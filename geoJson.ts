@@ -43,14 +43,14 @@ type InfoTemplateDetails = {
 
 type LabelJsonType = string | object | object[] | undefined;
 
-type UpMapLike = HTMLElement & {
+type ArcMapLike = HTMLElement & {
   getViewInstance?: () => Promise<ArcgisView>;
   viewOnReady?: () => Promise<void>;
   enableInfoWindow?: (enable: boolean) => void;
 };
 
-@customElement('up-geojson-layer')
-export class UpGeojsonLayer extends LitElement {
+@customElement('arc-geojson-layer')
+export class ArcGeojsonLayer extends LitElement {
   createRenderRoot() {
     return this;
   }
@@ -61,7 +61,7 @@ export class UpGeojsonLayer extends LitElement {
   private static readonly DEFAULT_LABEL_SIZE = 10;
   private static readonly DEFAULT_LABEL_COLOR = [0, 0, 0, 255];
 
-  private ancestorMap: UpMapLike | null = null;
+  private ancestorMap: ArcMapLike | null = null;
   private view: ArcgisView | null = null;
 
   private graphicsLayer: GraphicsLayer | null = null;
@@ -118,10 +118,10 @@ export class UpGeojsonLayer extends LitElement {
   labelJson: LabelJsonType;
 
   @property({ attribute: 'label-color' })
-  labelColor: string | number[] = UpGeojsonLayer.DEFAULT_LABEL_COLOR;
+  labelColor: string | number[] = ArcGeojsonLayer.DEFAULT_LABEL_COLOR;
 
   @property({ type: Number, attribute: 'label-size' })
-  labelSize = UpGeojsonLayer.DEFAULT_LABEL_SIZE;
+  labelSize = ArcGeojsonLayer.DEFAULT_LABEL_SIZE;
 
   @property({ type: String, attribute: 'layer-class' })
   layerClass = '';
@@ -177,10 +177,10 @@ export class UpGeojsonLayer extends LitElement {
   }
 
   private async resolveViewFromAncestor(): Promise<void> {
-    this.ancestorMap = this.closest('up-map') as UpMapLike | null;
+    this.ancestorMap = this.closest('arc-map') as ArcMapLike | null;
 
     if (!this.ancestorMap) {
-      console.error('<up-geojson-layer> must be a descendant of <up-map>.');
+      console.error('<arc-geojson-layer> must be a descendant of <arc-map>.');
       return;
     }
 
@@ -193,7 +193,7 @@ export class UpGeojsonLayer extends LitElement {
     }
 
     if (!this.view) {
-      console.error('Unable to resolve ArcGIS view instance from <up-map>.');
+      console.error('Unable to resolve ArcGIS view instance from <arc-map>.');
     }
   }
 
@@ -202,7 +202,7 @@ export class UpGeojsonLayer extends LitElement {
 
     if (!this.graphicsLayer) {
       this.graphicsLayer = new GraphicsLayer({
-        id: `${this.id || 'up-geojson-layer'}-graphics`,
+        id: `${this.id || 'arc-geojson-layer'}-graphics`,
         listMode: 'show',
       });
       this.view.map.add(this.graphicsLayer);
@@ -210,7 +210,7 @@ export class UpGeojsonLayer extends LitElement {
 
     if (!this.labelLayer) {
       this.labelLayer = new GraphicsLayer({
-        id: `${this.id || 'up-geojson-layer'}-labels`,
+        id: `${this.id || 'arc-geojson-layer'}-labels`,
         listMode: 'show',
       });
       this.view.map.add(this.labelLayer);
@@ -730,8 +730,8 @@ export class UpGeojsonLayer extends LitElement {
       case 'point':
       case 'multipoint':
         return new SimpleMarkerSymbol({
-          size: UpGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
-          color: UpGeojsonLayer.DEFAULT_SYMBOL_COLOR,
+          size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+          color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR,
           outline: {
             color: [0, 0, 0, 255],
             width: 1,
@@ -740,17 +740,17 @@ export class UpGeojsonLayer extends LitElement {
 
       case 'polyline':
         return new SimpleLineSymbol({
-          color: UpGeojsonLayer.DEFAULT_SYMBOL_COLOR,
-          width: UpGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+          color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR,
+          width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
         });
 
       case 'polygon':
       default:
         return new SimpleFillSymbol({
-          color: UpGeojsonLayer.DEFAULT_SYMBOL_COLOR,
+          color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR,
           outline: {
             color: [0, 0, 0, 255],
-            width: UpGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+            width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
           },
         });
     }
@@ -828,8 +828,8 @@ export class UpGeojsonLayer extends LitElement {
   private resolveLabelConfig(): { expression: string; color: any; size: number } {
     const fallback = {
       expression: '$feature.LABEL',
-      color: this.parseColor(this.labelColor) ?? UpGeojsonLayer.DEFAULT_LABEL_COLOR,
-      size: this.labelSize ?? UpGeojsonLayer.DEFAULT_LABEL_SIZE,
+      color: this.parseColor(this.labelColor) ?? ArcGeojsonLayer.DEFAULT_LABEL_COLOR,
+      size: this.labelSize ?? ArcGeojsonLayer.DEFAULT_LABEL_SIZE,
     };
 
     const parsed = this.parseUnknownJson(this.labelJson);
@@ -944,6 +944,6 @@ export class UpGeojsonLayer extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'up-geojson-layer': UpGeojsonLayer;
+    'arc-geojson-layer': ArcGeojsonLayer;
   }
 }
