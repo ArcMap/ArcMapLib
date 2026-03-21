@@ -602,19 +602,36 @@ export class UpGeoJsonLayer extends LitElement {
         );
       }),
       'view-dblclick'
-    );
-  }
+);
+}
 
-  private resultBelongsToManagedLayer(graphic: Graphic): boolean {
-    const layer = graphic.layer as FeatureLayer | undefined;
-    if (!layer) return false;
+private resultBelongsToManagedLayerResult(result: any): boolean {
+  const graphic = result?.graphic;
+  if (!graphic) return false;
 
+  const graphicLayer = graphic.layer;
+  if (graphicLayer) {
     for (const managed of this.featureLayers.values()) {
-      if (managed === layer) return true;
+      if (managed === graphicLayer) return true;
     }
-
-    return false;
   }
+
+  const resultLayer = result?.layer;
+  if (resultLayer) {
+    for (const managed of this.featureLayers.values()) {
+      if (managed === resultLayer) return true;
+    }
+  }
+
+  const originLayerId = graphic?.origin?.layerId;
+  if (originLayerId) {
+    for (const managed of this.featureLayers.values()) {
+      if (managed.id === originLayerId) return true;
+    }
+  }
+
+  return false;
+}
 
   private updateInfoTemplate(newInfoTemplate: PopupInput): void {
     if (!newInfoTemplate) {
