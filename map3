@@ -1,0 +1,232 @@
+  private syncDoubleClickZoom(): void {
+    if (!this.view) return;
+
+    this.view.navigation.browserTouchPanEnabled = true;
+    this.view.popupEnabled = true;
+    this.view.navigation.mouseWheelZoomEnabled = !this.disableMapScrollWheelZoom;
+    this.view.navigation.momentumEnabled = true;
+
+    this.view.navigation.actionMap = {
+      dragPrimary: 'pan',
+      dragSecondary: 'zoom',
+      dragTertiary: 'none',
+      mouseWheel: !this.disableMapScrollWheelZoom ? 'zoom' : 'none',
+      doubleClick: this.enableDoubleClickToZoom ? 'zoom' : 'none',
+      doubleClickShift: this.enableDoubleClickToZoom ? 'zoom' : 'none',
+    } as never;
+  }
+
+  private syncKeyboardNavigation(): void {
+    if (!this.view) return;
+    this.view.navigation.browserTouchPanEnabled = true;
+    this.view.navigation.momentumEnabled = true;
+    this.view.navigation.gamepad = { enabled: this.enableKeyboardNavigation } as never;
+  }
+
+  private async destroyMap(): Promise<void> {
+    if (this.view) {
+      this.view.destroy();
+    }
+  }
+
+  private async updateBasemap(newValue: string, oldValue: string): Promise<void> {
+    const basemapValue = newValue || oldValue || UpMapComponent.DEFAULT_BASEMAP;
+    await this.mapReady;
+
+    try {
+      this.map.basemap = basemapValue as string | Basemap;
+    } catch {
+      this.basemap = oldValue || UpMapComponent.DEFAULT_BASEMAP;
+      console.warn(
+        `Basemap value of "${newValue}" is not valid. Ignoring this value and staying on previous basemap.`,
+      );
+    }
+  }
+
+  private async updateCenter(newCenter: LatLongPoint | string): Promise<void> {
+    if (!this.view) return;
+
+    if (this.reflectOnlyCenter && UpMapComponent.areLatLongEqual(this.reflectOnlyCenter, newCenter)) {
+      return;
+    }
+
+    const validCenter = UpMapComponent.parseValidateAndConvertLatLongPoint(newCenter);
+    if (!validCenter) return;
+
+    this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
+      this.reflectOnlyCenter = undefined;
+      await this.view.goTo({
+        center: [validCenter.longitude, validCenter.latitude],
+      });
+    });
+
+    await this.pendingExtentChanges;
+  }
+
+  private async updateExtent(newExtent: UpMapExtent | string | null): Promise<void> {
+    if (!this.view || !newExtent) return;
+
+    if (this.reflectOnlyExtent && UpMapComponent.areExtentsEqual(this.reflectOnlyExtent, newExtent)) {
+      return;
+    }
+
+    const extent = await UpMapComponent.parseValidateAndConvertExtent(newExtent).catch(() => null);
+    if (!extent) return;
+
+    this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
+      this.reflectOnlyExtent = undefined;
+      await this.view.goTo(extent);
+    });
+
+    await this.pendingExtentChanges;
+  }
+
+  private updateZoom(newValue: number, oldValue: number): void {
+    if (!this.view) return;
+
+    if (this.reflectOnlyZoom != null && newValue === this.reflectOnlyZoom) {
+      return;
+    }
+
+    if (Number.isNaN(newValue)) {
+      return;
+    }
+
+    let normalizedZoom = Math.round(newValue);
+    normalizedZoom = Math.min(this.maxZoom, Math.max(this.minZoom, normalizedZoom));
+
+    if (normalizedZoom !== newValue) {
+      this.zoom = normalizedZoom;
+      return;
+    }
+
+    this.reflectOnlyZoom = undefined;
+    this.view.zoom = normalizedZoom;
+  }
+
+  private updatePopupVisible(newIsPopupVisible: boolean): void {
+    if (!this.view) return;
+
+    this.view.popupEnabled = newIsPopupVisible;
+    this.view.popup.visibleElements = {
+      ...this.view.popup.visibleElements,
+      closeButton: newIsPopupVisible,
+    };
+
+    if (!newIsPopupVisible) {
+      this.closePopup();
+    }
+  }
+
+  private updateOnlyUsePopupContent(usePopupContentFlag: boolean): void {
+    if (!usePopupContentFlag) {
+      this.customPopupContent = null;
+    }
+    this.closePopup();
+  }
+
+  public async addLayer(newLayer: Layer, element?: LayerElement): Promise<void> {
+    await this.mapReady;
+
+    if (!element) {
+      this.map.add(newLayer);
+      return;
+    }
+
+    this.layerAddQueue = this.layerAddQueue.then(async () => {
+      const layerCheckFunction = UpMapComponent.isGraphicsLayerElement(element)
+        ? UpMapComponent.isGraphicsLayerElement
+        : UpMapComponent.isNonGraphicsLayerElement;
+
+      let layerIdPromises = this.getAllLayerIdsFromSubsequentSiblings(element, layerCheckFunction);
+
+      let nextParentUp = element.parentElement;
+      while (nextParentUp && !MapUtils.isUpMap(nextParentUp as HTMLElement)) {
+        layerIdPromises = layerIdPromises.concat(
+          this.getAllLayerIdsFromSubsequentSiblings(nextParentUp, layerCheckFunction),
+        );
+        nextParentUp = nextParentUp.parentElement;
+      }
+
+      const subsequentLayerIds = await Promise.all(layerIdPromises);
+      const subsequentLayerIndices = subsequentLayerIds
+        .map((layerId) => this.map.layers.findIndex((layer) => layer.id === layerId))
+        .filter((layerIndex) => layerIndex !== -1);
+
+      if (subsequentLayerIndices.length > 0) {
+        const firstLayerIndexAfter = Math.min(...subsequentLayerIndices);
+        this.map.add(newLayer, firstLayerIndexAfter);
+      } else {
+        this.map.add(newLayer);
+      }
+    });
+
+    await this.layerAddQueue;
+  }
+
+  public async removeLayer(layer: Layer): Promise<void> {
+    if (!layer) return;
+    await this.mapReady;
+
+    const popupFeatures = (this.view.popup.features ?? []) as Graphic[];
+    const featuresToKeep = popupFeatures.filter((feature) => feature.layer?.id !== layer.id);
+
+    if (featuresToKeep.length === 0) {
+      this.view.popup.close();
+    } else if (featuresToKeep.length !== popupFeatures.length) {
+      this.view.popup.features = featuresToKeep;
+    }
+
+    this.map.remove(layer);
+  }
+
+  public async enableInfoWindow(enable: boolean): Promise<void> {
+    await this.mapReady;
+    this.view.popupEnabled = enable;
+
+    if (!enable) {
+      this.view.popup.close();
+    }
+  }
+
+  public async getEsriMap(): Promise<ArcGISMap> {
+    await this.mapReady;
+    return this.map;
+  }
+
+  public async getMapView(): Promise<MapView> {
+    await this.mapReady;
+    return this.view;
+  }
+
+  public async hideScaleBar(): Promise<void> {
+    await this.mapReady;
+    if (this.scaleBar) {
+      this.view.ui.remove(this.scaleBar);
+      this.scaleBar.destroy();
+      this.scaleBar = undefined;
+    }
+  }
+
+  public async hideZoomSlider(): Promise<void> {
+    await this.mapReady;
+    this.view.ui.components = this.view.ui.components.filter((name) => name !== 'zoom');
+  }
+
+  public async showScaleBarMethod(): Promise<void> {
+    await this.mapReady;
+    if (!this.scaleBar) {
+      this.scaleBar = new ScaleBar({
+        view: this.view,
+        unit: 'dual',
+      });
+      this.view.ui.add(this.scaleBar, 'bottom-left');
+    }
+  }
+
+  public async showZoomSlider(): Promise<void> {
+    await this.mapReady;
+    if (!this.view.ui.components.includes('zoom')) {
+      this.view.ui.components = [...this.view.ui.components, 'zoom'];
+    }
+  }
