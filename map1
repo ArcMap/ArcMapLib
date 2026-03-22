@@ -1,4 +1,4 @@
-by import { LitElement, css, html, PropertyValues } from 'lit';
+but by import { LitElement, css, html, PropertyValues } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 
 import ArcGISMap from '@arcgis/core/Map';
@@ -300,8 +300,39 @@ private syncMouseWheelZoom(): void {
     this.mouseWheelHandler = this.view.on('mouse-wheel', (event) => {
       event.stopPropagation(); // 🚫 disables zoom
     });
+  
+
+this.view.on('click', (mouseEvent) => {
+  const geographicGeometry = webMercatorUtils.webMercatorToGeographic(mouseEvent.mapPoint);
+
+  if (!(geographicGeometry instanceof Point)) {
+    return;
   }
-}
+
+  const latitude = ValidationService.validateLatitude(
+    geographicGeometry.latitude,
+    ArcMapComponent.DEFAULT_CENTER_LATITUDE,
+  );
+
+  const longitude = ValidationService.validateLongitude(
+    geographicGeometry.longitude,
+    ArcMapComponent.DEFAULT_CENTER_LONGITUDE,
+  );
+
+  const detail: LatLongPoint = {
+    latitude,
+    longitude,
+  };
+
+  this.dispatchEvent(
+    new CustomEvent<LatLongPoint>('map-click', {
+      detail,
+      bubbles: true,
+      composed: true,
+    }),
+  );
+});
+
     await this.view.when();
     this.resolveMapReady();
   }
