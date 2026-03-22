@@ -1,0 +1,71 @@
+import type { ArcMapExtent, LatLongPoint } from '../external-api';
+
+export default class ValidationService {
+  static isValidLatitude(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= -90 && value <= 90;
+  }
+
+  static isValidLongitude(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= -180 && value <= 180;
+  }
+
+  static validateLatitude(value: unknown, fallback: number): number {
+    return this.isValidLatitude(value) ? value : fallback;
+  }
+
+  static validateLongitude(value: unknown, fallback: number): number {
+    return this.isValidLongitude(value) ? value : fallback;
+  }
+
+  static isValidLatLongPoint(point: unknown): point is LatLongPoint {
+    if (!point || typeof point !== 'object') return false;
+
+    const candidate = point as LatLongPoint;
+    return this.isValidLatitude(candidate.latitude) && this.isValidLongitude(candidate.longitude);
+  }
+
+  static isValidArcMapExtent(extent: unknown): extent is ArcMapExtent {
+    if (!extent || typeof extent !== 'object') return false;
+
+    const candidate = extent as ArcMapExtent;
+
+    return (
+      this.isValidLatitude(candidate.bottomLatitude) &&
+      this.isValidLatitude(candidate.topLatitude) &&
+      this.isValidLongitude(candidate.leftLongitude) &&
+      this.isValidLongitude(candidate.rightLongitude) &&
+      candidate.bottomLatitude < candidate.topLatitude &&
+      candidate.leftLongitude < candidate.rightLongitude
+    );
+  }
+
+  static parseLatLongPoint(input: LatLongPoint | string): LatLongPoint | undefined {
+    let parsed: unknown = input;
+
+    if (typeof input === 'string') {
+      try {
+        parsed = JSON.parse(input);
+      } catch {
+        return undefined;
+      }
+    }
+
+    return this.isValidLatLongPoint(parsed) ? parsed : undefined;
+  }
+
+  static parseArcMapExtent(input: ArcMapExtent | string | null | undefined): ArcMapExtent | undefined {
+    if (input == null) return undefined;
+
+    let parsed: unknown = input;
+
+    if (typeof input === 'string') {
+      try {
+        parsed = JSON.parse(input);
+      } catch {
+        return undefined;
+      }
+    }
+
+    return this.isValidArcMapExtent(parsed) ? parsed : undefined;
+  }
+}
