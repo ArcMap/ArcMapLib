@@ -1,4 +1,4 @@
-import { LitElement, css, html, PropertyValues } from 'lit';
+by import { LitElement, css, html, PropertyValues } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 
 import ArcGISMap from '@arcgis/core/Map';
@@ -284,6 +284,24 @@ export class ArcMapComponent extends LitElement {
       this.view.ui.add(this.scaleBar, 'bottom-left');
     }
 
+
+private mouseWheelHandler: IHandle | null = null;
+
+private syncMouseWheelZoom(): void {
+  if (!this.view) return;
+
+  // Remove existing handler
+  if (this.mouseWheelHandler) {
+    this.mouseWheelHandler.remove();
+    this.mouseWheelHandler = null;
+  }
+
+  if (this.disableMapScrollWheelZoom) {
+    this.mouseWheelHandler = this.view.on('mouse-wheel', (event) => {
+      event.stopPropagation(); // 🚫 disables zoom
+    });
+  }
+}
     await this.view.when();
     this.resolveMapReady();
   }
