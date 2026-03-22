@@ -1,0 +1,16 @@
+/**
+ * Shared layer element typing used by the converted Lit map component.
+ * In Stencil these were HTML element interfaces from generated components.
+ * In Lit we keep them generic and capability-based.
+ */
+
+export interface BaseLayerElement extends HTMLElement {
+  getLayerId?: () => Promise<string> | string;
+  getLayer?: () => Promise<any> | any;
+}
+
+export interface GraphicsLayerElement extends BaseLayerElement {}
+
+export interface NonGraphicsLayerElement extends BaseLayerElement {}
+
+export type LayerElement = GraphicsLayerElement | NonGraphicsLayerElement;
