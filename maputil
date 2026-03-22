@@ -1,0 +1,53 @@
+import type Layer from '@arcgis/core/layers/Layer';
+
+export default class MapUtils {
+  static isArcMap(element: HTMLElement | null | undefined): boolean {
+    return !!element && element.tagName === 'ARC-MAP';
+  }
+
+  static findArcMapUp(element: HTMLElement | null): HTMLElement | null {
+    let current: HTMLElement | null = element ?? null;
+
+    while (current) {
+      if (this.isArcMap(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  static getLayerName(layer: Layer | { title?: string; id?: string; name?: string } | null | undefined): string {
+    if (!layer) return '';
+    return layer.title ?? (layer as { name?: string }).name ?? layer.id ?? '';
+  }
+
+  static isReadyCallback(callback: unknown): callback is () => void {
+    return typeof callback === 'function';
+  }
+
+  static safelyInvokeReadyCallback(callback?: () => void): void {
+    if (this.isReadyCallback(callback)) {
+      callback();
+    }
+  }
+
+  static isGraphicsTagName(tagName: string): boolean {
+    return [
+      'ARC-ESRI-FEATURE-LAYER',
+      'ARC-GEOJSON-LAYER',
+      'ARC-POINT',
+      'ARC-POLYLINE',
+      'ARC-ROUTE',
+    ].includes(tagName);
+  }
+
+  static isNonGraphicsTagName(tagName: string): boolean {
+    return [
+      'ARC-WMS-LAYER',
+      'ARC-TILED-MAP-SERVICE-LAYER',
+      'ARC-IMAGE-SERVICE-LAYER',
+    ].includes(tagName);
+  }
+}
