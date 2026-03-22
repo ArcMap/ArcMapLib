@@ -1,0 +1,265 @@
+  private setupDrawTool(): void {
+    this.drawTransientShapeTool = new SketchViewModel({
+      view: this.view,
+      layer: this.drawLayer,
+      defaultCreateOptions: {
+        hasZ: false,
+      },
+      pointSymbol: {
+        type: 'simple-marker',
+        size: 8,
+        style: 'circle',
+        color: [0, 122, 255, 1],
+        outline: {
+          color: [255, 255, 255, 1],
+          width: 1,
+        },
+      } as never,
+      polylineSymbol: {
+        type: 'simple-line',
+        color: [0, 122, 255, 1],
+        width: 2,
+      } as never,
+      polygonSymbol: {
+        type: 'simple-fill',
+        color: [0, 122, 255, 0.15],
+        outline: {
+          color: [0, 122, 255, 1],
+          width: 2,
+        },
+      } as never,
+    });
+
+    this.drawTransientShapeTool.on('create', (event) => {
+      if (event.state !== 'complete') return;
+
+      const geometry = webMercatorUtils.webMercatorToGeographic(event.graphic.geometry as never) as __esri.Geometry;
+      const detail: MapTransientShapeCoordinates = {
+        selectionCoordinates: geometry.toJSON(),
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<MapTransientShapeCoordinates>('map-draw-transient-shape-coordinates', {
+          detail,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+  }
+
+  private setupPopupBridge(): void {
+    const popup = this.view.popup;
+
+    popup.visibleElements = {
+      ...popup.visibleElements,
+      closeButton: this.isPopupVisible,
+    };
+
+    popup.watch('features', (features) => {
+      const popupFeatures = (features ?? []) as Graphic[];
+      this.popupFeatures = Array.from(popupFeatures);
+      this.localPopupContent = null;
+
+      const detail: PopupEvent = {
+        features: this.popupFeatures,
+        selectedIndex: popup.selectedFeatureIndex ?? 0,
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<PopupEvent>('popup-features-set', {
+          detail,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+
+      if (!this.popupFeatures.length) {
+        if (this.usePopupContentOnly) {
+          this.setPopupContent(
+            this.customPopupContent ??
+              `${this.popupCloseButton}<div class="popup-scrollable-content"><p>No features in this area.</p></div>`,
+            true,
+          );
+        }
+        return;
+      }
+
+      this.rebuildPopupContent();
+    });
+
+    popup.watch('selectedFeatureIndex', (selectedIndex) => {
+      const detail: PopupEvent = {
+        features: this.popupFeatures,
+        selectedIndex: selectedIndex ?? 0,
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<PopupEvent>('popup-selection-changed', {
+          detail,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+
+      this.rebuildPopupContent();
+    });
+  }
+
+  private rebuildPopupContent(): void {
+    const popup = this.view.popup;
+
+    if (this.usePopupContentOnly) {
+      this.setPopupContent(this.customPopupContent ?? 'Loading...', true);
+      return;
+    }
+
+    if (!popup.features?.length) {
+      if (this.localPopupContent) {
+        this.setPopupContent(this.localPopupContent, true);
+      }
+      return;
+    }
+
+    const declusteredFeatures = popup.features.flatMap((feature) => {
+      const maybeAggregate = feature as Graphic & {
+        isAggregate?: boolean;
+        getChildGraphics?: () => Graphic[];
+      };
+
+      if (maybeAggregate.isAggregate && maybeAggregate.getChildGraphics) {
+        return maybeAggregate.getChildGraphics();
+      }
+
+      return feature;
+    });
+
+    this.popupFeatures = Array.from(declusteredFeatures);
+
+    if (declusteredFeatures.length > 1) {
+      const listHeader = `${this.popupCloseButton}<p class="up-font-body1">Choose one</p><div class="popup-scrollable-content">`;
+
+      const layerPopupContent = new Map<string, string>();
+
+      declusteredFeatures.forEach((feature, index) => {
+        const layerName = MapUtils.getLayerName(feature.layer as any) || `Feature ${index + 1}`;
+
+        let popupContent = layerPopupContent.get(layerName);
+        if (!popupContent) {
+          popupContent =
+            `<div class="popup-group-title-container"><p class="up-font-body2"><b>${layerName}</b></p></div>`;
+        }
+
+        popupContent +=
+          `<div class="up-font-caption" data-action="popupDetails" data-index="${index}">` +
+          `${ArcMapComponent.getListItemLabel(feature, index)}` +
+          `</div>`;
+
+        layerPopupContent.set(layerName, popupContent);
+      });
+
+      let allLayersContent = '';
+      for (const graphicsLayerId of Array.from(this.map.allLayers).reverse().map((layer) => layer.id)) {
+        const layer = this.map.findLayerById(graphicsLayerId);
+        const layerName = MapUtils.getLayerName(layer as any);
+
+        if (layerName && layerPopupContent.has(layerName)) {
+          allLayersContent += layerPopupContent.get(layerName);
+          layerPopupContent.delete(layerName);
+        }
+      }
+
+      this.localPopupContent = `${listHeader}${allLayersContent}</div>`;
+    } else {
+      this.localPopupContent = ArcMapComponent.buildSingleFeaturePopupHtml(
+        declusteredFeatures[0],
+        this.popupCloseButton,
+      );
+    }
+
+    this.setPopupContent(this.localPopupContent, true);
+  }
+
+  private static buildSingleFeaturePopupHtml(feature: Graphic, popupCloseButton: string): string {
+    const layerName = MapUtils.getLayerName(feature.layer as any) || 'Feature';
+    const popupTemplate = feature.popupTemplate;
+    let content = '';
+
+    if (popupTemplate?.content && typeof popupTemplate.content === 'string') {
+      content = popupTemplate.content;
+    } else if (feature.attributes) {
+      content = Object.entries(feature.attributes)
+        .map(([key, value]) => `<div><strong>${key}:</strong> ${String(value)}</div>`)
+        .join('');
+    } else {
+      content = '<p>No features in this area.</p>';
+    }
+
+    return (
+      popupCloseButton +
+      `<div class="up-font-body1">` +
+      `<div class="popup-group-title-container"><p class="up-font-body2"><b>${layerName}</b></p></div>` +
+      `<div class="up-font-caption popup-scrollable-content">${content}</div>` +
+      `</div>`
+    );
+  }
+
+  private static getListItemLabel(feature: Graphic, index: number): string {
+    const attrs = feature.attributes ?? {};
+    return (
+      attrs.name ??
+      attrs.title ??
+      attrs.label ??
+      attrs.id ??
+      `Feature ${index + 1}`
+    ).toString();
+  }
+
+  private createPopupContentNode(content: string | null): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = content ?? '';
+    wrapper.removeEventListener('click', this.popupContentClickHandler);
+    wrapper.addEventListener('click', this.popupContentClickHandler);
+    return wrapper;
+  }
+
+  private attachMapEvents(): void {
+    this.view.on('click', (mouseEvent) => {
+      const geographicPoint = webMercatorUtils.webMercatorToGeographic(mouseEvent.mapPoint) as Point;
+      const detail: LatLongPoint = {
+        latitude: geographicPoint.latitude,
+        longitude: geographicPoint.longitude,
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>('map-click', {
+          detail,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+
+    this.view.watch('zoom', (newZoom, oldZoom) => {
+      if (oldZoom != null && oldZoom !== newZoom) {
+        this.dispatchEvent(
+          new CustomEvent<number>('zoom', {
+            detail: newZoom,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }
+    });
+
+    this.view.watch('extent', (newExtent, oldExtent) => {
+      if (!newExtent) return;
+
+      if (!this.suspendExtentTracking && oldExtent) {
+        this.previousExtentStack.push(oldExtent.clone());
+        this.nextExtentStack = [];
+      }
+
+      this.reflectCurrentMapState();
+    });
+  }
