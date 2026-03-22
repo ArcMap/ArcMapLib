@@ -333,6 +333,34 @@ this.view.on('click', (mouseEvent) => {
   );
 });
 
+public async startTransientShapeDrawing(drawGeometryType: string): Promise<void> {
+  if (!this.drawTransientShapeTool) return;
+
+  const normalized = String(drawGeometryType).toUpperCase();
+  const geometryType = DrawEditUtils.determineFeatureLayerGeometryType(normalized);
+  const humanReadable = DrawEditUtils.convertEsriGeometryTypeToHumanReadable(geometryType).toLowerCase();
+
+  if (!humanReadable) {
+    console.warn(`The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`);
+    return;
+  }
+
+  let createTool: 'point' | 'polyline' | 'polygon';
+
+  if (humanReadable === 'point') {
+    createTool = 'point';
+  } else if (humanReadable === 'polyline') {
+    createTool = 'polyline';
+  } else if (humanReadable === 'polygon') {
+    createTool = 'polygon';
+  } else {
+    console.warn(`The geometry type ${drawGeometryType} is not directly supported in ArcGIS 5.1.0 SketchViewModel.`);
+    return;
+  }
+
+  this.drawTransientShapeTool.create(createTool);
+}
+
     await this.view.when();
     this.resolveMapReady();
   }
