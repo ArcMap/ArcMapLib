@@ -1,0 +1,247 @@
+  public async startTransientShapeDrawing(drawGeometryType: string): Promise<void> {
+    if (!this.drawTransientShapeTool) return;
+
+    const normalized = String(drawGeometryType).toUpperCase();
+    const geometryType = DrawEditUtils.determineFeatureLayerGeometryType(normalized);
+    const humanReadable = DrawEditUtils.convertEsriGeometryTypeToHumanReadable(geometryType).toLowerCase();
+
+    if (!humanReadable) {
+      console.warn(`The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`);
+      return;
+    }
+
+    const supported = ['point', 'polyline', 'polygon'];
+    if (!supported.includes(humanReadable)) {
+      console.warn(`The geometry type ${drawGeometryType} is not directly supported in ArcGIS 5.1.0 SketchViewModel.`);
+      return;
+    }
+
+    this.drawTransientShapeTool.create(humanReadable as DrawGeometryType);
+  }
+
+  public async stopTransientShapeDrawing(): Promise<void> {
+    this.drawTransientShapeTool?.cancel();
+  }
+
+  public async zoomToPreviousExtent(): Promise<void> {
+    await this.mapReady;
+    const previous = this.previousExtentStack.pop();
+    if (!previous) return;
+
+    if (this.view.extent) {
+      this.nextExtentStack.push(this.view.extent.clone());
+    }
+
+    this.suspendExtentTracking = true;
+    await this.view.goTo(previous);
+    this.suspendExtentTracking = false;
+  }
+
+  public async zoomToNextExtent(): Promise<void> {
+    await this.mapReady;
+    const next = this.nextExtentStack.pop();
+    if (!next) return;
+
+    if (this.view.extent) {
+      this.previousExtentStack.push(this.view.extent.clone());
+    }
+
+    this.suspendExtentTracking = true;
+    await this.view.goTo(next);
+    this.suspendExtentTracking = false;
+  }
+
+  public async setPopupContent(content: string, hideCloseButton?: boolean): Promise<void> {
+    await this.mapReady;
+
+    if (hideCloseButton) {
+      this.customPopupContent = content;
+      this.view.popup.content = this.createPopupContentNode(content);
+      this.internalPopupVersion++;
+      return;
+    }
+
+    const newContent = this.popupCloseButton + content;
+    this.customPopupContent = newContent;
+    this.view.popup.content = this.createPopupContentNode(newContent);
+    this.internalPopupVersion++;
+  }
+
+  public async setPopupFeatures(features: Graphic[]): Promise<void> {
+    await this.mapReady;
+    this.popupFeatures = Array.from(features);
+    this.view.popup.features = features;
+    this.view.popup.open({
+      features,
+    });
+  }
+
+  public async closePopup(): Promise<void> {
+    await this.mapReady;
+    this.view.popup.close();
+  }
+
+  private async getAllLayerIdsFromDescendants(
+    element: Element,
+    layerCheckFunction: (elm: Element) => elm is LayerElement,
+  ): Promise<string[]> {
+    const ids: string[] = [];
+
+    for (const childElement of Array.from(element.children)) {
+      if (layerCheckFunction(childElement)) {
+        const layerId = await Promise.resolve(childElement.getLayerId?.() ?? '');
+        if (layerId) ids.push(layerId);
+      } else {
+        const descendantIds = await this.getAllLayerIdsFromDescendants(childElement, layerCheckFunction);
+        ids.push(...descendantIds);
+      }
+    }
+
+    return ids;
+  }
+
+  private getAllLayerIdsFromSubsequentSiblings(
+    element: Element,
+    layerCheckFunction: (elm: Element) => elm is LayerElement,
+  ): Promise<string>[] {
+    const layerIdPromises: Promise<string>[] = [];
+    let nextSibling = element.nextElementSibling;
+
+    while (nextSibling) {
+      if (layerCheckFunction(nextSibling)) {
+        layerIdPromises.push(Promise.resolve(nextSibling.getLayerId?.() ?? ''));
+      } else if (!nextSibling.matches?.('[data-basemap]')) {
+        layerIdPromises.push(
+          this.getAllLayerIdsFromDescendants(nextSibling, layerCheckFunction).then((ids) => ids[0] ?? ''),
+        );
+      }
+
+      nextSibling = nextSibling.nextElementSibling;
+    }
+
+    return layerIdPromises;
+  }
+
+  private reflectCurrentMapState(): void {
+    const zoom = this.view.zoom ?? ArcMapComponent.DEFAULT_ZOOM;
+    this.reflectOnlyZoom = zoom;
+    this.zoom = zoom;
+
+    const centerPoint = this.view.center;
+    const center: LatLongPoint = {
+      latitude: ValidationService.validateLatitude(centerPoint.latitude, ArcMapComponent.DEFAULT_CENTER_LATITUDE),
+      longitude: ValidationService.validateLongitude(centerPoint.longitude, ArcMapComponent.DEFAULT_CENTER_LONGITUDE),
+    };
+    this.reflectOnlyCenter = center;
+    this.center = center;
+
+    const geographicExtent = webMercatorUtils.webMercatorToGeographic(this.view.extent) as Extent;
+    const extentToEmit: ArcMapExtent = {
+      bottomLatitude: geographicExtent.ymin,
+      topLatitude: geographicExtent.ymax,
+      leftLongitude: geographicExtent.xmin,
+      rightLongitude: geographicExtent.xmax,
+    };
+
+    this.dispatchEvent(
+      new CustomEvent<ArcMapExtent>('extent-change', {
+        detail: extentToEmit,
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    this.reflectOnlyExtent = extentToEmit;
+    this.extent = extentToEmit;
+  }
+
+  private static isGraphicsLayerElement(element: Element): element is GraphicsLayerElement {
+    return ['ARC-ESRI-FEATURE-LAYER', 'ARC-GEOJSON-LAYER', 'ARC-POINT', 'ARC-POLYLINE', 'ARC-ROUTE'].includes(
+      element.tagName,
+    );
+  }
+
+  private static isNonGraphicsLayerElement(element: Element): element is NonGraphicsLayerElement {
+    return ['ARC-WMS-LAYER', 'ARC-TILED-MAP-SERVICE-LAYER', 'ARC-IMAGE-SERVICE-LAYER'].includes(element.tagName);
+  }
+
+  private static parseValidateAndConvertLatLongPoint(latLong: LatLongPoint | string): LatLongPoint | undefined {
+    let parsedLatLong: LatLongPoint;
+
+    if (typeof latLong === 'string') {
+      try {
+        parsedLatLong = JSON.parse(latLong) as LatLongPoint;
+      } catch (e) {
+        console.warn('Could not parse center as json, ignoring this property', e);
+        return undefined;
+      }
+    } else {
+      parsedLatLong = latLong;
+    }
+
+    if (!ValidationService.isValidLatLongPoint(parsedLatLong)) {
+      console.warn('Invalid value for center point, ignoring this property');
+      return undefined;
+    }
+
+    return {
+      longitude: ValidationService.validateLongitude(parsedLatLong.longitude, ArcMapComponent.DEFAULT_CENTER_LONGITUDE),
+      latitude: ValidationService.validateLatitude(parsedLatLong.latitude, ArcMapComponent.DEFAULT_CENTER_LATITUDE),
+    };
+  }
+
+  private static parseValidateAndConvertExtent(extent: ArcMapExtent | string | null): Promise<Extent> {
+    if (!extent) {
+      return Promise.reject(new Error('No extent provided'));
+    }
+
+    let parsedExtent: ArcMapExtent;
+
+    if (typeof extent === 'string') {
+      try {
+        parsedExtent = JSON.parse(extent) as ArcMapExtent;
+      } catch (e) {
+        console.warn('Could not parse extent as json, ignoring this property', e);
+        return Promise.reject(e);
+      }
+    } else {
+      parsedExtent = extent;
+    }
+
+    if (!ValidationService.isValidArcMapExtent(parsedExtent)) {
+      console.warn('Invalid value for extent, ignoring this property');
+      return Promise.reject(new Error('Invalid extent'));
+    }
+
+    return Promise.resolve(
+      new Extent({
+        xmin: parsedExtent.leftLongitude,
+        ymin: parsedExtent.bottomLatitude,
+        xmax: parsedExtent.rightLongitude,
+        ymax: parsedExtent.topLatitude,
+        spatialReference: { wkid: 4326 },
+      }),
+    );
+  }
+
+  private static areLatLongEqual(a: LatLongPoint, b: LatLongPoint | string): boolean {
+    if (typeof b === 'string') return false;
+    return a.latitude === b.latitude && a.longitude === b.longitude;
+  }
+
+  private static areExtentsEqual(a: ArcMapExtent, b: ArcMapExtent | string): boolean {
+    if (typeof b === 'string') return false;
+    return (
+      a.topLatitude === b.topLatitude &&
+      a.bottomLatitude === b.bottomLatitude &&
+      a.leftLongitude === b.leftLongitude &&
+      a.rightLongitude === b.rightLongitude
+    );
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'arc-map': ArcMapComponent;
+  }
+}
