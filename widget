@@ -1,0 +1,53 @@
+private setupMapUI(): void {
+  if (!this.view) return;
+
+  // Clear UI
+  this.view.ui.components = [];
+
+  let index = 0;
+
+  // ========================
+  // ZOOM
+  // ========================
+  if (this.showZoom) {
+    const zoom = new Zoom({
+      view: this.view,
+      id: "arc-zoom"
+    });
+
+    this.view.ui.add(zoom, {
+      position: "bottom-left",
+      index: index++
+    });
+  }
+
+  // ========================
+  // LOCATE
+  // ========================
+  if (this.showLocate) {
+    const locate = new Locate({
+      view: this.view,
+      id: "arc-locate"
+    });
+
+    this.view.ui.add(locate, {
+      position: "bottom-left",
+      index: index++
+    });
+  }
+
+  // ========================
+  // SCALE BAR
+  // ========================
+  if (this.showScaleBar) {
+    this.scaleBar = new ScaleBar({
+      view: this.view,
+      unit: "dual"
+    });
+
+    this.view.ui.add(this.scaleBar, {
+      position: "bottom-left",
+      index: index++
+    });
+  }
+}
