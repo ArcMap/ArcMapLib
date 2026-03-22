@@ -1271,6 +1271,60 @@ export class ArcGeoJsonLayer extends LitElement {
   }
 }
 
+private arcGisGeometryToGeoJson(geometry: Geometry): GeoJsonFeature['geometry'] | null {
+  // NEW CHANGE:
+  // Convert sketch/result geometry to geographic coordinates before storing in GeoJSON.
+  // This is why points stayed visible but polylines/polygons disappeared after refresh.
+
+  const geographicGeometry = webMercatorUtils.canProject(geometry, { wkid: 4326 } as any)
+    ? (webMercatorUtils.webMercatorToGeographic(geometry) as Geometry)
+    : geometry;
+
+  if (geographicGeometry instanceof Point) {
+    return {
+      type: 'Point',
+      coordinates: [
+        geographicGeometry.longitude ?? geographicGeometry.x,
+        geographicGeometry.latitude ?? geographicGeometry.y
+      ]
+    };
+  }
+
+  if (geographicGeometry instanceof Multipoint) {
+    return {
+      type: 'MultiPoint',
+      coordinates: geographicGeometry.points.map((p) => [p[0], p[1]])
+    };
+  }
+
+  if (geographicGeometry instanceof Polyline) {
+    const paths = geographicGeometry.paths ?? [];
+
+    if (paths.length === 1) {
+      return {
+        type: 'LineString',
+        coordinates: paths[0].map((p) => [p[0], p[1]])
+      };
+    }
+
+    return {
+      type: 'MultiLineString',
+      coordinates: paths.map((path) => path.map((p) => [p[0], p[1]]))
+    };
+  }
+
+  if (geographicGeometry instanceof Polygon) {
+    return {
+      type: 'Polygon',
+      coordinates: geographicGeometry.rings.map((ring) =>
+        ring.map((p) => [p[0], p[1]])
+      )
+    };
+  }
+
+  return null;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     'arc-geojson-layer': ArcGeoJsonLayer;
