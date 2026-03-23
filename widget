@@ -1,122 +1,236 @@
-private zoomWidget: Zoom | null = null;
-private locateWidget: Locate | null = null;
-private homeWidget: Home | null = null;
-private scaleBar: ScaleBar | null = null;
-private syncMapWidgets(): void {
-  if (!this.view) return;
 
-  // ZOOM
-  if (this.showZoom) {
-    if (!this.zoomWidget) {
-      this.zoomWidget = new Zoom({
-        view: this.view,
-        id: 'arc-zoom',
-      });
+import { LitElement, css, html, PropertyValues } from 'lit';
+import { customElement, property, query } from 'lit/decorators.js';
 
-      this.view.ui.add(this.zoomWidget, {
-        position: 'bottom-left',
-        index: 0,
-      });
+import ArcGISMap from '@arcgis/core/Map';
+import MapView from '@arcgis/core/views/MapView';
+
+import Zoom from '@arcgis/core/widgets/Zoom';
+import Locate from '@arcgis/core/widgets/Locate';
+import Home from '@arcgis/core/widgets/Home';
+import ScaleBar from '@arcgis/core/widgets/ScaleBar';
+
+@customElement('arc-map')
+export class ArcMap extends LitElement {
+  static styles = css`
+    :host {
+      display: block;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 300px;
     }
-  } else if (this.zoomWidget) {
-    this.view.ui.remove(this.zoomWidget);
-    this.zoomWidget.destroy();
-    this.zoomWidget = null;
-  }
 
-  // LOCATE
-  if (this.showLocate) {
-    if (!this.locateWidget) {
-      this.locateWidget = new Locate({
-        view: this.view,
-        id: 'arc-locate',
-      });
-
-      this.view.ui.add(this.locateWidget, {
-        position: 'bottom-left',
-        index: 1,
-      });
+    #viewDiv {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
     }
-  } else if (this.locateWidget) {
-    this.view.ui.remove(this.locateWidget);
-    this.locateWidget.destroy();
-    this.locateWidget = null;
-  }
 
-  // HOME
-  if (this.showHome) {
-    if (!this.homeWidget) {
-      this.homeWidget = new Home({
-        view: this.view,
-        id: 'arc-home',
-      });
-
-      this.view.ui.add(this.homeWidget, {
-        position: 'bottom-left',
-        index: 2,
-      });
+    .esri-ui-bottom-left {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
-  } else if (this.homeWidget) {
-    this.view.ui.remove(this.homeWidget);
-    this.homeWidget.destroy();
-    this.homeWidget = null;
-  }
 
-  // SCALE BAR
-  if (this.showScaleBar) {
-    if (!this.scaleBar) {
-      this.scaleBar = new ScaleBar({
-        view: this.view,
-        unit: 'dual',
-      });
-
-      this.view.ui.add(this.scaleBar, {
-        position: 'bottom-left',
-        index: 3,
-      });
+    .esri-zoom {
+      display: flex !important;
+      flex-direction: column !important;
     }
-  } else if (this.scaleBar) {
-    this.view.ui.remove(this.scaleBar);
-    this.scaleBar.destroy();
-    this.scaleBar = null;
-  }
-}
+  `;
 
-protected updated(changedProperties: PropertyValues): void {
-  if (
-    changedProperties.has('showZoom') ||
-    changedProperties.has('showLocate') ||
-    changedProperties.has('showHome') ||
-    changedProperties.has('showScaleBar')
-  ) {
+  private static readonly DEFAULT_BASEMAP = 'streets';
+  private static readonly DEFAULT_CENTER: [number, number] = [-98.4, 38.3];
+  private static readonly DEFAULT_ZOOM = 5;
+
+  @query('#viewDiv')
+  private internalDivElement!: HTMLDivElement;
+
+  @property({ type: String, reflect: true })
+  basemap = ArcMap.DEFAULT_BASEMAP;
+
+  @property({ type: Number, reflect: true })
+  zoom = ArcMap.DEFAULT_ZOOM;
+
+  @property({ type: Array })
+  center: [number, number] = ArcMap.DEFAULT_CENTER;
+
+  @property({ type: Boolean, reflect: true })
+  showZoom = true;
+
+  @property({ type: Boolean, reflect: true })
+  showHome = false;
+
+  @property({ type: Boolean, reflect: true })
+  showLocate = false;
+
+  @property({ type: Boolean, reflect: true })
+  showScaleBar = false;
+
+  private map: ArcGISMap | null = null;
+  private view: MapView | null = null;
+
+  private zoomWidget: __esri.Zoom | null = null;
+  private homeWidget: __esri.Home | null = null;
+  private locateWidget: __esri.Locate | null = null;
+  private scaleBarWidget: __esri.ScaleBar | null = null;
+
+  async firstUpdated(): Promise<void> {
+    this.map = new ArcGISMap({
+      basemap: this.basemap,
+    });
+
+    this.view = new MapView({
+      container: this.internalDivElement,
+      map: this.map,
+      center: this.center,
+      zoom: this.zoom,
+    });
+
+    await this.view.when();
     this.syncMapWidgets();
   }
-}
 
-disconnectedCallback(): void {
-  super.disconnectedCallback();
+  protected updated(changedProperties: PropertyValues<this>): void {
+    if (!this.view || !this.map) return;
 
-  if (this.zoomWidget) {
-    this.view?.ui.remove(this.zoomWidget);
-    this.zoomWidget.destroy();
-    this.zoomWidget = null;
+    if (changedProperties.has('basemap')) {
+      this.map.basemap = this.basemap;
+    }
+
+    if (changedProperties.has('zoom') && typeof this.zoom === 'number') {
+      this.view.zoom = this.zoom;
+    }
+
+    if (changedProperties.has('center') && Array.isArray(this.center)) {
+      this.view.center = this.center;
+    }
+
+    if (
+      changedProperties.has('showZoom') ||
+      changedProperties.has('showHome') ||
+      changedProperties.has('showLocate') ||
+      changedProperties.has('showScaleBar')
+    ) {
+      this.syncMapWidgets();
+    }
   }
 
-  if (this.locateWidget) {
-    this.view?.ui.remove(this.locateWidget);
-    this.locateWidget.destroy();
-    this.locateWidget = null;
+  private syncMapWidgets(): void {
+    if (!this.view) return;
+
+    let index = 0;
+
+    if (this.showZoom) {
+      if (!this.zoomWidget) {
+        this.zoomWidget = new Zoom({
+          view: this.view,
+          id: 'arc-zoom',
+        });
+        this.view.ui.add(this.zoomWidget, {
+          position: 'bottom-left',
+          index,
+        });
+      }
+      index += 1;
+    } else if (this.zoomWidget) {
+      this.view.ui.remove(this.zoomWidget);
+      this.zoomWidget.destroy();
+      this.zoomWidget = null;
+    }
+
+    if (this.showHome) {
+      if (!this.homeWidget) {
+        this.homeWidget = new Home({
+          view: this.view,
+          id: 'arc-home',
+        });
+        this.view.ui.add(this.homeWidget, {
+          position: 'bottom-left',
+          index,
+        });
+      }
+      index += 1;
+    } else if (this.homeWidget) {
+      this.view.ui.remove(this.homeWidget);
+      this.homeWidget.destroy();
+      this.homeWidget = null;
+    }
+
+    if (this.showLocate) {
+      if (!this.locateWidget) {
+        this.locateWidget = new Locate({
+          view: this.view,
+          id: 'arc-locate',
+          useHeadingEnabled: false,
+        });
+        this.view.ui.add(this.locateWidget, {
+          position: 'bottom-left',
+          index,
+        });
+      }
+      index += 1;
+    } else if (this.locateWidget) {
+      this.view.ui.remove(this.locateWidget);
+      this.locateWidget.destroy();
+      this.locateWidget = null;
+    }
+
+    if (this.showScaleBar) {
+      if (!this.scaleBarWidget) {
+        this.scaleBarWidget = new ScaleBar({
+          view: this.view,
+          unit: 'dual',
+        });
+        this.view.ui.add(this.scaleBarWidget, {
+          position: 'bottom-left',
+          index,
+        });
+      }
+    } else if (this.scaleBarWidget) {
+      this.view.ui.remove(this.scaleBarWidget);
+      this.scaleBarWidget.destroy();
+      this.scaleBarWidget = null;
+    }
   }
 
-  if (this.homeWidget) {
-    this.view?.ui.remove(this.homeWidget);
-    this.homeWidget.destroy();
-    this.homeWidget = null;
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+
+    if (this.zoomWidget && this.view) {
+      this.view.ui.remove(this.zoomWidget);
+      this.zoomWidget.destroy();
+      this.zoomWidget = null;
+    }
+
+    if (this.homeWidget && this.view) {
+      this.view.ui.remove(this.homeWidget);
+      this.homeWidget.destroy();
+      this.homeWidget = null;
+    }
+
+    if (this.locateWidget && this.view) {
+      this.view.ui.remove(this.locateWidget);
+      this.locateWidget.destroy();
+      this.locateWidget = null;
+    }
+
+    if (this.scaleBarWidget && this.view) {
+      this.view.ui.remove(this.scaleBarWidget);
+      this.scaleBarWidget.destroy();
+      this.scaleBarWidget = null;
+    }
+
+    if (this.view) {
+      this.view.destroy();
+      this.view = null;
+    }
+
+    this.map = null;
   }
 
-  if (this.scaleBar) {
-    this.view?.ui.remove(this.scaleBar);
-    this.scaleBar.destroy();
-    this.scaleBar = null;
+  render() {
+    return html`<div id="viewDiv"></div>`;
   }
 }
