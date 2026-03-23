@@ -1,148 +1,37 @@
-
-private setupViewWatchers(): void {
-  if (!this.view) return;
-
-  this.eventHandles.add(
-    reactiveUtils.watch(
-      () => this.view?.zoom,
-      (newZoom, oldZoom) => {
-        if (
-          typeof newZoom === 'number' &&
-          typeof oldZoom === 'number' &&
-          newZoom !== oldZoom
-        ) {
-          this.reflectOnlyZoom = newZoom;
-
-          this.dispatchEvent(
-            new CustomEvent<number>('zoom', {
-              detail: newZoom,
-              bubbles: true,
-              composed: true
-            })
-          );
-        }
-      }
-    )
-  );
-
-  this.eventHandles.add(
-    reactiveUtils.watch(
-      () => this.view?.extent,
-      (newExtent) => {
-        if (!newExtent) return;
-        if (this.suspendExtentTracking) return;
-
-        this.reflectCurrentMapState();
-      }
-    )
-  );
-
-  this.eventHandles.add(
-    reactiveUtils.watch(
-      () => this.view?.center,
-      (newCenter) => {
-        if (!newCenter) return;
-        if (this.suspendExtentTracking) return;
-
-        const center: LatLongPoint = {
-          latitude: ValidationService.validateLatitude(
-            newCenter.latitude,
-            ArcMap.DEFAULT_CENTER_LATITUDE
-          ),
-          longitude: ValidationService.validateLongitude(
-            newCenter.longitude,
-            ArcMap.DEFAULT_CENTER_LONGITUDE
-          )
-        };
-
-        this.reflectOnlyCenter = center;
-
-        this.dispatchEvent(
-          new CustomEvent<LatLongPoint>('center-change', {
-            detail: center,
-            bubbles: true,
-            composed: true
-          })
-        );
-      }
-    )
-  );
-}
-
-private syncPopupOptions(): void {
-  if (!this.view) return;
-
-  this.view.popupEnabled = this.popupComponentEnabled;
-
-  const popup = this.view.popup;
-  if (!popup) return;
-
-  popup.visibleElements = {
-    ...popup.visibleElements,
-    closeButton: this.isPopupVisible
-  };
-
-  if (!this.popupComponentEnabled && popup.visible) {
-    popup.close();
-    return;
-  }
-
-  if (this.usePopupContentOnly && this.customPopupContent) {
-    this.setPopupContent(this.customPopupContent, true);
-  }
+private isExtentObject(value: unknown): value is UpMapExtent {
+  return !!value &&
+    typeof value === 'object' &&
+    'leftLongitude' in value &&
+    'rightLongitude' in value &&
+    'topLatitude' in value &&
+    'bottomLatitude' in value;
 }
 
 
 render() {
-  const parsedCenter = this.center
-    ? [this.center.longitude, this.center.latitude]
-    : undefined;
-
-  const parsedExtent = this.extent
-    ? {
-        xmin: this.extent.leftLongitude,
-        ymin: this.extent.bottomLatitude,
-        xmax: this.extent.rightLongitude,
-        ymax: this.extent.topLatitude,
-        spatialReference: { wkid: 4326 }
-      }
-    : undefined;
-
-  return html`
-    <arcgis-map
-      basemap=${this.basemap ?? 'gray'}
-      .extent=${parsedExtent}
-      .center=${!parsedExtent ? parsedCenter : undefined}
-      .zoom=${!parsedExtent ? this.zoom : undefined}
-    >
-    </arcgis-map>
-  `;
-}
-
-
-
-render() {
-  // SAFE CENTER PARSE
+  const centerValue = this.center;
   const parsedCenter =
-    this.center &&
-    typeof this.center === 'object' &&
-    typeof this.center.longitude === 'number' &&
-    typeof this.center.latitude === 'number'
-      ? [this.center.longitude, this.center.latitude]
+    centerValue &&
+    typeof centerValue === 'object' &&
+    'longitude' in centerValue &&
+    'latitude' in centerValue &&
+    typeof centerValue.longitude === 'number' &&
+    typeof centerValue.latitude === 'number'
+      ? [centerValue.longitude, centerValue.latitude]
       : undefined;
 
-  // SAFE EXTENT PARSE
+  const extentValue = this.extent;
   const parsedExtent =
-    this.extent &&
-    typeof this.extent.leftLongitude === 'number' &&
-    typeof this.extent.rightLongitude === 'number' &&
-    typeof this.extent.topLatitude === 'number' &&
-    typeof this.extent.bottomLatitude === 'number'
+    this.isExtentObject(extentValue) &&
+    typeof extentValue.leftLongitude === 'number' &&
+    typeof extentValue.rightLongitude === 'number' &&
+    typeof extentValue.topLatitude === 'number' &&
+    typeof extentValue.bottomLatitude === 'number'
       ? {
-          xmin: this.extent.leftLongitude,
-          ymin: this.extent.bottomLatitude,
-          xmax: this.extent.rightLongitude,
-          ymax: this.extent.topLatitude,
+          xmin: extentValue.leftLongitude,
+          ymin: extentValue.bottomLatitude,
+          xmax: extentValue.rightLongitude,
+          ymax: extentValue.topLatitude,
           spatialReference: { wkid: 4326 }
         }
       : undefined;
@@ -152,19 +41,9 @@ render() {
       <arcgis-map
         class="map"
         .basemap=${this.basemap ?? 'gray'}
-
-        ${parsedExtent
-          ? html` .extent=${parsedExtent} `
-          : parsedCenter
-          ? html`
-              .center=${parsedCenter}
-              .zoom=${this.zoom}
-            `
-          : html`
-              .center=${[-98, 39]}
-              .zoom=${4}
-            `}
-
+        .extent=${parsedExtent}
+        .center=${!parsedExtent ? parsedCenter : undefined}
+        .zoom=${!parsedExtent ? this.zoom : undefined}
         .maxZoom=${this.maxZoom}
         .minZoom=${this.minZoom}
       >
@@ -172,70 +51,3 @@ render() {
     </div>
   `;
 }
-
-
-
-
-render() {
-  // ---------- SAFE CENTER ----------
-  const parsedCenter =
-    this.center &&
-    typeof this.center === 'object' &&
-    'longitude' in this.center &&
-    'latitude' in this.center &&
-    typeof this.center.longitude === 'number' &&
-    typeof this.center.latitude === 'number'
-      ? [this.center.longitude, this.center.latitude]
-      : undefined;
-
-  // ---------- SAFE EXTENT ----------
-  const isValidExtentObject =
-    this.extent &&
-    typeof this.extent === 'object' &&
-    'leftLongitude' in this.extent &&
-    'rightLongitude' in this.extent &&
-    'topLatitude' in this.extent &&
-    'bottomLatitude' in this.extent;
-
-  const parsedExtent =
-    isValidExtentObject &&
-    typeof this.extent.leftLongitude === 'number' &&
-    typeof this.extent.rightLongitude === 'number' &&
-    typeof this.extent.topLatitude === 'number' &&
-    typeof this.extent.bottomLatitude === 'number'
-      ? {
-          xmin: this.extent.leftLongitude,
-          ymin: this.extent.bottomLatitude,
-          xmax: this.extent.rightLongitude,
-          ymax: this.extent.topLatitude,
-          spatialReference: { wkid: 4326 }
-        }
-      : undefined;
-
-  // ---------- RENDER ----------
-  return html`
-    <div class="map-wrapper">
-      <arcgis-map
-        class="map"
-        .basemap=${this.basemap ?? 'gray'}
-
-        ${parsedExtent
-          ? html` .extent=${parsedExtent} `
-          : parsedCenter
-          ? html`
-              .center=${parsedCenter}
-              .zoom=${this.zoom}
-            `
-          : html`
-              .center=${[-98, 39]}
-              .zoom=${4}
-            `}
-
-        .maxZoom=${this.maxZoom}
-        .minZoom=${this.minZoom}
-      >
-      </arcgis-map>
-    </div>
-  `;
-}
-
