@@ -1,608 +1,160 @@
-  connectedCallback(): void {
-    super.connectedCallback();
-
-    this.mapReady = new Promise((resolve) => {
-      this.resolveMapReady = resolve;
-    });
-  }
-
-  async firstUpdated(): Promise<void> {
-    await this.initializeMap();
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-
-    this.eventHandles.removeAll();
-    this.eventHandles.destroy();
-
-    if (this.zoomWidget && this.view) {
-      this.view.ui.remove(this.zoomWidget);
-      this.zoomWidget.destroy();
-      this.zoomWidget = null;
-    }
-
-    if (this.homeWidget && this.view) {
-      this.view.ui.remove(this.homeWidget);
-      this.homeWidget.destroy();
-      this.homeWidget = null;
-    }
-
-    if (this.locateWidget && this.view) {
-      this.view.ui.remove(this.locateWidget);
-      this.locateWidget.destroy();
-      this.locateWidget = null;
-    }
-
-    if (this.scaleBarWidget && this.view) {
-      this.view.ui.remove(this.scaleBarWidget);
-      this.scaleBarWidget.destroy();
-      this.scaleBarWidget = null;
-    }
-
-    if (this.view) {
-      this.view.destroy();
-    }
-  }
-
-  private async initializeMap(): Promise<void> {
-    this.map = new ArcGISMap({
-      basemap: this.basemap || ArcMap.DEFAULT_BASEMAP
-    });
-
-    const parsedCenter = ArcMap.parseValidateAndConvertLatLongPoint(this.center);
-
-    const initialCenter = parsedCenter
-      ? new Point({
-          longitude: parsedCenter.longitude,
-          latitude: parsedCenter.latitude,
-          spatialReference: { wkid: 4326 }
-        })
-      : new Point({
-          longitude: ArcMap.DEFAULT_CENTER_LONGITUDE,
-          latitude: ArcMap.DEFAULT_CENTER_LATITUDE,
-          spatialReference: { wkid: 4326 }
-        });
-
-    this.view = new MapView({
-      container: this.internalDivElement,
-      map: this.map,
-      center: initialCenter,
-      zoom: Math.round(this.zoom),
-      constraints: {
-        minZoom: this.minZoom,
-        maxZoom: this.maxZoom
-      }
-    });
-
-    await this.view.when();
-
-    if (this.extent) {
-      await this.updateExtent(this.extent);
-    }
-
-    this.attachReactiveWatchers();
-    this.syncWidgets();
-
-    this.resolveMapReady();
-  }
-
-  protected async updated(changedProperties: PropertyValues<this>): Promise<void> {
-    if (!this.view) return;
-
-    if (changedProperties.has('basemap')) {
-      await this.updateBasemap(
-        this.basemap ?? ArcMap.DEFAULT_BASEMAP
-      );
-    }
-
-    if (changedProperties.has('center')) {
-      await this.updateCenter(this.center);
-    }
-
-    if (changedProperties.has('extent')) {
-      await this.updateExtent(this.extent);
-    }
-
-    if (changedProperties.has('zoom')) {
-      const safeZoom =
-        typeof this.zoom === 'number'
-          ? this.zoom
-          : ArcMap.DEFAULT_ZOOM;
-
-      this.view.zoom = safeZoom;
-    }
-
-    if (
-      changedProperties.has('showZoom') ||
-      changedProperties.has('showHome') ||
-      changedProperties.has('showLocate') ||
-      changedProperties.has('showScaleBar')
-    ) {
-      this.syncWidgets();
-    }
-  }
-
-  private async updateBasemap(newValue: string): Promise<void> {
-    if (!this.map) return;
-
-    const basemapValue = newValue || ArcMap.DEFAULT_BASEMAP;
-
-    try {
-      this.map.basemap = basemapValue as string | Basemap;
-    } catch (e) {
-      console.warn(`Invalid basemap: ${basemapValue}`, e);
-      this.basemap = ArcMap.DEFAULT_BASEMAP;
-    }
-  }
-
-  private async updateCenter(newCenter: LatLongPoint | string | null): Promise<void> {
-    if (!this.view || !newCenter) return;
-
-    if (
-      typeof newCenter === 'object' &&
-      newCenter !== null &&
-      'leftLongitude' in newCenter
-    ) {
-      console.warn('updateCenter received extent instead of center:', newCenter);
-      return;
-    }
-
-    const validCenter = ArcMap.parseValidateAndConvertLatLongPoint(newCenter);
-    if (!validCenter) {
-      console.warn('updateCenter received invalid center:', newCenter);
-      return;
-    }
-
-    if (
-      this.reflectOnlyCenter &&
-      ArcMap.areLatLongEqual(this.reflectOnlyCenter, validCenter)
-    ) {
-      return;
-    }
-
-    this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
-      this.reflectOnlyCenter = undefined;
-
-      try {
-        await this.view.goTo(
-          {
-            center: [validCenter.longitude, validCenter.latitude]
-          },
-          { animate: false }
-        );
-      } catch (e) {
-        console.warn('Failed to update center', e);
-      }
-    });
-
-    await this.pendingExtentChanges;
-  }
-
-  private async updateExtent(extentInput?: ArcMapExtent | string | null): Promise<void> {
-    if (!this.view || !extentInput) return;
-
-    const validExtent = await ArcMap.parseValidateAndConvertExtent(extentInput).catch(() => null);
-    if (!validExtent) {
-      console.warn('updateExtent received invalid extent:', extentInput);
-      return;
-    }
-
-    this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
-      this.reflectOnlyExtent = undefined;
-
-      try {
-        await this.view.goTo(validExtent, { animate: false });
-      } catch (e) {
-        console.warn('Failed to update extent', e);
-      }
-    });
-
-    await this.pendingExtentChanges;
-  }
-
-  private reflectCurrentMapState(): void {
-    if (!this.view) return;
-
-    const zoom = typeof this.view.zoom === 'number'
-      ? this.view.zoom
-      : ArcMap.DEFAULT_ZOOM;
-
-    this.reflectOnlyZoom = zoom;
-    this.zoom = zoom;
-
-    const centerPoint = this.view.center;
-    if (centerPoint) {
-      const center: LatLongPoint = {
-        latitude: ArcMap.validateLatitude(
-          centerPoint.latitude,
-          ArcMap.DEFAULT_CENTER_LATITUDE
-        ),
-        longitude: ArcMap.validateLongitude(
-          centerPoint.longitude,
-          ArcMap.DEFAULT_CENTER_LONGITUDE
-        )
-      };
-
-      this.reflectOnlyCenter = center;
-      this.center = center;
-    }
-
-    const currentExtent = this.view.extent;
-    if (!currentExtent) return;
-
-    const convertedExtent = webMercatorUtils.webMercatorToGeographic(currentExtent);
-
-    if (!convertedExtent || !(convertedExtent instanceof Extent)) {
-      return;
-    }
-
-    const geographicExtent = convertedExtent as Extent;
-
-    const extentToEmit: ArcMapExtent = {
-      bottomLatitude: geographicExtent.ymin,
-      topLatitude: geographicExtent.ymax,
-      leftLongitude: geographicExtent.xmin,
-      rightLongitude: geographicExtent.xmax
-    };
-
-    this.reflectOnlyExtent = extentToEmit;
-    this.extent = extentToEmit;
-
-    this.dispatchEvent(
-      new CustomEvent<ArcMapExtent>('extent-change', {
-        detail: extentToEmit,
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-
-  private attachReactiveWatchers(): void {
-    this.eventHandles.add(
-      reactiveUtils.watch(
-        () => this.view?.zoom,
-        (newZoom, oldZoom) => {
-          if (typeof newZoom === 'number' && typeof oldZoom === 'number' && newZoom !== oldZoom) {
-            this.dispatchEvent(
-              new CustomEvent<number>('zoom', {
-                detail: newZoom,
-                bubbles: true,
-                composed: true
-              })
-            );
-          }
-        }
-      )
-    );
-
-    this.eventHandles.add(
-      reactiveUtils.watch(
-        () => this.view?.extent,
-        (newExtent) => {
-          if (!newExtent) return;
-          this.reflectCurrentMapState();
-        }
-      )
-    );
-  }
-
-  private syncWidgets(): void {
-    if (!this.view) return;
-
-    if (this.showZoom) {
-      if (!this.zoomWidget) {
-        this.zoomWidget = new Zoom({
-          view: this.view,
-          id: 'arc-zoom'
-        });
-
-        this.view.ui.add(this.zoomWidget, {
-          position: 'bottom-left',
-          index: 0
-        });
-      }
-    } else if (this.zoomWidget) {
-      this.view.ui.remove(this.zoomWidget);
-      this.zoomWidget.destroy();
-      this.zoomWidget = null;
-    }
-
-    if (this.showHome) {
-      if (!this.homeWidget) {
-        this.homeWidget = new Home({
-          view: this.view,
-          id: 'arc-home'
-        });
-
-        this.view.ui.add(this.homeWidget, {
-          position: 'bottom-left',
-          index: 1
-        });
-      }
-    } else if (this.homeWidget) {
-      this.view.ui.remove(this.homeWidget);
-      this.homeWidget.destroy();
-      this.homeWidget = null;
-    }
-
-    if (this.showLocate) {
-      if (!this.locateWidget) {
-        this.locateWidget = new Locate({
-          view: this.view,
-          id: 'arc-locate',
-          useHeadingEnabled: false
-        });
-
-        this.view.ui.add(this.locateWidget, {
-          position: 'bottom-left',
-          index: 2
-        });
-      }
-    } else if (this.locateWidget) {
-      this.view.ui.remove(this.locateWidget);
-      this.locateWidget.destroy();
-      this.locateWidget = null;
-    }
-
-    if (this.showScaleBar) {
-      if (!this.scaleBarWidget) {
-        this.scaleBarWidget = new ScaleBar({
-          view: this.view,
-          unit: 'dual'
-        });
-
-        this.view.ui.add(this.scaleBarWidget, {
-          position: 'bottom-left',
-          index: 3
-        });
-      }
-    } else if (this.scaleBarWidget) {
-      this.view.ui.remove(this.scaleBarWidget);
-      this.scaleBarWidget.destroy();
-      this.scaleBarWidget = null;
-    }
-  }
-
-  private static parseValidateAndConvertLatLongPoint(
-    latLong: LatLongPoint | string | null
-  ): LatLongPoint | undefined {
-    if (!latLong) return;
-
-    let parsedLatLong: unknown;
-
-    if (typeof latLong === 'string') {
-      try {
-        parsedLatLong = JSON.parse(latLong);
-      } catch (e) {
-        console.warn('Could not parse center as json, ignoring this property', e);
-        return;
-      }
-    } else {
-      parsedLatLong = latLong;
-    }
-
-    if (
-      !parsedLatLong ||
-      typeof parsedLatLong !== 'object' ||
-      typeof (parsedLatLong as LatLongPoint).latitude !== 'number' ||
-      typeof (parsedLatLong as LatLongPoint).longitude !== 'number'
-    ) {
-      console.warn('Invalid value for center point, ignoring this property');
-      return;
-    }
-
-    const point = parsedLatLong as LatLongPoint;
-
-    return {
-      latitude: point.latitude,
-      longitude: point.longitude
-    };
-  }
-
-  private static parseValidateAndConvertExtent(
-    extent: ArcMapExtent | string | null
-  ): Promise<Extent> {
-    if (!extent) {
-      return Promise.reject(new Error('No extent provided'));
-    }
-
-    let parsedExtent: ArcMapExtent;
-
-    if (typeof extent === 'string') {
-      try {
-        parsedExtent = JSON.parse(extent) as ArcMapExtent;
-      } catch (e) {
-        console.warn('Could not parse extent as json, ignoring this property', e);
-        return Promise.reject(e);
-      }
-    } else {
-      parsedExtent = extent;
-    }
-
-    if (
-      typeof parsedExtent.leftLongitude !== 'number' ||
-      typeof parsedExtent.rightLongitude !== 'number' ||
-      typeof parsedExtent.bottomLatitude !== 'number' ||
-      typeof parsedExtent.topLatitude !== 'number'
-    ) {
-      return Promise.reject(new Error('Invalid extent'));
-    }
-
-    let xmin = parsedExtent.leftLongitude;
-    let xmax = parsedExtent.rightLongitude;
-
-    if (xmin > xmax) {
-      xmax += 360;
-    }
-
-    return Promise.resolve(
-      new Extent({
-        xmin,
-        xmax,
-        ymin: parsedExtent.bottomLatitude,
-        ymax: parsedExtent.topLatitude,
-        spatialReference: { wkid: 4326 }
-      })
-    );
-  }
-
-  private static areLatLongEqual(a: LatLongPoint, b: LatLongPoint | string): boolean {
-    if (typeof b === 'string') return false;
-    return a.latitude === b.latitude && a.longitude === b.longitude;
-  }
-
-  private static validateLatitude(value: unknown, fallback: number): number {
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-  }
-
-  private static validateLongitude(value: unknown, fallback: number): number {
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-  }
-
-
-private async updateCenter(newCenter: LatLongPoint | string | null): Promise<void> {
+private static areExtentsEqual(
+  a?: ArcMapExtent | string | null,
+  b?: ArcMapExtent | string | null
+): boolean {
+  if (!a || !b) return false;
+
+  const extentA =
+    typeof a === 'string' ? (JSON.parse(a) as ArcMapExtent) : a;
+  const extentB =
+    typeof b === 'string' ? (JSON.parse(b) as ArcMapExtent) : b;
+
+  return (
+    extentA.leftLongitude === extentB.leftLongitude &&
+    extentA.rightLongitude === extentB.rightLongitude &&
+    extentA.bottomLatitude === extentB.bottomLatitude &&
+    extentA.topLatitude === extentB.topLatitude
+  );
+}
+
+private async updateCenter(
+  newCenter: LatLongPoint | string | null
+): Promise<void> {
   if (!this.view || !newCenter) return;
 
-  // ❌ Prevent extent object being passed as center (VERY IMPORTANT)
   if (
-    typeof newCenter === 'object' &&
-    newCenter !== null &&
-    'leftLongitude' in newCenter
+    this.reflectOnlyCenter &&
+    ArcMap.areLatLongEqual(this.reflectOnlyCenter, newCenter)
   ) {
-    console.warn('Skipping invalid center (looks like extent):', newCenter);
     return;
   }
 
-  let latitude: number | undefined;
-  let longitude: number | undefined;
+  const validCenter = ArcMap.parseValidateAndConvertLatLongPoint(newCenter);
+  if (!validCenter) return;
 
-  if (typeof newCenter === 'string') {
+  this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
+    this.reflectOnlyCenter = undefined;
+
+    await this.view.goTo({
+      center: [validCenter.longitude, validCenter.latitude]
+    });
+  });
+
+  await this.pendingExtentChanges;
+}
+
+private async updateExtent(
+  extentInput: ArcMapExtent | string | null
+): Promise<void> {
+  if (!this.view || !extentInput) return;
+
+  if (
+    this.reflectOnlyExtent &&
+    ArcMap.areExtentsEqual(this.reflectOnlyExtent, extentInput)
+  ) {
+    return;
+  }
+
+  const validExtent = await ArcMap.parseValidateAndConvertExtent(extentInput)
+    .then((extent) => extent)
+    .catch(() => null);
+
+  if (!validExtent) return;
+
+  this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
+    this.reflectOnlyExtent = undefined;
+    await this.view.goTo(validExtent);
+  });
+
+  await this.pendingExtentChanges;
+}
+
+private static areExtentsEqual(
+  a?: ArcMapExtent | string | null,
+  b?: ArcMapExtent | string | null
+): boolean {
+  if (!a || !b) return false;
+
+  const extentA =
+    typeof a === 'string' ? (JSON.parse(a) as ArcMapExtent) : a;
+  const extentB =
+    typeof b === 'string' ? (JSON.parse(b) as ArcMapExtent) : b;
+
+  return (
+    extentA.leftLongitude === extentB.leftLongitude &&
+    extentA.rightLongitude === extentB.rightLongitude &&
+    extentA.bottomLatitude === extentB.bottomLatitude &&
+    extentA.topLatitude === extentB.topLatitude
+  );
+}
+
+private static async parseValidateAndConvertExtent(
+  extent: ArcMapExtent | string
+): Promise<Extent> {
+  let parsedExtent: ArcMapExtent;
+
+  if (typeof extent === 'string') {
     try {
-      const parsed = JSON.parse(newCenter);
-      latitude = parsed.latitude;
-      longitude = parsed.longitude;
-    } catch {
-      console.warn('Invalid center JSON');
+      parsedExtent = JSON.parse(extent) as ArcMapExtent;
+    } catch (e) {
+      console.warn('Could not parse extent as json, ignoring this property', e);
+      return Promise.reject();
+    }
+  } else {
+    parsedExtent = extent;
+  }
+
+  if (!ValidationService.isValidArcMapExtent(parsedExtent)) {
+    console.warn('Invalid value for extent, ignoring this property');
+    return Promise.reject();
+  }
+
+  return new Extent({
+    xmin: parsedExtent.leftLongitude,
+    ymin: parsedExtent.bottomLatitude,
+    xmax: parsedExtent.rightLongitude,
+    ymax: parsedExtent.topLatitude,
+    spatialReference: { wkid: 4326 }
+  });
+}
+
+private static parseValidateAndConvertLatLongPoint(
+  latLong: LatLongPoint | string
+): LatLongPoint | undefined {
+  let parsedLatLong: LatLongPoint;
+
+  if (typeof latLong === 'string') {
+    try {
+      parsedLatLong = JSON.parse(latLong) as LatLongPoint;
+    } catch (e) {
+      console.warn('Could not parse center as json, ignoring this property', e);
       return;
     }
   } else {
-    latitude = newCenter.latitude;
-    longitude = newCenter.longitude;
+    parsedLatLong = latLong;
   }
 
-  // ❌ HARD VALIDATION (THIS FIXES YOUR CRASH)
-  if (
-    typeof latitude !== 'number' ||
-    typeof longitude !== 'number' ||
-    isNaN(latitude) ||
-    isNaN(longitude)
-  ) {
-    console.warn('Invalid center values:', newCenter);
+  if (!ValidationService.isValidLatLongPoint(parsedLatLong)) {
+    console.warn('Invalid value for center point, ignoring this property');
     return;
   }
 
-  try {
-    await this.view.goTo(
-      {
-        center: [longitude, latitude]
-      },
-      { animate: false }
-    );
-  } catch (e) {
-    console.warn('Center update failed:', e);
-  }
+  return {
+    longitude: parsedLatLong.longitude,
+    latitude: parsedLatLong.latitude
+  };
 }
 
-private async updateExtent(extentInput?: any): Promise<void> {
-  if (!this.view || !extentInput) return;
+const newBasemap =
+  typeof this.basemap === 'string' && this.basemap.trim().length > 0
+    ? this.basemap
+    : ArcMap.DEFAULT_BASEMAP;
 
-  let extent: Extent | null = null;
+const oldRaw = changedProperties.get('basemap');
+const oldBasemap =
+  typeof oldRaw === 'string' && oldRaw.trim().length > 0
+    ? oldRaw
+    : ArcMap.DEFAULT_BASEMAP;
 
-  if (typeof extentInput === 'string') {
-    try {
-      extentInput = JSON.parse(extentInput);
-    } catch {
-      console.warn('Invalid extent JSON');
-      return;
-    }
-  }
-
-  // ❌ HARD VALIDATION
-  if (
-    typeof extentInput.leftLongitude !== 'number' ||
-    typeof extentInput.rightLongitude !== 'number' ||
-    typeof extentInput.bottomLatitude !== 'number' ||
-    typeof extentInput.topLatitude !== 'number'
-  ) {
-    console.warn('Invalid extent values:', extentInput);
-    return;
-  }
-
-  extent = new Extent({
-    xmin: extentInput.leftLongitude,
-    xmax: extentInput.rightLongitude,
-    ymin: extentInput.bottomLatitude,
-    ymax: extentInput.topLatitude,
-    spatialReference: { wkid: 4326 }
-  });
-
-  try {
-    await this.view.goTo(extent, { animate: false });
-  } catch (e) {
-    console.warn('Extent update failed:', e);
-  }
-}
-}
-
-
-
-import Extent from "@arcgis/core/geometry/Extent";
-import SpatialReference from "@arcgis/core/geometry/SpatialReference";
-
-private async updateExtent(extentInput?: UpMapExtent | string | null): Promise<void> {
-  if (!this.view || !extentInput) return;
-
-  let extentObj: UpMapExtent;
-
-  try {
-    extentObj =
-      typeof extentInput === "string"
-        ? JSON.parse(extentInput)
-        : extentInput;
-  } catch {
-    console.error("Invalid extent JSON");
-    return;
-  }
-
-  const {
-    leftLongitude,
-    rightLongitude,
-    bottomLatitude,
-    topLatitude
-  } = extentObj;
-
-  // 🚨 Validate
-  if (
-    leftLongitude == null ||
-    rightLongitude == null ||
-    bottomLatitude == null ||
-    topLatitude == null
-  ) {
-    console.error("Invalid extent values", extentObj);
-    return;
-  }
-
-  // ✅ Convert to ArcGIS Extent
-  const arcgisExtent = new Extent({
-    xmin: leftLongitude,
-    xmax: rightLongitude,
-    ymin: bottomLatitude,
-    ymax: topLatitude,
-    spatialReference: new SpatialReference({ wkid: 4326 }) // VERY IMPORTANT
-  });
-
-  // ✅ Use goTo safely
-  await this.view.goTo(arcgisExtent);
-}
+await this.updateBasemap(newBasemap, oldBasemap);
 
