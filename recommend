@@ -389,3 +389,42 @@ export class ArcMap extends LitElement {
     };
   }
 }
+
+private async initializeMap(): Promise<void> {
+  const mapEl = this.arcgisMapElement;
+
+  if (!mapEl) {
+    console.warn('arcgis-map element not found');
+    return;
+  }
+
+  const attachToReadyView = async (): Promise<void> => {
+    const view = mapEl.view;
+    if (!view) {
+      console.warn('arcgis-map view not available');
+      return;
+    }
+
+    this.view = view;
+    await this.view.when();
+
+    this.setupMapClickHandler();
+    this.setupViewWatchers();
+    this.setupPopupBridge();
+    this.syncPopupOptions();
+
+    console.log('arcgis-map view connected');
+  };
+
+  if (mapEl.view) {
+    await attachToReadyView();
+    return;
+  }
+
+  const onReady = async () => {
+    mapEl.removeEventListener('arcgisViewReadyChange', onReady);
+    await attachToReadyView();
+  };
+
+  mapEl.addEventListener('arcgisViewReadyChange', onReady, { once: true });
+}
