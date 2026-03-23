@@ -674,3 +674,92 @@ override disconnectedCallback(): void {
   this.eventHandles.removeAll();
 }
 
+private keyDownHandle: { remove: () => void } | null = null;
+private keyPressHandle: { remove: () => void } | null = null;
+
+private syncKeyboardNavigation(): void {
+  if (!this.view) return;
+
+  if (this.keyDownHandle) {
+    this.keyDownHandle.remove();
+    this.keyDownHandle = null;
+  }
+
+  if (this.keyPressHandle) {
+    this.keyPressHandle.remove();
+    this.keyPressHandle = null;
+  }
+
+  if (!this.enableKeyboardNavigation) {
+    this.keyDownHandle = this.view.on('key-down', (event: any) => {
+      const blockedKeys = [
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        '+',
+        '-',
+        '=',
+        '_',
+        'PageUp',
+        'PageDown'
+      ];
+
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+
+    this.keyPressHandle = this.view.on('key-up', (event: any) => {
+      const blockedKeys = [
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        '+',
+        '-',
+        '=',
+        '_',
+        'PageUp',
+        'PageDown'
+      ];
+
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+  }
+}
+
+override disconnectedCallback(): void {
+  super.disconnectedCallback();
+
+  if (this.mouseWheelHandle) {
+    this.mouseWheelHandle.remove();
+    this.mouseWheelHandle = null;
+  }
+
+  if (this.doubleClickHandle) {
+    this.doubleClickHandle.remove();
+    this.doubleClickHandle = null;
+  }
+
+  if (this.doubleClickShiftHandle) {
+    this.doubleClickShiftHandle.remove();
+    this.doubleClickShiftHandle = null;
+  }
+
+  if (this.keyDownHandle) {
+    this.keyDownHandle.remove();
+    this.keyDownHandle = null;
+  }
+
+  if (this.keyPressHandle) {
+    this.keyPressHandle.remove();
+    this.keyPressHandle = null;
+  }
+
+  this.eventHandles.removeAll();
+}
+
+
