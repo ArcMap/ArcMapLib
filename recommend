@@ -626,3 +626,51 @@ public async hideScaleBar(): Promise<void> {
   await this.updateComplete;
 }
 
+private syncDoubleClickZoom(): void {
+  if (!this.view) return;
+
+  if (this.doubleClickHandle) {
+    this.doubleClickHandle.remove();
+    this.doubleClickHandle = null;
+  }
+
+  if (this.doubleClickShiftHandle) {
+    this.doubleClickShiftHandle.remove();
+    this.doubleClickShiftHandle = null;
+  }
+
+  if (!this.enableDoubleClickToZoom) {
+    this.doubleClickHandle = this.view.on('double-click', (event: any) => {
+      event.stopPropagation();
+    });
+
+    this.doubleClickShiftHandle = this.view.on('double-click', ['Shift'], (event: any) => {
+      event.stopPropagation();
+    });
+  }
+}
+
+private doubleClickHandle: { remove: () => void } | null = null;
+private doubleClickShiftHandle: { remove: () => void } | null = null;
+
+override disconnectedCallback(): void {
+  super.disconnectedCallback();
+
+  if (this.mouseWheelHandle) {
+    this.mouseWheelHandle.remove();
+    this.mouseWheelHandle = null;
+  }
+
+  if (this.doubleClickHandle) {
+    this.doubleClickHandle.remove();
+    this.doubleClickHandle = null;
+  }
+
+  if (this.doubleClickShiftHandle) {
+    this.doubleClickShiftHandle.remove();
+    this.doubleClickShiftHandle = null;
+  }
+
+  this.eventHandles.removeAll();
+}
+
