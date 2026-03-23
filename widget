@@ -337,6 +337,68 @@ private async updateExtent(extentInput?: ArcMapExtent | string | null): Promise<
     console.warn('Failed to update extent:', esriExtent, e);
   }
 }
+private static parseValidateAndConvertExtent(extent: any): Extent | null {
+  let parsedExtent = extent;
+
+  if (typeof extent === 'string') {
+    try {
+      parsedExtent = JSON.parse(extent);
+    } catch (e) {
+      console.warn('Could not parse extent as JSON, ignoring this property', e);
+      return null;
+    }
+  }
+
+  if (
+    !parsedExtent ||
+    typeof parsedExtent.leftLongitude !== 'number' ||
+    typeof parsedExtent.rightLongitude !== 'number' ||
+    typeof parsedExtent.bottomLatitude !== 'number' ||
+    typeof parsedExtent.topLatitude !== 'number'
+  ) {
+    console.warn('Invalid value for extent, ignoring this property');
+    return null;
+  }
+
+  const left = parsedExtent.leftLongitude;
+  const right = parsedExtent.rightLongitude;
+  const bottom = parsedExtent.bottomLatitude;
+  const top = parsedExtent.topLatitude;
+
+  if (bottom >= top) {
+    console.warn('Invalid extent: bottomLatitude must be < topLatitude');
+    return null;
+  }
+
+  let xmin = left;
+  let xmax = right;
+
+  // Crosses international date line
+  if (xmin > xmax) {
+    xmax += 360;
+  }
+
+  return new Extent({
+    xmin,
+    ymin: bottom,
+    xmax,
+    ymax: top,
+    spatialReference: { wkid: 4326 }
+  });
+}
+
+private async updateExtent(extent: ArcMapExtent | string | null): Promise<void> {
+  if (!this.view || !extent) return;
+
+  const esriExtent = ArcMap.parseValidateAndConvertExtent(extent);
+  if (!esriExtent) return;
+
+  try {
+    await this.view.goTo(esriExtent, { animate: false });
+  } catch (e) {
+    console.warn('Failed to update extent', e);
+  }
+}
   render() {
     return html`<div id="viewDiv"></div>`;
   }
