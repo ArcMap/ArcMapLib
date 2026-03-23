@@ -428,3 +428,139 @@ private async initializeMap(): Promise<void> {
 
   mapEl.addEventListener('arcgisViewReadyChange', onReady, { once: true });
 }
+
+// =====================================================
+// 1. TYPE
+// =====================================================
+
+export interface PopupEvent {
+  features: Graphic[];
+  selectedIndex: number;
+}
+
+
+// =====================================================
+// 2. KEEP THESE FIELDS
+// =====================================================
+
+private popupFeatures: Graphic[] = [];
+private localPopupContent: string | null = null;
+
+
+// =====================================================
+// 3. UPDATE setupPopupBridge()
+// =====================================================
+
+private setupPopupBridge(): void {
+  if (!this.view?.popup) return;
+
+  const popup = this.view.popup;
+
+  // -------------------------------------------------
+  // popup features changed
+  // -------------------------------------------------
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.features,
+      (features) => {
+        this.popupFeatures = Array.from((features ?? []) as Graphic[]);
+        this.localPopupContent = null;
+
+        const detail: PopupEvent = {
+          features: this.popupFeatures,
+          selectedIndex: popup.selectedFeatureIndex ?? 0
+        };
+
+        // old stencil-compatible event
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        // kebab-case version
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        if (!this.popupFeatures.length) {
+          this.setPopupContent(
+            `${this.popupCloseButton}<div class="popup-scrollable-content"><p>No features in this area</p></div>`,
+            true
+          );
+          return;
+        }
+
+        this.rebuildPopupContent();
+      }
+    )
+  );
+
+  // -------------------------------------------------
+  // popup selected feature changed
+  // -------------------------------------------------
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.selectedFeatureIndex,
+      (selectedIndex) => {
+        const detail: PopupEvent = {
+          features: this.popupFeatures ?? [],
+          selectedIndex: selectedIndex ?? 0
+        };
+
+        // keep popup content behavior same as old stencil code
+        if (this.usePopupContentOnly) {
+          if (this.customPopupContent) {
+            this.setPopupContent(this.customPopupContent, true);
+          } else {
+            this.setPopupContent('Loading...', true);
+          }
+        } else if (this.localPopupContent) {
+          this.setPopupContent(this.localPopupContent, true);
+        }
+
+        // old stencil-compatible event
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupSelectionChanged', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        // kebab-case version
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-selection-changed', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        // also keep existing popupFeaturesSet behavior if you want exact parity
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+      }
+    )
+  );
+}
+
