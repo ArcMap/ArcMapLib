@@ -442,4 +442,33 @@ private async updateCenter(newCenter: LatLongPoint | string | null): Promise<voi
 
   await this.pendingExtentChanges;
 }
+
+private static parseValidateAndConvertLatLongPoint(
+  latLong: LatLongPoint | string | null
+): LatLongPoint | undefined {
+  if (!latLong) return;
+
+  let parsedLatLong: any;
+
+  if (typeof latLong === 'string') {
+    try {
+      parsedLatLong = JSON.parse(latLong);
+    } catch (e) {
+      console.warn('Could not parse center as json, ignoring this property', e);
+      return;
+    }
+  } else {
+    parsedLatLong = latLong;
+  }
+
+  if (!ValidationService.isValidLatLongPoint(parsedLatLong)) {
+    console.warn('Invalid value for center point, ignoring this property');
+    return;
+  }
+
+  return {
+    longitude: parsedLatLong.longitude,
+    latitude: parsedLatLong.latitude
+  };
+}
 }
