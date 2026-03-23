@@ -118,3 +118,57 @@ render() {
     </arcgis-map>
   `;
 }
+
+
+
+render() {
+  // SAFE CENTER PARSE
+  const parsedCenter =
+    this.center &&
+    typeof this.center === 'object' &&
+    typeof this.center.longitude === 'number' &&
+    typeof this.center.latitude === 'number'
+      ? [this.center.longitude, this.center.latitude]
+      : undefined;
+
+  // SAFE EXTENT PARSE
+  const parsedExtent =
+    this.extent &&
+    typeof this.extent.leftLongitude === 'number' &&
+    typeof this.extent.rightLongitude === 'number' &&
+    typeof this.extent.topLatitude === 'number' &&
+    typeof this.extent.bottomLatitude === 'number'
+      ? {
+          xmin: this.extent.leftLongitude,
+          ymin: this.extent.bottomLatitude,
+          xmax: this.extent.rightLongitude,
+          ymax: this.extent.topLatitude,
+          spatialReference: { wkid: 4326 }
+        }
+      : undefined;
+
+  return html`
+    <div class="map-wrapper">
+      <arcgis-map
+        class="map"
+        .basemap=${this.basemap ?? 'gray'}
+
+        ${parsedExtent
+          ? html` .extent=${parsedExtent} `
+          : parsedCenter
+          ? html`
+              .center=${parsedCenter}
+              .zoom=${this.zoom}
+            `
+          : html`
+              .center=${[-98, 39]}
+              .zoom=${4}
+            `}
+
+        .maxZoom=${this.maxZoom}
+        .minZoom=${this.minZoom}
+      >
+      </arcgis-map>
+    </div>
+  `;
+}
