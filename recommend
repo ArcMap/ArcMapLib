@@ -763,3 +763,73 @@ override disconnectedCallback(): void {
 }
 
 
+private syncMouseWheelZoom(): void {
+  if (!this.view) return;
+
+  this.eventHandles.remove('mouse-wheel');
+
+  if (this.disableMapScrollWheelZoom) {
+    const handle = this.view.on('mouse-wheel', (event: ViewMouseWheelEvent) => {
+      event.stopPropagation();
+    });
+
+    this.eventHandles.add(handle, 'mouse-wheel');
+  }
+}
+
+private syncDoubleClickZoom(): void {
+  if (!this.view) return;
+
+  this.eventHandles.remove('double-click');
+
+  if (!this.enableDoubleClickToZoom) {
+    const doubleClickHandle = this.view.on('double-click', (event: any) => {
+      event.stopPropagation();
+    });
+
+    const doubleClickShiftHandle = this.view.on(
+      'double-click',
+      ['Shift'],
+      (event: any) => {
+        event.stopPropagation();
+      }
+    );
+
+    this.eventHandles.add([doubleClickHandle, doubleClickShiftHandle], 'double-click');
+  }
+}
+
+private syncKeyboardNavigation(): void {
+  if (!this.view) return;
+
+  this.eventHandles.remove('keyboard-navigation');
+
+  if (!this.enableKeyboardNavigation) {
+    const blockedKeys = [
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      '+',
+      '-',
+      '=',
+      '_',
+      'PageUp',
+      'PageDown'
+    ];
+
+    const keyDownHandle = this.view.on('key-down', (event: any) => {
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+
+    const keyUpHandle = this.view.on('key-up', (event: any) => {
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+
+    this.eventHandles.add([keyDownHandle, keyUpHandle], 'keyboard-navigation');
+  }
+}
