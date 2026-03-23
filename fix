@@ -181,3 +181,26 @@ private reflectCurrentMapState(): void {
   );
 }
 
+
+const initialCenter = ArcMap.parseValidateAndConvertLatLongPoint(this.center);
+const initialExtent = this.extent
+  ? await ArcMap.parseValidateAndConvertExtent(this.extent).catch(() => null)
+  : null;
+
+this.view = new MapView({
+  container: this.internalDivElement,
+  map: this.map,
+  zoom: this.zoom
+});
+
+await this.view.when();
+
+if (initialExtent) {
+  await this.view.goTo(initialExtent);
+} else if (initialCenter) {
+  await this.view.goTo({
+    center: [initialCenter.longitude, initialCenter.latitude],
+    zoom: this.zoom
+  });
+}
+
