@@ -1,537 +1,93 @@
-// =========================
-// CHANGED / ADDED PROPERTIES
-// =========================
 
-@property({ type: String, reflect: true })
-basemap: string = ArcMap.DEFAULT_BASEMAP;
-
-@property({ attribute: false })
-center: LatLongPoint | string | null = {
-  latitude: ArcMap.DEFAULT_CENTER_LATITUDE,
-  longitude: ArcMap.DEFAULT_CENTER_LONGITUDE
-};
-
-@property({ attribute: false })
-extent: ArcMapExtent | string | null = null;
-
-@property({ type: Number, reflect: true })
-zoom = ArcMap.DEFAULT_ZOOM;
-
-@property({ type: Number })
-maxZoom = 23;
-
-@property({ type: Number })
-minZoom = 0;
-
-@property({ type: Boolean })
-showZoom = true;
-
-@property({ type: Boolean })
-showHome = false;
-
-@property({ type: Boolean })
-showLocate = false;
-
-@property({ type: Boolean, attribute: 'show-scalebar', reflect: true })
-showScaleBar = false;
-
-@property({ type: Boolean, attribute: 'disable-map-scroll-wheel-zoom', reflect: true })
-disableMapScrollWheelZoom = false;
-
-@property({ type: Boolean, attribute: 'enable-double-click-to-zoom', reflect: true })
-enableDoubleClickToZoom = true;
-
-@property({ type: Boolean, attribute: 'enable-keyboard-navigation', reflect: true })
-enableKeyboardNavigation = true;
-
-@property({ type: Boolean })
-popupComponentEnabled = true;
-
-@property({ type: Boolean, attribute: 'is-popup-visible', reflect: true })
-isPopupVisible = true;
-
-@property({ type: Boolean, attribute: 'use-popup-content-only', reflect: true })
-usePopupContentOnly = false;
-
-@property({ attribute: false })
-customPopupContent: string | null = null;
-
-
-// =========================
-// CHANGED / ADDED INTERNALS
-// =========================
-
-private suspendExtentTracking = false;
-private reflectOnlyCenter?: LatLongPoint;
-private reflectOnlyExtent?: ArcMapExtent;
-private reflectOnlyZoom?: number;
-private pendingExtentChanges: Promise<void> = Promise.resolve();
-
-
-// =========================
-// REPLACE updated()
-// =========================
-
-protected override async updated(
-  changedProperties: PropertyValues<this>
-): Promise<void> {
-  super.updated(changedProperties);
-
+private setupViewWatchers(): void {
   if (!this.view) return;
-  await this.mapReady;
 
-  if (changedProperties.has('basemap')) {
-    const oldValue = changedProperties.get('basemap');
-    const oldBasemap =
-      typeof oldValue === 'string' && oldValue.trim().length > 0
-        ? oldValue
-        : ArcMap.DEFAULT_BASEMAP;
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.zoom,
+      (newZoom, oldZoom) => {
+        if (
+          typeof newZoom === 'number' &&
+          typeof oldZoom === 'number' &&
+          newZoom !== oldZoom
+        ) {
+          this.reflectOnlyZoom = newZoom;
 
-    const newBasemap =
-      typeof this.basemap === 'string' && this.basemap.trim().length > 0
-        ? this.basemap
-        : ArcMap.DEFAULT_BASEMAP;
-
-    if (oldBasemap !== newBasemap) {
-      await this.updateBasemap(newBasemap, oldBasemap);
-    }
-  }
-
-  // extent gets priority; do not apply center + extent together
-  if (changedProperties.has('extent') && this.extent) {
-    await this.updateExtent(this.extent);
-  } else if (changedProperties.has('center') && this.center) {
-    await this.updateCenter(this.center);
-  }
-
-  if (changedProperties.has('zoom')) {
-    const oldValue = changedProperties.get('zoom');
-    const oldZoom =
-      typeof oldValue === 'number' && Number.isFinite(oldValue)
-        ? oldValue
-        : ArcMap.DEFAULT_ZOOM;
-
-    const newZoom =
-      typeof this.zoom === 'number' && Number.isFinite(this.zoom)
-        ? this.zoom
-        : ArcMap.DEFAULT_ZOOM;
-
-    if (oldZoom !== newZoom && this.view.zoom !== newZoom) {
-      this.view.zoom = newZoom;
-    }
-  }
-
-  if (changedProperties.has('maxZoom')) {
-    this.view.constraints = {
-      ...this.view.constraints,
-      maxZoom: typeof this.maxZoom === 'number' ? this.maxZoom : 23
-    };
-  }
-
-  if (changedProperties.has('minZoom')) {
-    this.view.constraints = {
-      ...this.view.constraints,
-      minZoom: typeof this.minZoom === 'number' ? this.minZoom : 0
-    };
-  }
-
-  if (changedProperties.has('disableMapScrollWheelZoom')) {
-    this.syncMouseWheelZoom();
-  }
-
-  if (changedProperties.has('enableDoubleClickToZoom')) {
-    this.syncDoubleClickZoom();
-  }
-
-  if (changedProperties.has('enableKeyboardNavigation')) {
-    this.syncKeyboardNavigation();
-  }
-
-  if (
-    changedProperties.has('popupComponentEnabled') ||
-    changedProperties.has('isPopupVisible')
-  ) {
-    this.syncPopupOptions();
-  }
-
-  if (
-    changedProperties.has('usePopupContentOnly') ||
-    changedProperties.has('customPopupContent')
-  ) {
-    this.rebuildPopupContent();
-  }
-
-  if (changedProperties.has('showZoom')) {
-    this.showZoom ? await this.showZoomSlider() : await this.hideZoomSlider();
-  }
-
-  if (changedProperties.has('showHome')) {
-    this.showHome ? await this.showHomeMethod() : await this.hideHomeMethod();
-  }
-
-  if (changedProperties.has('showLocate')) {
-    this.showLocate ? await this.showLocateMethod() : await this.hideLocateMethod();
-  }
-
-  if (changedProperties.has('showScaleBar')) {
-    this.showScaleBar ? await this.showScaleBarMethod() : await this.hideScaleBar();
-  }
-}
-
-
-// =========================
-// REPLACE initializeMap()
-// =========================
-
-private async initializeMap(): Promise<void> {
-  this.map = new ArcGISMap({
-    basemap: this.basemap || ArcMap.DEFAULT_BASEMAP
-  });
-
-  this.view = new MapView({
-    container: this.internalDivElement,
-    map: this.map,
-    zoom: typeof this.zoom === 'number' ? this.zoom : ArcMap.DEFAULT_ZOOM,
-    constraints: {
-      minZoom: typeof this.minZoom === 'number' ? this.minZoom : 0,
-      maxZoom: typeof this.maxZoom === 'number' ? this.maxZoom : 23
-    },
-    popup: {
-      dockEnabled: false,
-      visibleElements: {
-        closeButton: this.isPopupVisible
+          this.dispatchEvent(
+            new CustomEvent<number>('zoom', {
+              detail: newZoom,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
       }
-    }
-  });
+    )
+  );
 
-  await this.view.when();
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.extent,
+      (newExtent) => {
+        if (!newExtent) return;
+        if (this.suspendExtentTracking) return;
 
-  if (this.extent) {
-    await this.updateExtent(this.extent);
-  } else if (this.center) {
-    await this.updateCenter(this.center);
-  }
+        this.reflectCurrentMapState();
+      }
+    )
+  );
 
-  this.setupViewWatchers();
-  this.syncMouseWheelZoom();
-  this.syncDoubleClickZoom();
-  this.syncKeyboardNavigation();
-  this.syncPopupOptions();
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.center,
+      (newCenter) => {
+        if (!newCenter) return;
+        if (this.suspendExtentTracking) return;
 
-  if (this.showZoom) await this.showZoomSlider();
-  if (this.showHome) await this.showHomeMethod();
-  if (this.showLocate) await this.showLocateMethod();
-  if (this.showScaleBar) await this.showScaleBarMethod();
+        const center: LatLongPoint = {
+          latitude: ValidationService.validateLatitude(
+            newCenter.latitude,
+            ArcMap.DEFAULT_CENTER_LATITUDE
+          ),
+          longitude: ValidationService.validateLongitude(
+            newCenter.longitude,
+            ArcMap.DEFAULT_CENTER_LONGITUDE
+          )
+        };
 
-  this.resolveMapReady();
+        this.reflectOnlyCenter = center;
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>('center-change', {
+            detail: center,
+            bubbles: true,
+            composed: true
+          })
+        );
+      }
+    )
+  );
 }
 
-
-// =========================
-// REPLACE updateCenter()
-// =========================
-
-private async updateCenter(
-  newCenter: LatLongPoint | string | null
-): Promise<void> {
-  if (!this.view || !newCenter) return;
-
-  const validCenter = ArcMap.parseValidateAndConvertLatLongPoint(newCenter);
-  if (!validCenter) return;
-
-  if (
-    this.reflectOnlyCenter &&
-    ArcMap.areLatLongEqual(this.reflectOnlyCenter, validCenter)
-  ) {
-    return;
-  }
-
-  const point = new Point({
-    longitude: validCenter.longitude,
-    latitude: validCenter.latitude,
-    spatialReference: { wkid: 4326 }
-  });
-
-  this.suspendExtentTracking = true;
-
-  try {
-    await this.view.goTo(
-      { target: point },
-      { animate: false }
-    );
-  } finally {
-    this.suspendExtentTracking = false;
-  }
-}
-
-
-// =========================
-// REPLACE updateExtent()
-// =========================
-
-private async updateExtent(
-  extentInput: ArcMapExtent | string | null
-): Promise<void> {
-  if (!this.view || !extentInput) return;
-
-  const validExtent = await ArcMap.parseValidateAndConvertExtent(extentInput).catch(() => null);
-  if (!validExtent) return;
-
-  if (
-    this.reflectOnlyExtent &&
-    ArcMap.areExtentsEqual(this.reflectOnlyExtent, extentInput)
-  ) {
-    return;
-  }
-
-  this.suspendExtentTracking = true;
-
-  try {
-    await this.view.goTo(validExtent, { animate: false });
-  } finally {
-    this.suspendExtentTracking = false;
-  }
-}
-
-
-// =========================
-// REPLACE reflectCurrentMapState()
-// IMPORTANT: do not assign this.center / this.extent / this.zoom here
-// only emit events
-// =========================
-
-private reflectCurrentMapState(): void {
+private syncPopupOptions(): void {
   if (!this.view) return;
 
-  const zoom = this.view.zoom ?? ArcMap.DEFAULT_ZOOM;
+  this.view.popupEnabled = this.popupComponentEnabled;
 
-  this.reflectOnlyZoom = zoom;
+  const popup = this.view.popup;
+  if (!popup) return;
 
-  this.dispatchEvent(
-    new CustomEvent<number>('zoom', {
-      detail: zoom,
-      bubbles: true,
-      composed: true
-    })
-  );
-
-  const centerPoint = this.view.center;
-  if (centerPoint) {
-    const center: LatLongPoint = {
-      latitude: ValidationService.validateLatitude(
-        centerPoint.latitude,
-        ArcMap.DEFAULT_CENTER_LATITUDE
-      ),
-      longitude: ValidationService.validateLongitude(
-        centerPoint.longitude,
-        ArcMap.DEFAULT_CENTER_LONGITUDE
-      )
-    };
-
-    this.reflectOnlyCenter = center;
-
-    this.dispatchEvent(
-      new CustomEvent<LatLongPoint>('center-change', {
-        detail: center,
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-
-  const currentExtent = this.view.extent;
-  if (!currentExtent) return;
-
-  const geographicExtent = webMercatorUtils.webMercatorToGeographic(currentExtent) as Extent;
-  if (!geographicExtent) return;
-
-  const extentToEmit: ArcMapExtent = {
-    bottomLatitude: geographicExtent.ymin,
-    topLatitude: geographicExtent.ymax,
-    leftLongitude: geographicExtent.xmin,
-    rightLongitude: geographicExtent.xmax
+  popup.visibleElements = {
+    ...popup.visibleElements,
+    closeButton: this.isPopupVisible
   };
 
-  this.reflectOnlyExtent = extentToEmit
-
-
-// =========================
-// CONTINUATION: parseValidateAndConvertLatLongPoint()
-// =========================
-
-private static parseValidateAndConvertLatLongPoint(
-  latLong: LatLongPoint | string
-): LatLongPoint | undefined {
-  let parsedLatLong: LatLongPoint;
-
-  if (typeof latLong === 'string') {
-    try {
-      parsedLatLong = JSON.parse(latLong) as LatLongPoint;
-    } catch (e) {
-      console.warn('Invalid center JSON');
-      return;
-    }
-  } else {
-    parsedLatLong = latLong;
-  }
-
-  if (!parsedLatLong) return;
-
-  if (
-    typeof parsedLatLong.latitude !== 'number' ||
-    typeof parsedLatLong.longitude !== 'number'
-  ) {
+  if (!this.popupComponentEnabled && popup.visible) {
+    popup.close();
     return;
   }
 
-  return {
-    latitude: Math.max(-85, Math.min(85, parsedLatLong.latitude)),
-    longitude: Math.max(-180, Math.min(180, parsedLatLong.longitude))
-  };
-}
-
-
-// =========================
-// ADD parseValidateAndConvertExtent()
-// =========================
-
-private static async parseValidateAndConvertExtent(
-  extent: ArcMapExtent | string
-): Promise<Extent> {
-  let parsed: ArcMapExtent;
-
-  if (typeof extent === 'string') {
-    try {
-      parsed = JSON.parse(extent);
-    } catch {
-      return Promise.reject('Invalid extent JSON');
-    }
-  } else {
-    parsed = extent;
+  if (this.usePopupContentOnly && this.customPopupContent) {
+    this.setPopupContent(this.customPopupContent, true);
   }
-
-  if (
-    !parsed ||
-    parsed.leftLongitude >= parsed.rightLongitude ||
-    parsed.bottomLatitude >= parsed.topLatitude
-  ) {
-    return Promise.reject('Invalid extent values');
-  }
-
-  return new Extent({
-    xmin: parsed.leftLongitude,
-    ymin: parsed.bottomLatitude,
-    xmax: parsed.rightLongitude,
-    ymax: parsed.topLatitude,
-    spatialReference: { wkid: 4326 } // CRITICAL FIX
-  });
-}
-
-
-// =========================
-// ADD updateBasemap()
-// =========================
-
-private async updateBasemap(newBasemap: string, oldBasemap: string): Promise<void> {
-  if (!this.map) return;
-
-  try {
-    this.map.basemap = newBasemap;
-  } catch (e) {
-    console.warn('Failed to update basemap', e);
-  }
-}
-
-
-// =========================
-// OPTIONAL BUT IMPORTANT FIX
-// Prevent center/extent conflict BEFORE render
-// =========================
-
-private getSafeCenter(): LatLongPoint | null {
-  if (this.extent) return null; // extent wins
-  return this.center as LatLongPoint;
-}
-
-
-// =========================
-// FINAL CRITICAL NOTE (NO CODE CHANGE BUT MUST FOLLOW)
-// =========================
-
-// ❌ DO NOT DO THIS ANYWHERE:
-// this.center = ...
-// this.extent = ...
-// this.zoom = ...
-
-// Inside:
-// - reflectCurrentMapState
-// - watchers
-// - update functions
-
-// ONLY dispatch events instead.
-
-private reflectCurrentMapState(): void {
-  if (!this.view) return;
-
-  const zoom = this.view.zoom ?? ArcMap.DEFAULT_ZOOM;
-
-  this.reflectOnlyZoom = zoom;
-
-  this.dispatchEvent(
-    new CustomEvent<number>('zoom', {
-      detail: zoom,
-      bubbles: true,
-      composed: true
-    })
-  );
-
-  const centerPoint = this.view.center;
-  if (centerPoint) {
-    const center: LatLongPoint = {
-      latitude: ValidationService.validateLatitude(
-        centerPoint.latitude,
-        ArcMap.DEFAULT_CENTER_LATITUDE
-      ),
-      longitude: ValidationService.validateLongitude(
-        centerPoint.longitude,
-        ArcMap.DEFAULT_CENTER_LONGITUDE
-      )
-    };
-
-    this.reflectOnlyCenter = center;
-
-    this.dispatchEvent(
-      new CustomEvent<LatLongPoint>('center-change', {
-        detail: center,
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-
-  const currentExtent = this.view.extent;
-  if (!currentExtent) return;
-
-  const geographicExtent = webMercatorUtils.webMercatorToGeographic(
-    currentExtent
-  ) as Extent | null;
-
-  if (!geographicExtent) return;
-
-  const extentToEmit: ArcMapExtent = {
-    bottomLatitude: geographicExtent.ymin,
-    topLatitude: geographicExtent.ymax,
-    leftLongitude: geographicExtent.xmin,
-    rightLongitude: geographicExtent.xmax
-  };
-
-  this.reflectOnlyExtent = extentToEmit;
-
-  this.dispatchEvent(
-    new CustomEvent<ArcMapExtent>('extent-change', {
-      detail: extentToEmit,
-      bubbles: true,
-      composed: true
-    })
-  );
 }
