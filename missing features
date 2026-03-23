@@ -469,3 +469,95 @@ private async initializeMap(): Promise<void> {
 //   const detail = (e as CustomEvent<MapTransientShapeCoordinates>).detail;
 //   console.log('mapDrawTransientShapeCoordinates', detail);
 // });
+
+private setupPopupBridge(): void {
+  if (!this.view?.popup) return;
+
+  const popup = this.view.popup;
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.features,
+      (features) => {
+        const popupFeatures = ((features ?? []) as Graphic[]);
+        this.popupFeatures = Array.from(popupFeatures);
+
+        const detail: PopupEvent = {
+          features: this.popupFeatures,
+          selectedIndex: popup.selectedFeatureIndex ?? 0
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        // No features found
+        if (!this.popupFeatures.length) {
+          const noFeaturesHtml =
+            `${this.popupCloseButton}` +
+            `<div class="popup-scrollable-content">` +
+            `<p>No features in this area</p>` +
+            `</div>`;
+
+          this.setPopupContent(noFeaturesHtml, true);
+          return;
+        }
+
+        this.rebuildPopupContent();
+      }
+    )
+  );
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.selectedFeatureIndex,
+      (selectedIndex) => {
+        const detail: PopupEvent = {
+          features: this.popupFeatures ?? [],
+          selectedIndex: selectedIndex ?? 0
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        if (!this.popupFeatures?.length) {
+          const noFeaturesHtml =
+            `${this.popupCloseButton}` +
+            `<div class="popup-scrollable-content">` +
+            `<p>No features in this area</p>` +
+            `</div>`;
+
+          this.setPopupContent(noFeaturesHtml, true);
+          return;
+        }
+
+        this.rebuildPopupContent();
+      }
+    )
+  );
+}
