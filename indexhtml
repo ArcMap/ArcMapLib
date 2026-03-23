@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Arc Map Test</title>
+
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      flex-wrap: wrap;
+      background: #f7f7f7;
+    }
+
+    .toolbar button {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    .layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .map-panel {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+    }
+
+    .side-panel {
+      width: 360px;
+      border-left: 1px solid #ddd;
+      padding: 12px;
+      overflow: auto;
+      box-sizing: border-box;
+      background: #fafafa;
+    }
+
+    .section {
+      margin-bottom: 16px;
+    }
+
+    .section h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+    }
+
+    .output-box {
+      padding: 10px;
+      border: 1px solid #ccc;
+      background: white;
+      min-height: 60px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    arc-map {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 500px;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="setCenterBtn">Set Center (Chicago)</button>
+    <button id="setExtentBtn">Set Extent (USA)</button>
+    <button id="clearExtentBtn">Clear Extent + Use Center</button>
+    <button id="drawPointBtn">Start Point Drawing</button>
+    <button id="drawPolylineBtn">Start Polyline Drawing</button>
+    <button id="drawPolygonBtn">Start Polygon Drawing</button>
+    <button id="stopDrawBtn">Stop Drawing</button>
+    <button id="toggleZoomBtn">Toggle Zoom</button>
+    <button id="toggleHomeBtn">Toggle Home</button>
+    <button id="toggleLocateBtn">Toggle Locate</button>
+    <button id="toggleScaleBarBtn">Toggle Scale Bar</button>
+  </div>
+
+  <div class="layout">
+    <div class="map-panel">
+      <arc-map
+        id="arcMap"
+        basemap="gray"
+        show-scale-bar
+      ></arc-map>
+    </div>
+
+    <div class="side-panel">
+      <div class="section">
+        <h3>Map Click</h3>
+        <div id="mapClickOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Extent Change</h3>
+        <div id="extentOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Popup Features Set</h3>
+        <div id="popupOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Transient Shape Coordinates</h3>
+        <div id="drawOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Zoom Event</h3>
+        <div id="zoomOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Center Change</h3>
+        <div id="centerOutput" class="output-box">Waiting...</div>
+      </div>
+
+      <div class="section">
+        <h3>Debug</h3>
+        <div id="debugOutput" class="output-box">Ready</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // IMPORTANT:
+    // Update this import path to your built component entry file.
+    // Examples:
+    // import './dist/src/index.js';
+    // import './dist/index.js';
+    // import '/src/index.ts';
+    import './src/index.js';
+
+    const arcMap = document.getElementById('arcMap');
+
+    const mapClickOutput = document.getElementById('mapClickOutput');
+    const extentOutput = document.getElementById('extentOutput');
+    const popupOutput = document.getElementById('popupOutput');
+    const drawOutput = document.getElementById('drawOutput');
+    const zoomOutput = document.getElementById('zoomOutput');
+    const centerOutput = document.getElementById('centerOutput');
+    const debugOutput = document.getElementById('debugOutput');
+
+    const setCenterBtn = document.getElementById('setCenterBtn');
+    const setExtentBtn = document.getElementById('setExtentBtn');
+    const clearExtentBtn = document.getElementById('clearExtentBtn');
+    const drawPointBtn = document.getElementById('drawPointBtn');
+    const drawPolylineBtn = document.getElementById('drawPolylineBtn');
+    const drawPolygonBtn = document.getElementById('drawPolygonBtn');
+    const stopDrawBtn = document.getElementById('stopDrawBtn');
+    const toggleZoomBtn = document.getElementById('toggleZoomBtn');
+    const toggleHomeBtn = document.getElementById('toggleHomeBtn');
+    const toggleLocateBtn = document.getElementById('toggleLocateBtn');
+    const toggleScaleBarBtn = document.getElementById('toggleScaleBarBtn');
+
+    function print(el, value) {
+      el.textContent =
+        typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    }
+
+    function logDebug(message, value) {
+      const prefix = `[${new Date().toLocaleTimeString()}] ${message}`;
+      debugOutput.textContent =
+        value === undefined
+          ? prefix
+          : `${prefix}\n${JSON.stringify(value, null, 2)}`;
+      console.log(message, value);
+    }
+
+    // Initial safe setup
+    arcMap.center = {
+      latitude: 41.8781,
+      longitude: -87.6298
+    };
+    arcMap.zoom = 8;
+
+    arcMap.showZoom = true;
+    arcMap.showHome = true;
+    arcMap.showLocate = true;
+    arcMap.showScaleBar = true;
+
+    // =========================================
+    // EVENT TESTING
+    // =========================================
+
+    arcMap.addEventListener('map-click', (event) => {
+      print(mapClickOutput, event.detail);
+      logDebug('map-click fired', event.detail);
+    });
+
+    // Backward compatibility if you dispatch camelCase too
+    arcMap.addEventListener('mapClick', (event) => {
+      logDebug('mapClick fired', event.detail);
+    });
+
+    arcMap.addEventListener('extent-change', (event) => {
+      print(extentOutput, event.detail);
+      logDebug('extent-change fired', event.detail);
+    });
+
+    arcMap.addEventListener('extentChange', (event) => {
+      logDebug('extentChange fired', event.detail);
+    });
+
+    arcMap.addEventListener('popup-features-set', (event) => {
+      print(popupOutput, event.detail);
+      logDebug('popup-features-set fired', event.detail);
+    });
+
+    arcMap.addEventListener('popupFeaturesSet', (event) => {
+      logDebug('popupFeaturesSet fired', event.detail);
+    });
+
+    arcMap.addEventListener('map-draw-transient-shape-coordinates', (event) => {
+      print(drawOutput, event.detail);
+      logDebug('map-draw-transient-shape-coordinates fired', event.detail);
+    });
+
+    arcMap.addEventListener('mapDrawTransientShapeCoordinates', (event) => {
+      logDebug('mapDrawTransientShapeCoordinates fired', event.detail);
+    });
+
+    arcMap.addEventListener('zoom', (event) => {
+      print(zoomOutput, event.detail);
+      logDebug('zoom fired', event.detail);
+    });
+
+    arcMap.addEventListener('center-change', (event) => {
+      print(centerOutput, event.detail);
+      logDebug('center-change fired', event.detail);
+    });
+
+    // =========================================
+    // BUTTON ACTIONS
+    // =========================================
+
+    setCenterBtn.addEventListener('click', () => {
+      arcMap.extent = null;
+      arcMap.center = {
+        latitude: 41.8781,
+        longitude: -87.6298
+      };
+      arcMap.zoom = 8;
+      logDebug('Center set to Chicago');
+    });
+
+    setExtentBtn.addEventListener('click', () => {
+      // extent takes priority over center in your component
+      arcMap.extent = {
+        leftLongitude: -125,
+        rightLongitude: -66,
+        bottomLatitude: 24,
+        topLatitude: 49
+      };
+      logDebug('Extent set to USA');
+    });
+
+    clearExtentBtn.addEventListener('click', () => {
+      arcMap.extent = null;
+      arcMap.center = {
+        latitude: 33.749,
+        longitude: -84.388
+      };
+      arcMap.zoom = 10;
+      logDebug('Extent cleared, center set to Atlanta');
+    });
+
+    drawPointBtn.addEventListener('click', async () => {
+      if (typeof arcMap.startTransientShapeDrawing === 'function') {
+        await arcMap.startTransientShapeDrawing('POINT');
+        logDebug('Started point drawing');
+      } else {
+        logDebug('startTransientShapeDrawing(POINT) not found on component');
+      }
+    });
+
+    drawPolylineBtn.addEventListener('click', async () => {
+      if (typeof arcMap.startTransientShapeDrawing === 'function') {
+        await arcMap.startTransientShapeDrawing('POLYLINE');
+        logDebug('Started polyline drawing');
+      } else {
+        logDebug('startTransientShapeDrawing(POLYLINE) not found on component');
+      }
+    });
+
+    drawPolygonBtn.addEventListener('click', async () => {
+      if (typeof arcMap.startTransientShapeDrawing === 'function') {
+        await arcMap.startTransientShapeDrawing('POLYGON');
