@@ -1,0 +1,471 @@
+private popupFeatures: Graphic[] = [];
+private drawTransientShapeTool!: SketchViewModel;
+private suspendExtentTracking = false;
+private reflectOnlyCenter?: LatLongPoint;
+private reflectOnlyExtent?: ArcMapExtent;
+private reflectOnlyZoom?: number;
+
+// ======================================================
+// ADD / KEEP THESE TYPES
+// ======================================================
+
+export interface LatLongPoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ArcMapExtent {
+  topLatitude: number;
+  bottomLatitude: number;
+  leftLongitude: number;
+  rightLongitude: number;
+}
+
+export interface PopupEvent {
+  features: Graphic[];
+  selectedIndex: number;
+}
+
+export interface MapTransientShapeCoordinates {
+  selectionCoordinates: number[][] | number[][][];
+}
+
+
+// ======================================================
+// ADD THESE METHODS TO YOUR ArcMap / UpMap CLASS
+// ======================================================
+
+private setupMapClickHandler(): void {
+  if (!this.view) return;
+
+  this.eventHandles.add(
+    this.view.on('click', (event) => {
+      if (!this.view || !event.mapPoint) return;
+
+      const geographicPoint = webMercatorUtils.webMercatorToGeographic(
+        event.mapPoint
+      ) as Point | null;
+
+      if (!geographicPoint) return;
+
+      const latLongPoint: LatLongPoint = {
+        latitude: ValidationService.validateLatitude(
+          geographicPoint.latitude,
+          ArcMap.DEFAULT_CENTER_LATITUDE
+        ),
+        longitude: ValidationService.validateLongitude(
+          geographicPoint.longitude,
+          ArcMap.DEFAULT_CENTER_LONGITUDE
+        )
+      };
+
+      // New Lit-style event
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>('map-click', {
+          detail: latLongPoint,
+          bubbles: true,
+          composed: true
+        })
+      );
+
+      // Backward-compatible Stencil-style event name
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>('mapClick', {
+          detail: latLongPoint,
+          bubbles: true,
+          composed: true
+        })
+      );
+    })
+  );
+}
+
+private setupPopupBridge(): void {
+  if (!this.view?.popup) return;
+
+  const popup = this.view.popup;
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.features,
+      (features) => {
+        const popupFeatures = ((features ?? []) as Graphic[]);
+        this.popupFeatures = Array.from(popupFeatures);
+
+        const detail: PopupEvent = {
+          features: this.popupFeatures,
+          selectedIndex: popup.selectedFeatureIndex ?? 0
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.rebuildPopupContent();
+      }
+    )
+  );
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => popup.selectedFeatureIndex,
+      (selectedIndex) => {
+        const detail: PopupEvent = {
+          features: this.popupFeatures ?? [],
+          selectedIndex: selectedIndex ?? 0
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popup-features-set', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>('popupFeaturesSet', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.rebuildPopupContent();
+      }
+    )
+  );
+}
+
+private emitTransientShapeCoordinates(geometry: Geometry | null | undefined): void {
+  if (!geometry) return;
+
+  let selectionCoordinates: number[][] | number[][][] | null = null;
+
+  if (geometry.type === 'point') {
+    const point = geometry as Point;
+    selectionCoordinates = [[point.longitude, point.latitude]];
+  } else if (geometry.type === 'polyline') {
+    const polyline = geometry as Polyline;
+    const geographic = webMercatorUtils.webMercatorToGeographic(polyline) as Polyline;
+    selectionCoordinates = geographic.paths?.[0] ?? null;
+  } else if (geometry.type === 'polygon') {
+    const polygon = geometry as Polygon;
+    const geographic = webMercatorUtils.webMercatorToGeographic(polygon) as Polygon;
+    selectionCoordinates = geographic.rings ?? null;
+  }
+
+  if (!selectionCoordinates) return;
+
+  const detail: MapTransientShapeCoordinates = {
+    selectionCoordinates
+  };
+
+  this.dispatchEvent(
+    new CustomEvent<MapTransientShapeCoordinates>('map-draw-transient-shape-coordinates', {
+      detail,
+      bubbles: true,
+      composed: true
+    })
+  );
+
+  this.dispatchEvent(
+    new CustomEvent<MapTransientShapeCoordinates>('mapDrawTransientShapeCoordinates', {
+      detail,
+      bubbles: true,
+      composed: true
+    })
+  );
+}
+
+private setupDrawTool(): void {
+  this.drawTransientShapeTool = new SketchViewModel({
+    view: this.view,
+    layer: this.drawLayer,
+    defaultCreateOptions: {
+      hasZ: false
+    },
+    pointSymbol: {
+      type: 'simple-marker',
+      style: 'circle',
+      size: 10,
+      color: [0, 122, 194, 1],
+      outline: {
+        color: [255, 255, 255, 1],
+        width: 1
+      }
+    },
+    polylineSymbol: {
+      type: 'simple-line',
+      color: [0, 122, 194, 1],
+      width: 2
+    },
+    polygonSymbol: {
+      type: 'simple-fill',
+      color: [0, 122, 194, 0.15],
+      outline: {
+        color: [0, 122, 194, 1],
+        width: 2
+      }
+    }
+  });
+
+  this.drawTransientShapeTool.on('create', (event) => {
+    if (event.state === 'active' || event.state === 'complete') {
+      this.emitTransientShapeCoordinates(event.graphic?.geometry);
+    }
+  });
+}
+
+private setupViewWatchers(): void {
+  if (!this.view) return;
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.zoom,
+      (newZoom, oldZoom) => {
+        if (
+          typeof newZoom === 'number' &&
+          typeof oldZoom === 'number' &&
+          newZoom !== oldZoom
+        ) {
+          this.reflectOnlyZoom = newZoom;
+
+          this.dispatchEvent(
+            new CustomEvent<number>('zoom', {
+              detail: newZoom,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      }
+    )
+  );
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.extent,
+      (newExtent) => {
+        if (!newExtent) return;
+        if (this.suspendExtentTracking) return;
+
+        this.reflectCurrentMapState();
+      }
+    )
+  );
+
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.center,
+      (newCenter) => {
+        if (!newCenter) return;
+        if (this.suspendExtentTracking) return;
+
+        const center: LatLongPoint = {
+          latitude: ValidationService.validateLatitude(
+            newCenter.latitude,
+            ArcMap.DEFAULT_CENTER_LATITUDE
+          ),
+          longitude: ValidationService.validateLongitude(
+            newCenter.longitude,
+            ArcMap.DEFAULT_CENTER_LONGITUDE
+          )
+        };
+
+        this.reflectOnlyCenter = center;
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>('center-change', {
+            detail: center,
+            bubbles: true,
+            composed: true
+          })
+        );
+      }
+    )
+  );
+}
+
+private reflectCurrentMapState(): void {
+  if (!this.view) return;
+
+  const zoom = this.view.zoom ?? ArcMap.DEFAULT_ZOOM;
+  this.reflectOnlyZoom = zoom;
+
+  this.dispatchEvent(
+    new CustomEvent<number>('zoom', {
+      detail: zoom,
+      bubbles: true,
+      composed: true
+    })
+  );
+
+  const centerPoint = this.view.center;
+  if (centerPoint) {
+    const center: LatLongPoint = {
+      latitude: ValidationService.validateLatitude(
+        centerPoint.latitude,
+        ArcMap.DEFAULT_CENTER_LATITUDE
+      ),
+      longitude: ValidationService.validateLongitude(
+        centerPoint.longitude,
+        ArcMap.DEFAULT_CENTER_LONGITUDE
+      )
+    };
+
+    this.reflectOnlyCenter = center;
+
+    this.dispatchEvent(
+      new CustomEvent<LatLongPoint>('center-change', {
+        detail: center,
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+
+  const currentExtent = this.view.extent;
+  if (!currentExtent) return;
+
+  const geographicExtent = webMercatorUtils.webMercatorToGeographic(
+    currentExtent
+  ) as Extent | null;
+
+  if (!geographicExtent) return;
+
+  const extentToEmit: ArcMapExtent = {
+    bottomLatitude: geographicExtent.ymin,
+    topLatitude: geographicExtent.ymax,
+    leftLongitude: geographicExtent.xmin,
+    rightLongitude: geographicExtent.xmax
+  };
+
+  this.reflectOnlyExtent = extentToEmit;
+
+  // New Lit-style event
+  this.dispatchEvent(
+    new CustomEvent<ArcMapExtent>('extent-change', {
+      detail: extentToEmit,
+      bubbles: true,
+      composed: true
+    })
+  );
+
+  // Backward-compatible Stencil-style event name
+  this.dispatchEvent(
+    new CustomEvent<ArcMapExtent>('extentChange', {
+      detail: extentToEmit,
+      bubbles: true,
+      composed: true
+    })
+  );
+}
+
+
+// ======================================================
+// CALL THESE FROM initializeMap()
+// ======================================================
+
+private async initializeMap(): Promise<void> {
+  this.map = new ArcGISMap({
+    basemap: this.basemap || ArcMap.DEFAULT_BASEMAP
+  });
+
+  this.view = new MapView({
+    container: this.internalDivElement,
+    map: this.map,
+    zoom: typeof this.zoom === 'number' ? this.zoom : ArcMap.DEFAULT_ZOOM,
+    constraints: {
+      minZoom: typeof this.minZoom === 'number' ? this.minZoom : 0,
+      maxZoom: typeof this.maxZoom === 'number' ? this.maxZoom : 23
+    },
+    popup: {
+      dockEnabled: false,
+      visibleElements: {
+        closeButton: this.isPopupVisible
+      }
+    }
+  });
+
+  await this.view.when();
+
+  this.setupMapClickHandler();
+  this.setupViewWatchers();
+  this.setupPopupBridge();
+
+  if (this.extent) {
+    await this.updateExtent(this.extent);
+  } else if (this.center) {
+    await this.updateCenter(this.center);
+  }
+
+  this.syncMouseWheelZoom();
+  this.syncDoubleClickZoom();
+  this.syncKeyboardNavigation();
+  this.syncPopupOptions();
+
+  if (this.showZoom) await this.showZoomSlider();
+  if (this.showHome) await this.showHomeMethod();
+  if (this.showLocate) await this.showLocateMethod();
+  if (this.showScaleBar) await this.showScaleBarMethod();
+
+  this.resolveMapReady();
+}
+
+
+// ======================================================
+// OPTIONAL: EXAMPLE EVENT LISTENING USAGE
+// ======================================================
+
+// arcMapEl.addEventListener('map-click', (e: Event) => {
+//   const detail = (e as CustomEvent<LatLongPoint>).detail;
+//   console.log('map-click', detail);
+// });
+
+// arcMapEl.addEventListener('mapClick', (e: Event) => {
+//   const detail = (e as CustomEvent<LatLongPoint>).detail;
+//   console.log('mapClick', detail);
+// });
+
+// arcMapEl.addEventListener('extent-change', (e: Event) => {
+//   const detail = (e as CustomEvent<ArcMapExtent>).detail;
+//   console.log('extent-change', detail);
+// });
+
+// arcMapEl.addEventListener('extentChange', (e: Event) => {
+//   const detail = (e as CustomEvent<ArcMapExtent>).detail;
+//   console.log('extentChange', detail);
+// });
+
+// arcMapEl.addEventListener('popup-features-set', (e: Event) => {
+//   const detail = (e as CustomEvent<PopupEvent>).detail;
+//   console.log('popup-features-set', detail);
+// });
+
+// arcMapEl.addEventListener('popupFeaturesSet', (e: Event) => {
+//   const detail = (e as CustomEvent<PopupEvent>).detail;
+//   console.log('popupFeaturesSet', detail);
+// });
+
+// arcMapEl.addEventListener('map-draw-transient-shape-coordinates', (e: Event) => {
+//   const detail = (e as CustomEvent<MapTransientShapeCoordinates>).detail;
+//   console.log('map-draw-transient-shape-coordinates', detail);
+// });
+
+// arcMapEl.addEventListener('mapDrawTransientShapeCoordinates', (e: Event) => {
+//   const detail = (e as CustomEvent<MapTransientShapeCoordinates>).detail;
+//   console.log('mapDrawTransientShapeCoordinates', detail);
+// });
