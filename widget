@@ -229,7 +229,55 @@ export class ArcMap extends LitElement {
 
     this.map = null;
   }
+import * as reactiveUtils from '@arcgis/core/core/reactiveUtils';
 
+this.eventHandles.add(
+  reactiveUtils.watch(
+    () => popup.features,
+    (features) => {
+      const popupFeatures = (features ?? []) as Graphic[];
+      this.popupFeatures = Array.from(popupFeatures);
+      this.localPopupContent = null;
+
+      const detail: PopupEvent = {
+        features: this.popupFeatures,
+        selectedIndex: popup.selectedFeatureIndex ?? 0,
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<PopupEvent>('popup-features-set', {
+          detail,
+          bubbles: true,
+          composed: true,
+        })
+      );
+
+      this.rebuildPopupContent();
+    }
+  )
+);
+
+this.eventHandles.add(
+  reactiveUtils.watch(
+    () => popup.selectedFeatureIndex,
+    () => {
+      this.rebuildPopupContent();
+
+      const detail: PopupEvent = {
+        features: this.popupFeatures,
+        selectedIndex: popup.selectedFeatureIndex ?? 0,
+      };
+
+      this.dispatchEvent(
+        new CustomEvent<PopupEvent>('popup-selection-changed', {
+          detail,
+          bubbles: true,
+          composed: true,
+        })
+      );
+    }
+  )
+);
   render() {
     return html`<div id="viewDiv"></div>`;
   }
