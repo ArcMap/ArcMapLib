@@ -91,3 +91,30 @@ private syncPopupOptions(): void {
     this.setPopupContent(this.customPopupContent, true);
   }
 }
+
+
+render() {
+  const parsedCenter = this.center
+    ? [this.center.longitude, this.center.latitude]
+    : undefined;
+
+  const parsedExtent = this.extent
+    ? {
+        xmin: this.extent.leftLongitude,
+        ymin: this.extent.bottomLatitude,
+        xmax: this.extent.rightLongitude,
+        ymax: this.extent.topLatitude,
+        spatialReference: { wkid: 4326 }
+      }
+    : undefined;
+
+  return html`
+    <arcgis-map
+      basemap=${this.basemap ?? 'gray'}
+      .extent=${parsedExtent}
+      .center=${!parsedExtent ? parsedCenter : undefined}
+      .zoom=${!parsedExtent ? this.zoom : undefined}
+    >
+    </arcgis-map>
+  `;
+}
