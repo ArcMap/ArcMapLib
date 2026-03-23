@@ -564,3 +564,65 @@ private setupPopupBridge(): void {
   );
 }
 
+
+// =====================================================
+// PROPERTIES
+// =====================================================
+
+@property({ type: Boolean })
+showZoom = true;
+
+@property({ type: Boolean })
+showHome = false;
+
+@property({ type: Boolean })
+showLocate = false;
+
+@property({ type: Boolean })
+showScaleBar = false;
+
+
+// =====================================================
+// PUBLIC METHODS
+// =====================================================
+
+public async showZoomSlider(): Promise<void> {
+  this.showZoom = true;
+  await this.updateComplete;
+}
+
+public async hideZoomSlider(): Promise<void> {
+  this.showZoom = false;
+  await this.updateComplete;
+}
+
+public async showHomeMethod(): Promise<void> {
+  this.showHome = true;
+  await this.updateComplete;
+}
+
+public async hideHomeMethod(): Promise<void> {
+  this.showHome = false;
+  await this.updateComplete;
+}
+
+public async showLocateMethod(): Promise<void> {
+  this.showLocate = true;
+  await this.updateComplete;
+}
+
+public async hideLocateMethod(): Promise<void> {
+  this.showLocate = false;
+  await this.updateComplete;
+}
+
+public async showScaleBarMethod(): Promise<void> {
+  this.showScaleBar = true;
+  await this.updateComplete;
+}
+
+public async hideScaleBar(): Promise<void> {
+  this.showScaleBar = false;
+  await this.updateComplete;
+}
+
