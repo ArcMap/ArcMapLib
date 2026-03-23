@@ -149,7 +149,7 @@ export class ArcMap extends LitElement {
   }
 
   override async firstUpdated(): Promise<void> {
-    await this.connectArcgisMapView();
+    await this.initializeMap();
   }
 
   override disconnectedCallback(): void {
@@ -157,8 +157,12 @@ export class ArcMap extends LitElement {
     this.eventHandles.removeAll();
   }
 
-  private async connectArcgisMapView(): Promise<void> {
+  // =========================================
+  // OLD NAME RESTORED
+  // =========================================
+  private async initializeMap(): Promise<void> {
     const view = await this.waitForView();
+
     if (!view) {
       console.warn('arcgis-map view not available');
       return;
