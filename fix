@@ -172,3 +172,70 @@ render() {
     </div>
   `;
 }
+
+
+
+
+render() {
+  // ---------- SAFE CENTER ----------
+  const parsedCenter =
+    this.center &&
+    typeof this.center === 'object' &&
+    'longitude' in this.center &&
+    'latitude' in this.center &&
+    typeof this.center.longitude === 'number' &&
+    typeof this.center.latitude === 'number'
+      ? [this.center.longitude, this.center.latitude]
+      : undefined;
+
+  // ---------- SAFE EXTENT ----------
+  const isValidExtentObject =
+    this.extent &&
+    typeof this.extent === 'object' &&
+    'leftLongitude' in this.extent &&
+    'rightLongitude' in this.extent &&
+    'topLatitude' in this.extent &&
+    'bottomLatitude' in this.extent;
+
+  const parsedExtent =
+    isValidExtentObject &&
+    typeof this.extent.leftLongitude === 'number' &&
+    typeof this.extent.rightLongitude === 'number' &&
+    typeof this.extent.topLatitude === 'number' &&
+    typeof this.extent.bottomLatitude === 'number'
+      ? {
+          xmin: this.extent.leftLongitude,
+          ymin: this.extent.bottomLatitude,
+          xmax: this.extent.rightLongitude,
+          ymax: this.extent.topLatitude,
+          spatialReference: { wkid: 4326 }
+        }
+      : undefined;
+
+  // ---------- RENDER ----------
+  return html`
+    <div class="map-wrapper">
+      <arcgis-map
+        class="map"
+        .basemap=${this.basemap ?? 'gray'}
+
+        ${parsedExtent
+          ? html` .extent=${parsedExtent} `
+          : parsedCenter
+          ? html`
+              .center=${parsedCenter}
+              .zoom=${this.zoom}
+            `
+          : html`
+              .center=${[-98, 39]}
+              .zoom=${4}
+            `}
+
+        .maxZoom=${this.maxZoom}
+        .minZoom=${this.minZoom}
+      >
+      </arcgis-map>
+    </div>
+  `;
+}
+
