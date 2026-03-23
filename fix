@@ -555,3 +555,54 @@ private async updateExtent(extentInput?: any): Promise<void> {
 }
 }
 
+
+
+import Extent from "@arcgis/core/geometry/Extent";
+import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+
+private async updateExtent(extentInput?: UpMapExtent | string | null): Promise<void> {
+  if (!this.view || !extentInput) return;
+
+  let extentObj: UpMapExtent;
+
+  try {
+    extentObj =
+      typeof extentInput === "string"
+        ? JSON.parse(extentInput)
+        : extentInput;
+  } catch {
+    console.error("Invalid extent JSON");
+    return;
+  }
+
+  const {
+    leftLongitude,
+    rightLongitude,
+    bottomLatitude,
+    topLatitude
+  } = extentObj;
+
+  // 🚨 Validate
+  if (
+    leftLongitude == null ||
+    rightLongitude == null ||
+    bottomLatitude == null ||
+    topLatitude == null
+  ) {
+    console.error("Invalid extent values", extentObj);
+    return;
+  }
+
+  // ✅ Convert to ArcGIS Extent
+  const arcgisExtent = new Extent({
+    xmin: leftLongitude,
+    xmax: rightLongitude,
+    ymin: bottomLatitude,
+    ymax: topLatitude,
+    spatialReference: new SpatialReference({ wkid: 4326 }) // VERY IMPORTANT
+  });
+
+  // ✅ Use goTo safely
+  await this.view.goTo(arcgisExtent);
+}
+
