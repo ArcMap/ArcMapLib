@@ -1,0 +1,387 @@
+import { LitElement, html, css } from 'lit';
+import { customElement, property, query } from 'lit/decorators.js';
+
+import type MapView from '@arcgis/core/views/MapView';
+import type Point from '@arcgis/core/geometry/Point';
+import type Extent from '@arcgis/core/geometry/Extent';
+import type Graphic from '@arcgis/core/Graphic';
+
+import * as reactiveUtils from '@arcgis/core/core/reactiveUtils';
+import Handles from '@arcgis/core/core/Handles';
+import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
+
+export interface LatLongPoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ArcMapExtent {
+  topLatitude: number;
+  bottomLatitude: number;
+  leftLongitude: number;
+  rightLongitude: number;
+}
+
+export interface PopupEvent {
+  features: Graphic[];
+  selectedIndex: number;
+}
+
+@customElement('arc-map')
+export class ArcMap extends LitElement {
+  static override styles = css`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 400px;
+    }
+
+    .map-wrapper {
+      width: 100%;
+      height: 100%;
+    }
+
+    .map {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  `;
+
+  static readonly DEFAULT_BASEMAP = 'gray';
+  static readonly DEFAULT_ZOOM = 4;
+  static readonly DEFAULT_CENTER_LATITUDE = 39;
+  static readonly DEFAULT_CENTER_LONGITUDE = -98;
+
+  @property({ type: String, reflect: true })
+  basemap = ArcMap.DEFAULT_BASEMAP;
+
+  @property({ attribute: false })
+  center: LatLongPoint | null = {
+    latitude: ArcMap.DEFAULT_CENTER_LATITUDE,
+    longitude: ArcMap.DEFAULT_CENTER_LONGITUDE
+  };
+
+  @property({ attribute: false })
+  extent: ArcMapExtent | null = null;
+
+  @property({ type: Number, reflect: true })
+  zoom = ArcMap.DEFAULT_ZOOM;
+
+  @property({ type: Number })
+  minZoom = 0;
+
+  @property({ type: Number })
+  maxZoom = 23;
+
+  @property({ type: Boolean })
+  showZoom = true;
+
+  @property({ type: Boolean })
+  showHome = false;
+
+  @property({ type: Boolean })
+  showLocate = false;
+
+  @property({ type: Boolean })
+  showScaleBar = false;
+
+  @property({ type: Boolean })
+  isPopupVisible = true;
+
+  @property({ type: Boolean })
+  popupComponentEnabled = true;
+
+  @query('#arcgisMap')
+  private arcgisMapElement!: HTMLElement & { view?: MapView };
+
+  private view?: MapView;
+  private eventHandles = new Handles();
+  private popupFeatures: Graphic[] = [];
+
+  override render() {
+    const parsedCenter = this.center
+      ? [this.center.longitude, this.center.latitude]
+      : undefined;
+
+    const parsedExtent = this.extent
+      ? {
+          xmin: this.extent.leftLongitude,
+          ymin: this.extent.bottomLatitude,
+          xmax: this.extent.rightLongitude,
+          ymax: this.extent.topLatitude,
+          spatialReference: { wkid: 4326 }
+        }
+      : undefined;
+
+    return html`
+      <div class="map-wrapper">
+        <arcgis-map
+          id="arcgisMap"
+          class="map"
+          .basemap=${this.basemap || ArcMap.DEFAULT_BASEMAP}
+          .extent=${parsedExtent}
+          .center=${!parsedExtent ? parsedCenter : undefined}
+          .zoom=${!parsedExtent ? this.zoom : undefined}
+          .minZoom=${this.minZoom}
+          .maxZoom=${this.maxZoom}
+          .popupDisabled=${!this.popupComponentEnabled}
+        >
+          ${this.showHome
+            ? html`<arcgis-home position="bottom-left"></arcgis-home>`
+            : ''}
+
+          ${this.showLocate
+            ? html`<arcgis-locate position="bottom-left"></arcgis-locate>`
+            : ''}
+
+          ${this.showZoom
+            ? html`<arcgis-zoom position="bottom-left"></arcgis-zoom>`
+            : ''}
+
+          ${this.showScaleBar
+            ? html`<arcgis-scale-bar position="bottom-left" unit="dual"></arcgis-scale-bar>`
+            : ''}
+        </arcgis-map>
+      </div>
+    `;
+  }
+
+  override async firstUpdated(): Promise<void> {
+    await this.connectArcgisMapView();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.eventHandles.removeAll();
+  }
+
+  private async connectArcgisMapView(): Promise<void> {
+    const view = await this.waitForView();
+    if (!view) {
+      console.warn('arcgis-map view not available');
+      return;
+    }
+
+    this.view = view;
+
+    this.setupMapClickHandler();
+    this.setupViewWatchers();
+    this.setupPopupBridge();
+    this.syncPopupOptions();
+  }
+
+  private async waitForView(): Promise<MapView | undefined> {
+    for (let i = 0; i < 50; i += 1) {
+      if (this.arcgisMapElement?.view) {
+        return this.arcgisMapElement.view;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return undefined;
+  }
+
+  private setupMapClickHandler(): void {
+    if (!this.view) return;
+
+    this.eventHandles.add(
+      this.view.on('click', (event) => {
+        if (!event.mapPoint) return;
+
+        const geographicPoint = webMercatorUtils.webMercatorToGeographic(
+          event.mapPoint
+        ) as Point | null;
+
+        if (
+          !geographicPoint ||
+          typeof geographicPoint.latitude !== 'number' ||
+          typeof geographicPoint.longitude !== 'number'
+        ) {
+          return;
+        }
+
+        const detail: LatLongPoint = {
+          latitude: geographicPoint.latitude,
+          longitude: geographicPoint.longitude
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>('map-click', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>('mapClick', {
+            detail,
+            bubbles: true,
+            composed: true
+          })
+        );
+      })
+    );
+  }
+
+  private setupViewWatchers(): void {
+    if (!this.view) return;
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => this.view?.extent,
+        (extent) => {
+          if (!extent) return;
+
+          const geographicExtent = webMercatorUtils.webMercatorToGeographic(
+            extent
+          ) as Extent | null;
+
+          if (!geographicExtent) return;
+
+          const detail: ArcMapExtent = {
+            leftLongitude: geographicExtent.xmin,
+            rightLongitude: geographicExtent.xmax,
+            bottomLatitude: geographicExtent.ymin,
+            topLatitude: geographicExtent.ymax
+          };
+
+          this.dispatchEvent(
+            new CustomEvent<ArcMapExtent>('extent-change', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+
+          this.dispatchEvent(
+            new CustomEvent<ArcMapExtent>('extentChange', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      )
+    );
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => this.view?.center,
+        (center) => {
+          if (!center) return;
+          if (
+            typeof center.latitude !== 'number' ||
+            typeof center.longitude !== 'number'
+          ) {
+            return;
+          }
+
+          const detail: LatLongPoint = {
+            latitude: center.latitude,
+            longitude: center.longitude
+          };
+
+          this.dispatchEvent(
+            new CustomEvent<LatLongPoint>('center-change', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      )
+    );
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => this.view?.zoom,
+        (zoom) => {
+          if (typeof zoom !== 'number') return;
+
+          this.dispatchEvent(
+            new CustomEvent<number>('zoom', {
+              detail: zoom,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      )
+    );
+  }
+
+  private setupPopupBridge(): void {
+    if (!this.view?.popup) return;
+
+    const popup = this.view.popup;
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => popup.features,
+        (features) => {
+          this.popupFeatures = Array.from((features ?? []) as Graphic[]);
+
+          const detail: PopupEvent = {
+            features: this.popupFeatures,
+            selectedIndex: popup.selectedFeatureIndex ?? 0
+          };
+
+          this.dispatchEvent(
+            new CustomEvent<PopupEvent>('popup-features-set', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+
+          this.dispatchEvent(
+            new CustomEvent<PopupEvent>('popupFeaturesSet', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      )
+    );
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => popup.selectedFeatureIndex,
+        (selectedIndex) => {
+          const detail: PopupEvent = {
+            features: this.popupFeatures,
+            selectedIndex: selectedIndex ?? 0
+          };
+
+          this.dispatchEvent(
+            new CustomEvent<PopupEvent>('popup-features-set', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+
+          this.dispatchEvent(
+            new CustomEvent<PopupEvent>('popupFeaturesSet', {
+              detail,
+              bubbles: true,
+              composed: true
+            })
+          );
+        }
+      )
+    );
+  }
+
+  private syncPopupOptions(): void {
+    if (!this.view?.popup) return;
+
+    this.view.popup.visibleElements = {
+      ...this.view.popup.visibleElements,
+      closeButton: this.isPopupVisible
+    };
+  }
+}
