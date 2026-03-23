@@ -402,4 +402,44 @@ private async updateExtent(extent: ArcMapExtent | string | null): Promise<void> 
   render() {
     return html`<div id="viewDiv"></div>`;
   }
+
+private async updateCenter(newCenter: LatLongPoint | string | null): Promise<void> {
+  if (!this.view || !newCenter) return;
+
+  if (
+    typeof newCenter === 'object' &&
+    newCenter !== null &&
+    'leftLongitude' in newCenter
+  ) {
+    console.warn('updateCenter received an extent object instead of a center:', newCenter);
+    return;
+  }
+
+  if (
+    this.reflectOnlyCenter &&
+    ArcMap.areLatLongEqual(this.reflectOnlyCenter, newCenter)
+  ) {
+    return;
+  }
+
+  const validCenter = ArcMap.parseValidateAndConvertLatLongPoint(newCenter);
+  if (!validCenter) return;
+
+  this.pendingExtentChanges = this.pendingExtentChanges.then(async () => {
+    this.reflectOnlyCenter = undefined;
+
+    try {
+      await this.view.goTo(
+        {
+          center: [validCenter.longitude, validCenter.latitude]
+        },
+        { animate: false }
+      );
+    } catch (e) {
+      console.warn('Failed to update center', e);
+    }
+  });
+
+  await this.pendingExtentChanges;
+}
 }
