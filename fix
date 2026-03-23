@@ -459,5 +459,99 @@
   private static validateLongitude(value: unknown, fallback: number): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   }
+
+
+private async updateCenter(newCenter: LatLongPoint | string | null): Promise<void> {
+  if (!this.view || !newCenter) return;
+
+  // ❌ Prevent extent object being passed as center (VERY IMPORTANT)
+  if (
+    typeof newCenter === 'object' &&
+    newCenter !== null &&
+    'leftLongitude' in newCenter
+  ) {
+    console.warn('Skipping invalid center (looks like extent):', newCenter);
+    return;
+  }
+
+  let latitude: number | undefined;
+  let longitude: number | undefined;
+
+  if (typeof newCenter === 'string') {
+    try {
+      const parsed = JSON.parse(newCenter);
+      latitude = parsed.latitude;
+      longitude = parsed.longitude;
+    } catch {
+      console.warn('Invalid center JSON');
+      return;
+    }
+  } else {
+    latitude = newCenter.latitude;
+    longitude = newCenter.longitude;
+  }
+
+  // ❌ HARD VALIDATION (THIS FIXES YOUR CRASH)
+  if (
+    typeof latitude !== 'number' ||
+    typeof longitude !== 'number' ||
+    isNaN(latitude) ||
+    isNaN(longitude)
+  ) {
+    console.warn('Invalid center values:', newCenter);
+    return;
+  }
+
+  try {
+    await this.view.goTo(
+      {
+        center: [longitude, latitude]
+      },
+      { animate: false }
+    );
+  } catch (e) {
+    console.warn('Center update failed:', e);
+  }
+}
+
+private async updateExtent(extentInput?: any): Promise<void> {
+  if (!this.view || !extentInput) return;
+
+  let extent: Extent | null = null;
+
+  if (typeof extentInput === 'string') {
+    try {
+      extentInput = JSON.parse(extentInput);
+    } catch {
+      console.warn('Invalid extent JSON');
+      return;
+    }
+  }
+
+  // ❌ HARD VALIDATION
+  if (
+    typeof extentInput.leftLongitude !== 'number' ||
+    typeof extentInput.rightLongitude !== 'number' ||
+    typeof extentInput.bottomLatitude !== 'number' ||
+    typeof extentInput.topLatitude !== 'number'
+  ) {
+    console.warn('Invalid extent values:', extentInput);
+    return;
+  }
+
+  extent = new Extent({
+    xmin: extentInput.leftLongitude,
+    xmax: extentInput.rightLongitude,
+    ymin: extentInput.bottomLatitude,
+    ymax: extentInput.topLatitude,
+    spatialReference: { wkid: 4326 }
+  });
+
+  try {
+    await this.view.goTo(extent, { animate: false });
+  } catch (e) {
+    console.warn('Extent update failed:', e);
+  }
+}
 }
 
