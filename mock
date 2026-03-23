@@ -1,6 +1,20 @@
-import { ArcMap } from './map';
+/**
+ * @jest-environment jsdom
+ */
+
+import { html } from 'lit';
+import { UpMap } from './map';
 import * as reactiveUtils from '@arcgis/core/core/reactiveUtils';
 import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
+
+import type Point from '@arcgis/core/geometry/Point';
+import type Polyline from '@arcgis/core/geometry/Polyline';
+import type Polygon from '@arcgis/core/geometry/Polygon';
+import type Graphic from '@arcgis/core/Graphic';
+
+// --------------------------------------------------
+// ARC GIS MOCKS
+// --------------------------------------------------
 
 jest.mock('@arcgis/core/core/reactiveUtils', () => ({
   watch: jest.fn()
@@ -10,26 +24,52 @@ jest.mock('@arcgis/core/geometry/support/webMercatorUtils', () => ({
   webMercatorToGeographic: jest.fn()
 }));
 
-describe('ArcMap', () => {
-  let component: ArcMap;
+// --------------------------------------------------
+// TYPES USED IN TESTS
+// --------------------------------------------------
 
-  let mockView: any;
-  let mockMapElement: any;
-  let mockMouseWheelHandle: { remove: jest.Mock };
-  let mockClickHandle: { remove: jest.Mock };
-  let mockPopup: any;
+type EventHandle = {
+  remove: jest.Mock;
+};
+
+type MockPopup = {
+  features: Graphic[];
+  selectedFeatureIndex: number;
+  visibleElements: Record<string, unknown>;
+};
+
+type MockView = {
+  when: jest.Mock<Promise<void>, []>;
+  on: jest.Mock;
+  zoom: number;
+  popup: MockPopup;
+  navigation: Record<string, unknown>;
+  __handlers?: Record<string, Function[]>;
+};
+
+type MockArcgisMapElement = HTMLElement & {
+  view?: MockView;
+};
+
+// --------------------------------------------------
+// TEST SUITE
+// --------------------------------------------------
+
+describe('UpMap', () => {
+  let component: UpMap;
+  let mockView: MockView;
+  let mockPopup: MockPopup;
+  let mockMapEl: MockArcgisMapElement;
+
+  let eventHandlesAddSpy: jest.Mock;
+  let eventHandlesRemoveSpy: jest.Mock;
+  let eventHandlesRemoveAllSpy: jest.Mock;
+
+  const createHandle = (): EventHandle => ({
+    remove: jest.fn()
+  });
 
   beforeEach(() => {
-    component = new ArcMap();
-
-    mockMouseWheelHandle = {
-      remove: jest.fn()
-    };
-
-    mockClickHandle = {
-      remove: jest.fn()
-    };
-
     mockPopup = {
       features: [],
       selectedFeatureIndex: 0,
@@ -40,337 +80,574 @@ describe('ArcMap', () => {
 
     mockView = {
       when: jest.fn().mockResolvedValue(undefined),
-      on: jest.fn((eventName: string, handler: (...args: any[]) => void) => {
-        if (eventName === 'mouse-wheel') {
-          mockView.__mouseWheelHandler = handler;
-          return mockMouseWheelHandle;
-        }
-
-        if (eventName === 'click') {
-          mockView.__clickHandler = handler;
-          return mockClickHandle;
-        }
-
-        return { remove: jest.fn() };
-      }),
       zoom: 4,
-      popup: mockPopup
+      popup: mockPopup,
+      navigation: {},
+      __handlers: {},
+      on: jest.fn((eventName: string, ...args: unknown[]) => {
+        const maybeHandler = args[args.length - 1];
+        if (typeof maybeHandler === 'function') {
+          if (!mockView.__handlers![eventName]) {
+            mockView.__handlers![eventName] = [];
+          }
+          mockView.__handlers![eventName].push(maybeHandler as Function);
+        }
+        return createHandle();
+      })
     };
 
-    mockMapElement = {
-      view: mockView,
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn()
+    mockMapEl = document.createElement('div') as MockArcgisMapElement;
+    mockMapEl.view = mockView;
+
+    component = new UpMap();
+
+    eventHandlesAddSpy = jest.fn();
+    eventHandlesRemoveSpy = jest.fn();
+    eventHandlesRemoveAllSpy = jest.fn();
+
+    (component as any).eventHandles = {
+      add: eventHandlesAddSpy,
+      remove: eventHandlesRemoveSpy,
+      removeAll: eventHandlesRemoveAllSpy
     };
 
+    jest.spyOn(component, 'dispatchEvent');
+
+    // queryAsync-style mocked property
     Object.defineProperty(component, 'arcgisMapElement', {
       configurable: true,
-      get: jest.fn().mockResolvedValue(mockMapElement)
+      get: jest.fn().mockResolvedValue(mockMapEl)
     });
 
-    component['eventHandles'] = {
-      add: jest.fn(),
-      removeAll: jest.fn()
-    } as any;
-
-    component.dispatchEvent = jest.fn();
-  });
-
-  afterEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('initializeMap', () => {
-    it('should connect view and call setup methods when map view exists', async () => {
-      const setupMapClickHandlerSpy = jest
-        .spyOn(component as any, 'setupMapClickHandler')
-        .mockImplementation(() => {});
-      const setupViewWatchersSpy = jest
-        .spyOn(component as any, 'setupViewWatchers')
-        .mockImplementation(() => {});
-      const setupPopupBridgeSpy = jest
-        .spyOn(component as any, 'setupPopupBridge')
-        .mockImplementation(() => {});
-      const syncPopupOptionsSpy = jest
-        .spyOn(component as any, 'syncPopupOptions')
-        .mockImplementation(() => {});
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
-      await (component as any).initializeMap();
+  // --------------------------------------------------
+  // BASIC RENDER / PROPERTIES
+  // --------------------------------------------------
 
-      expect(mockView.when).toHaveBeenCalled();
-      expect(component['view']).toBe(mockView);
-      expect(setupMapClickHandlerSpy).toHaveBeenCalled();
-      expect(setupViewWatchersSpy).toHaveBeenCalled();
-      expect(setupPopupBridgeSpy).toHaveBeenCalled();
-      expect(syncPopupOptionsSpy).toHaveBeenCalled();
+  it('should instantiate component', () => {
+    expect(component).toBeTruthy();
+  });
+
+  it('should have default boolean UI properties', () => {
+    expect(typeof (component as any).showZoom).toBe('boolean');
+    expect(typeof (component as any).showHome).toBe('boolean');
+    expect(typeof (component as any).showLocate).toBe('boolean');
+    expect(typeof (component as any).showScaleBar).toBe('boolean');
+  });
+
+  // --------------------------------------------------
+  // INITIALIZE MAP
+  // --------------------------------------------------
+
+  it('initializeMap should attach to resolved view and call setup methods', async () => {
+    const setupMapClickHandlerSpy = jest
+      .spyOn(component as any, 'setupMapClickHandler')
+      .mockImplementation(() => {});
+    const setupViewWatchersSpy = jest
+      .spyOn(component as any, 'setupViewWatchers')
+      .mockImplementation(() => {});
+    const setupPopupBridgeSpy = jest
+      .spyOn(component as any, 'setupPopupBridge')
+      .mockImplementation(() => {});
+    const setupZoomEmitterSpy = jest
+      .spyOn(component as any, 'setupZoomEmitter')
+      .mockImplementation(() => {});
+    const syncPopupOptionsSpy = jest
+      .spyOn(component as any, 'syncPopupOptions')
+      .mockImplementation(() => {});
+    const syncMouseWheelZoomSpy = jest
+      .spyOn(component as any, 'syncMouseWheelZoom')
+      .mockImplementation(() => {});
+    const syncDoubleClickZoomSpy = jest
+      .spyOn(component as any, 'syncDoubleClickZoom')
+      .mockImplementation(() => {});
+    const syncKeyboardNavigationSpy = jest
+      .spyOn(component as any, 'syncKeyboardNavigation')
+      .mockImplementation(() => {});
+
+    await (component as any).initializeMap();
+
+    expect(mockView.when).toHaveBeenCalled();
+    expect((component as any).view).toBe(mockView);
+    expect(setupMapClickHandlerSpy).toHaveBeenCalled();
+    expect(setupViewWatchersSpy).toHaveBeenCalled();
+    expect(setupPopupBridgeSpy).toHaveBeenCalled();
+    expect(setupZoomEmitterSpy).toHaveBeenCalled();
+    expect(syncPopupOptionsSpy).toHaveBeenCalled();
+    expect(syncMouseWheelZoomSpy).toHaveBeenCalled();
+    expect(syncDoubleClickZoomSpy).toHaveBeenCalled();
+    expect(syncKeyboardNavigationSpy).toHaveBeenCalled();
+  });
+
+  it('initializeMap should warn when map element is missing', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    Object.defineProperty(component, 'arcgisMapElement', {
+      configurable: true,
+      get: jest.fn().mockResolvedValue(undefined)
     });
 
-    it('should warn when arcgis map element is not found', async () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await (component as any).initializeMap();
 
-      Object.defineProperty(component, 'arcgisMapElement', {
-        configurable: true,
-        get: jest.fn().mockResolvedValue(undefined)
-      });
+    expect(warnSpy).toHaveBeenCalled();
+  });
 
-      await (component as any).initializeMap();
+  it('initializeMap should warn when map element has no view yet', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const addEventListenerSpy = jest.fn();
 
-      expect(warnSpy).toHaveBeenCalledWith('arcgis-map element not found');
+    Object.defineProperty(component, 'arcgisMapElement', {
+      configurable: true,
+      get: jest.fn().mockResolvedValue({
+        addEventListener: addEventListenerSpy
+      })
     });
 
-    it('should warn when map element exists but view is unavailable', async () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await (component as any).initializeMap();
 
-      Object.defineProperty(component, 'arcgisMapElement', {
-        configurable: true,
-        get: jest.fn().mockResolvedValue({
-          view: undefined,
-          addEventListener: jest.fn()
-        })
-      });
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      'arcgisViewReadyChange',
+      expect.any(Function),
+      { once: true }
+    );
 
-      await (component as any).initializeMap();
+    expect(warnSpy).not.toHaveBeenCalledWith('arcgis-map element not found');
+  });
 
-      expect(warnSpy).toHaveBeenCalledWith('arcgis-map view not available');
+  // --------------------------------------------------
+  // MAP CLICK
+  // --------------------------------------------------
+
+  it('setupMapClickHandler should register click handler', () => {
+    (component as any).view = mockView;
+
+    (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
+      latitude: 33.749,
+      longitude: -84.388
+    });
+
+    (component as any).setupMapClickHandler();
+
+    expect(mockView.on).toHaveBeenCalledWith('click', expect.any(Function));
+  });
+
+  it('setupMapClickHandler should dispatch map-click and mapClick', () => {
+    (component as any).view = mockView;
+
+    (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
+      latitude: 33.749,
+      longitude: -84.388
+    });
+
+    (component as any).setupMapClickHandler();
+
+    const clickHandler = mockView.__handlers?.['click']?.[0];
+    expect(clickHandler).toBeTruthy();
+
+    clickHandler?.({ mapPoint: {} });
+
+    const calls = (component.dispatchEvent as jest.Mock).mock.calls.map(
+      (call) => call[0]
+    );
+
+    expect(calls.some((evt) => evt.type === 'map-click')).toBe(true);
+    expect(calls.some((evt) => evt.type === 'mapClick')).toBe(true);
+
+    const kebabEvt = calls.find((evt) => evt.type === 'map-click');
+    expect(kebabEvt.detail).toEqual({
+      latitude: 33.749,
+      longitude: -84.388
     });
   });
 
-  describe('syncMouseWheelZoom', () => {
-    beforeEach(() => {
-      component['view'] = mockView;
+  it('setupMapClickHandler should do nothing if no mapPoint', () => {
+    (component as any).view = mockView;
+    (component as any).setupMapClickHandler();
+
+    const clickHandler = mockView.__handlers?.['click']?.[0];
+    clickHandler?.({});
+
+    expect(component.dispatchEvent).not.toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------
+  // ZOOM EMITTER
+  // --------------------------------------------------
+
+  it('setupZoomEmitter should emit zoom event', () => {
+    (component as any).view = mockView;
+
+    const emitZoomSpy = jest
+      .spyOn(component as any, 'emitZoom')
+      .mockImplementation(() => {});
+
+    (reactiveUtils.watch as jest.Mock).mockImplementation(
+      (_getter: () => unknown, callback: (zoom: number) => void) => {
+        callback(7);
+        return createHandle();
+      }
+    );
+
+    (component as any).setupZoomEmitter();
+
+    expect(reactiveUtils.watch).toHaveBeenCalled();
+    expect(emitZoomSpy).toHaveBeenCalledWith(7);
+  });
+
+  it('emitZoom should dispatch zoom custom event', () => {
+    (component as any).emitZoom(9);
+
+    expect(component.dispatchEvent).toHaveBeenCalledTimes(1);
+
+    const evt = (component.dispatchEvent as jest.Mock).mock.calls[0][0];
+    expect(evt.type).toBe('zoom');
+    expect(evt.detail).toBe(9);
+  });
+
+  // --------------------------------------------------
+  // MOUSE WHEEL
+  // --------------------------------------------------
+
+  it('syncMouseWheelZoom should add mouse-wheel handle when disabled is true', () => {
+    (component as any).view = mockView;
+    (component as any).disableMapScrollWheelZoom = true;
+
+    (component as any).syncMouseWheelZoom();
+
+    expect(eventHandlesRemoveSpy).toHaveBeenCalledWith('mouse-wheel');
+    expect(mockView.on).toHaveBeenCalledWith('mouse-wheel', expect.any(Function));
+    expect(eventHandlesAddSpy).toHaveBeenCalled();
+  });
+
+  it('syncMouseWheelZoom should not add mouse-wheel handle when disabled is false', () => {
+    (component as any).view = mockView;
+    (component as any).disableMapScrollWheelZoom = false;
+
+    (component as any).syncMouseWheelZoom();
+
+    expect(eventHandlesRemoveSpy).toHaveBeenCalledWith('mouse-wheel');
+    expect(mockView.on).not.toHaveBeenCalledWith('mouse-wheel', expect.any(Function));
+  });
+
+  it('mouse-wheel handler should stop propagation', () => {
+    (component as any).view = mockView;
+    (component as any).disableMapScrollWheelZoom = true;
+
+    (component as any).syncMouseWheelZoom();
+
+    const handler = mockView.__handlers?.['mouse-wheel']?.[0];
+    const stopPropagation = jest.fn();
+
+    handler?.({ stopPropagation });
+
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------
+  // DOUBLE CLICK
+  // --------------------------------------------------
+
+  it('syncDoubleClickZoom should register double-click blockers when disabled', () => {
+    (component as any).view = mockView;
+    (component as any).enableDoubleClickToZoom = false;
+
+    (component as any).syncDoubleClickZoom();
+
+    expect(eventHandlesRemoveSpy).toHaveBeenCalledWith('double-click');
+    expect(mockView.on).toHaveBeenCalledWith('double-click', expect.any(Function));
+    expect(eventHandlesAddSpy).toHaveBeenCalled();
+  });
+
+  it('double-click handler should stop propagation', () => {
+    (component as any).view = mockView;
+    (component as any).enableDoubleClickToZoom = false;
+
+    (component as any).syncDoubleClickZoom();
+
+    const handler = mockView.__handlers?.['double-click']?.[0];
+    const stopPropagation = jest.fn();
+
+    handler?.({ stopPropagation });
+
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------
+  // KEYBOARD NAVIGATION
+  // --------------------------------------------------
+
+  it('syncKeyboardNavigation should register key handlers when disabled', () => {
+    (component as any).view = mockView;
+    (component as any).enableKeyboardNavigation = false;
+
+    (component as any).syncKeyboardNavigation();
+
+    expect(eventHandlesRemoveSpy).toHaveBeenCalledWith('keyboard-navigation');
+    expect(mockView.on).toHaveBeenCalledWith('key-down', expect.any(Function));
+    expect(mockView.on).toHaveBeenCalledWith('key-up', expect.any(Function));
+  });
+
+  it('key-down handler should block supported navigation keys', () => {
+    (component as any).view = mockView;
+    (component as any).enableKeyboardNavigation = false;
+
+    (component as any).syncKeyboardNavigation();
+
+    const handler = mockView.__handlers?.['key-down']?.[0];
+    const stopPropagation = jest.fn();
+
+    handler?.({ key: 'ArrowUp', stopPropagation });
+
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------
+  // POPUP BRIDGE
+  // --------------------------------------------------
+
+  it('setupPopupBridge should register popup watchers', () => {
+    (component as any).view = mockView;
+
+    (reactiveUtils.watch as jest.Mock).mockReturnValue(createHandle());
+
+    (component as any).setupPopupBridge();
+
+    expect(reactiveUtils.watch).toHaveBeenCalledTimes(2);
+    expect(eventHandlesAddSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('setupPopupBridge should dispatch popupFeaturesSet and popup-features-set when features change', () => {
+    (component as any).view = mockView;
+
+    let featuresCallback!: (value: Graphic[]) => void;
+    let selectedIndexCallback!: (value: number) => void;
+
+    (reactiveUtils.watch as jest.Mock)
+      .mockImplementationOnce((_getter: () => unknown, callback: (value: Graphic[]) => void) => {
+        featuresCallback = callback;
+        return createHandle();
+      })
+      .mockImplementationOnce((_getter: () => unknown, callback: (value: number) => void) => {
+        selectedIndexCallback = callback;
+        return createHandle();
+      });
+
+    const rebuildPopupContentSpy = jest
+      .spyOn(component as any, 'rebuildPopupContent')
+      .mockImplementation(() => {});
+    const setPopupContentSpy = jest
+      .spyOn(component as any, 'setPopupContent')
+      .mockImplementation(() => {});
+
+    (component as any).setupPopupBridge();
+
+    const features = [{ attributes: { id: 1 } }] as unknown as Graphic[];
+    mockPopup.selectedFeatureIndex = 0;
+
+    featuresCallback(features);
+
+    const eventTypes = (component.dispatchEvent as jest.Mock).mock.calls.map(
+      (call) => call[0].type
+    );
+
+    expect(eventTypes).toContain('popupFeaturesSet');
+    expect(eventTypes).toContain('popup-features-set');
+    expect(rebuildPopupContentSpy).toHaveBeenCalled();
+    expect(setPopupContentSpy).not.toHaveBeenCalled();
+    expect(selectedIndexCallback).toBeDefined();
+  });
+
+  it('setupPopupBridge should dispatch popupSelectionChanged and popup-selection-changed when selected index changes', () => {
+    (component as any).view = mockView;
+    (component as any).popupFeatures = [{ attributes: { id: 2 } }] as unknown as Graphic[];
+    (component as any).localPopupContent = '<div>popup</div>';
+    (component as any).usePopupContentOnly = false;
+
+    let selectedIndexCallback!: (value: number) => void;
+
+    (reactiveUtils.watch as jest.Mock)
+      .mockImplementationOnce(() => createHandle())
+      .mockImplementationOnce((_getter: () => unknown, callback: (value: number) => void) => {
+        selectedIndexCallback = callback;
+        return createHandle();
+      });
+
+    const setPopupContentSpy = jest
+      .spyOn(component as any, 'setPopupContent')
+      .mockImplementation(() => {});
+
+    (component as any).setupPopupBridge();
+
+    selectedIndexCallback(1);
+
+    const eventTypes = (component.dispatchEvent as jest.Mock).mock.calls.map(
+      (call) => call[0].type
+    );
+
+    expect(eventTypes).toContain('popupSelectionChanged');
+    expect(eventTypes).toContain('popup-selection-changed');
+    expect(setPopupContentSpy).toHaveBeenCalledWith('<div>popup</div>', true);
+  });
+
+  // --------------------------------------------------
+  // POPUP OPTIONS
+  // --------------------------------------------------
+
+  it('syncPopupOptions should update popup visible elements', () => {
+    (component as any).view = mockView;
+    (component as any).isPopupVisible = false;
+
+    (component as any).syncPopupOptions();
+
+    expect(mockPopup.visibleElements.closeButton).toBe(false);
+  });
+
+  // --------------------------------------------------
+  // DRAW TRANSIENT SHAPE COORDINATES
+  // --------------------------------------------------
+
+  it('emitTransientShapeCoordinates should dispatch point coordinates', () => {
+    (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
+      longitude: -84.388,
+      latitude: 33.749
+    } as Partial<Point>);
+
+    (component as any).emitTransientShapeCoordinates({
+      type: 'point'
     });
 
-    it('should register mouse-wheel handler when disableMapScrollWheelZoom is true', () => {
-      component.disableMapScrollWheelZoom = true;
+    const eventTypes = (component.dispatchEvent as jest.Mock).mock.calls.map(
+      (call) => call[0].type
+    );
 
-      (component as any).syncMouseWheelZoom();
+    expect(eventTypes).toContain('mapDrawTransientShapeCoordinates');
+    expect(eventTypes).toContain('map-draw-transient-shape-coordinates');
 
-      expect(mockView.on).toHaveBeenCalledWith(
-        'mouse-wheel',
-        expect.any(Function)
-      );
-      expect(component['mouseWheelHandle']).toBe(mockMouseWheelHandle);
-    });
+    const evt = (component.dispatchEvent as jest.Mock).mock.calls.find(
+      (call) => call[0].type === 'mapDrawTransientShapeCoordinates'
+    )?.[0];
 
-    it('should not register mouse-wheel handler when disableMapScrollWheelZoom is false', () => {
-      component.disableMapScrollWheelZoom = false;
-
-      (component as any).syncMouseWheelZoom();
-
-      expect(mockView.on).not.toHaveBeenCalledWith(
-        'mouse-wheel',
-        expect.any(Function)
-      );
-      expect(component['mouseWheelHandle']).toBeNull();
-    });
-
-    it('should remove old mouse-wheel handler before adding a new one', () => {
-      component['mouseWheelHandle'] = mockMouseWheelHandle as any;
-      component.disableMapScrollWheelZoom = true;
-
-      (component as any).syncMouseWheelZoom();
-
-      expect(mockMouseWheelHandle.remove).toHaveBeenCalled();
-      expect(mockView.on).toHaveBeenCalledWith(
-        'mouse-wheel',
-        expect.any(Function)
-      );
-    });
-
-    it('should stop propagation when wheel event fires and disabling is enabled', () => {
-      component.disableMapScrollWheelZoom = true;
-      (component as any).syncMouseWheelZoom();
-
-      const stopPropagation = jest.fn();
-
-      mockView.__mouseWheelHandler({ stopPropagation });
-
-      expect(stopPropagation).toHaveBeenCalled();
+    expect(evt.detail).toEqual({
+      selectionCoordinates: [[-84.388, 33.749]]
     });
   });
 
-  describe('setupMapClickHandler', () => {
-    beforeEach(() => {
-      component['view'] = mockView;
+  it('emitTransientShapeCoordinates should dispatch polyline coordinates', () => {
+    (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
+      paths: [[[-84, 33], [-85, 34]]]
+    } as Partial<Polyline>);
+
+    (component as any).emitTransientShapeCoordinates({
+      type: 'polyline'
     });
 
-    it('should register click handler', () => {
-      (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
-        latitude: 33.749,
-        longitude: -84.388
-      });
+    const evt = (component.dispatchEvent as jest.Mock).mock.calls.find(
+      (call) => call[0].type === 'mapDrawTransientShapeCoordinates'
+    )?.[0];
 
-      (component as any).setupMapClickHandler();
-
-      expect(mockView.on).toHaveBeenCalledWith('click', expect.any(Function));
-    });
-
-    it('should dispatch map-click and mapClick events on valid click', () => {
-      (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
-        latitude: 33.749,
-        longitude: -84.388
-      });
-
-      (component as any).setupMapClickHandler();
-
-      mockView.__clickHandler({
-        mapPoint: {}
-      });
-
-      expect(component.dispatchEvent).toHaveBeenCalledTimes(2);
-
-      const firstEvent = (component.dispatchEvent as jest.Mock).mock.calls[0][0];
-      const secondEvent = (component.dispatchEvent as jest.Mock).mock.calls[1][0];
-
-      expect(firstEvent.type).toBe('map-click');
-      expect(firstEvent.detail).toEqual({
-        latitude: 33.749,
-        longitude: -84.388
-      });
-
-      expect(secondEvent.type).toBe('mapClick');
-      expect(secondEvent.detail).toEqual({
-        latitude: 33.749,
-        longitude: -84.388
-      });
-    });
-
-    it('should do nothing when click event has no mapPoint', () => {
-      (component as any).setupMapClickHandler();
-
-      mockView.__clickHandler({});
-
-      expect(component.dispatchEvent).not.toHaveBeenCalled();
-    });
-
-    it('should do nothing when geographic point is invalid', () => {
-      (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
-        latitude: undefined,
-        longitude: undefined
-      });
-
-      (component as any).setupMapClickHandler();
-
-      mockView.__clickHandler({ mapPoint: {} });
-
-      expect(component.dispatchEvent).not.toHaveBeenCalled();
+    expect(evt.detail).toEqual({
+      selectionCoordinates: [[[-84, 33], [-85, 34]]]
     });
   });
 
-  describe('setupZoomEmitter', () => {
-    beforeEach(() => {
-      component['view'] = mockView;
-      (reactiveUtils.watch as jest.Mock).mockImplementation(
-        (_getter: () => unknown, callback: (value: number) => void) => {
-          callback(7);
-          return { remove: jest.fn() };
-        }
-      );
+  it('emitTransientShapeCoordinates should dispatch polygon coordinates', () => {
+    (webMercatorUtils.webMercatorToGeographic as jest.Mock).mockReturnValue({
+      rings: [[[-84, 33], [-85, 34], [-86, 35], [-84, 33]]]
+    } as Partial<Polygon>);
+
+    (component as any).emitTransientShapeCoordinates({
+      type: 'polygon'
     });
 
-    it('should dispatch zoom event when zoom changes', () => {
-      const emitZoomSpy = jest
-        .spyOn(component as any, 'emitZoom')
-        .mockImplementation(() => {});
+    const evt = (component.dispatchEvent as jest.Mock).mock.calls.find(
+      (call) => call[0].type === 'mapDrawTransientShapeCoordinates'
+    )?.[0];
 
-      (component as any).setupZoomEmitter();
-
-      expect(reactiveUtils.watch).toHaveBeenCalled();
-      expect(emitZoomSpy).toHaveBeenCalledWith(7);
+    expect(evt.detail).toEqual({
+      selectionCoordinates: [[[-84, 33], [-85, 34], [-86, 35], [-84, 33]]]
     });
   });
 
-  describe('setupPopupBridge', () => {
-    beforeEach(() => {
-      component['view'] = mockView;
-    });
+  // --------------------------------------------------
+  // UPDATED()
+  // --------------------------------------------------
 
-    it('should register popup watchers', () => {
-      (reactiveUtils.watch as jest.Mock).mockReturnValue({
-        remove: jest.fn()
-      });
+  it('updated should call sync methods when relevant properties change', () => {
+    (component as any).view = mockView;
 
-      (component as any).setupPopupBridge();
+    const syncMouseWheelZoomSpy = jest
+      .spyOn(component as any, 'syncMouseWheelZoom')
+      .mockImplementation(() => {});
+    const syncDoubleClickZoomSpy = jest
+      .spyOn(component as any, 'syncDoubleClickZoom')
+      .mockImplementation(() => {});
+    const syncKeyboardNavigationSpy = jest
+      .spyOn(component as any, 'syncKeyboardNavigation')
+      .mockImplementation(() => {});
+    const syncPopupOptionsSpy = jest
+      .spyOn(component as any, 'syncPopupOptions')
+      .mockImplementation(() => {});
+    const rebuildPopupContentSpy = jest
+      .spyOn(component as any, 'rebuildPopupContent')
+      .mockImplementation(() => {});
 
-      expect(reactiveUtils.watch).toHaveBeenCalledTimes(2);
-      expect((component['eventHandles'] as any).add).toHaveBeenCalledTimes(2);
-    });
+    const changedProps = new Map<string, unknown>([
+      ['disableMapScrollWheelZoom', false],
+      ['enableDoubleClickToZoom', true],
+      ['enableKeyboardNavigation', true],
+      ['isPopupVisible', true],
+      ['usePopupContentOnly', false]
+    ]);
 
-    it('should dispatch popupFeaturesSet and popup-features-set when features change', () => {
-      const featureWatcher = jest.fn();
-      const selectedIndexWatcher = jest.fn();
+    (component as any).updated(changedProps);
 
-      (reactiveUtils.watch as jest.Mock)
-        .mockImplementationOnce((_getter: () => unknown, callback: (value: any[]) => void) => {
-          featureWatcher.mockImplementation(callback);
-          return { remove: jest.fn() };
-        })
-        .mockImplementationOnce((_getter: () => unknown, callback: (value: number) => void) => {
-          selectedIndexWatcher.mockImplementation(callback);
-          return { remove: jest.fn() };
-        });
-
-      (component as any).setupPopupBridge();
-
-      const features = [{ id: 1 }, { id: 2 }] as any;
-      mockPopup.selectedFeatureIndex = 1;
-
-      featureWatcher(features);
-
-      const firstEvent = (component.dispatchEvent as jest.Mock).mock.calls[0][0];
-      const secondEvent = (component.dispatchEvent as jest.Mock).mock.calls[1][0];
-
-      expect(firstEvent.type).toBe('popupFeaturesSet');
-      expect(firstEvent.detail).toEqual({
-        features,
-        selectedIndex: 1
-      });
-
-      expect(secondEvent.type).toBe('popup-features-set');
-      expect(secondEvent.detail).toEqual({
-        features,
-        selectedIndex: 1
-      });
-    });
-
-    it('should dispatch popupSelectionChanged and popup-selection-changed when selected feature changes', () => {
-      let selectedIndexCallback!: (value: number) => void;
-
-      (reactiveUtils.watch as jest.Mock)
-        .mockImplementationOnce((_getter: () => unknown, _callback: (value: any[]) => void) => {
-          return { remove: jest.fn() };
-        })
-        .mockImplementationOnce((_getter: () => unknown, callback: (value: number) => void) => {
-          selectedIndexCallback = callback;
-          return { remove: jest.fn() };
-        });
-
-      component['popupFeatures'] = [{ id: 100 }] as any;
-
-      (component as any).setupPopupBridge();
-
-      selectedIndexCallback(0);
-
-      const eventTypes = (component.dispatchEvent as jest.Mock).mock.calls.map(
-        (call) => call[0].type
-      );
-
-      expect(eventTypes).toContain('popupSelectionChanged');
-      expect(eventTypes).toContain('popup-selection-changed');
-    });
+    expect(syncMouseWheelZoomSpy).toHaveBeenCalled();
+    expect(syncDoubleClickZoomSpy).toHaveBeenCalled();
+    expect(syncKeyboardNavigationSpy).toHaveBeenCalled();
+    expect(syncPopupOptionsSpy).toHaveBeenCalled();
+    expect(rebuildPopupContentSpy).toHaveBeenCalled();
   });
 
-  describe('disconnectedCallback', () => {
-    it('should remove wheel handle and event handles', () => {
-      component['mouseWheelHandle'] = mockMouseWheelHandle as any;
-      component['eventHandles'] = {
-        removeAll: jest.fn()
-      } as any;
+  // --------------------------------------------------
+  // DISCONNECT
+  // --------------------------------------------------
 
-      component.disconnectedCallback();
+  it('disconnectedCallback should remove all grouped handles', () => {
+    component.disconnectedCallback();
+    expect(eventHandlesRemoveAllSpy).toHaveBeenCalled();
+  });
 
-      expect(mockMouseWheelHandle.remove).toHaveBeenCalled();
-      expect((component['eventHandles'] as any).removeAll).toHaveBeenCalled();
-    });
+  // --------------------------------------------------
+  // PUBLIC TOGGLE METHODS
+  // --------------------------------------------------
+
+  it('showZoomSlider should set showZoom true', async () => {
+    (component as any).showZoom = false;
+    await (component as any).showZoomSlider();
+    expect((component as any).showZoom).toBe(true);
+  });
+
+  it('hideZoomSlider should set showZoom false', async () => {
+    (component as any).showZoom = true;
+    await (component as any).hideZoomSlider();
+    expect((component as any).showZoom).toBe(false);
+  });
+
+  it('showScaleBarMethod should set showScaleBar true', async () => {
+    (component as any).showScaleBar = false;
+    await (component as any).showScaleBarMethod();
+    expect((component as any).showScaleBar).toBe(true);
+  });
+
+  it('hideScaleBar should set showScaleBar false', async () => {
+    (component as any).showScaleBar = true;
+    await (component as any).hideScaleBar();
+    expect((component as any).showScaleBar).toBe(false);
   });
 });
