@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Arc GeoJSON Layer Test</title>
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        font-family: Arial, sans-serif;
+      }
+
+      .page {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        grid-template-rows: auto 1fr;
+        width: 100%;
+        height: 100%;
+      }
+
+      .toolbar {
+        grid-column: 1 / 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px;
+        border-bottom: 1px solid #ccc;
+        background: #f7f7f7;
+      }
+
+      .map-panel {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .side-panel {
+        border-left: 1px solid #ccc;
+        padding: 10px;
+        overflow: auto;
+        background: #fff;
+      }
+
+      arc-map {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .box {
+        border: 1px solid #d6d6d6;
+        min-height: 90px;
+        padding: 8px;
+        margin-bottom: 12px;
+        white-space: pre-wrap;
+        overflow: auto;
+        background: #fafafa;
+      }
+
+      button {
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      .section-title {
+        font-weight: bold;
+        margin: 10px 0 6px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="page">
+      <div class="toolbar">
+        <button id="drawPointBtn">Start Point Drawing</button>
+        <button id="drawPolylineBtn">Start Polyline Drawing</button>
+        <button id="drawPolygonBtn">Start Polygon Drawing</button>
+        <button id="cancelDrawingBtn">Cancel Drawing</button>
+        <button id="zoomToFeatureBtn">Zoom To First Feature</button>
+        <button id="openPopupBtn">Open Popup For First Feature</button>
+
+        <button id="editOnBtn">Edit ON</button>
+        <button id="editOffBtn">Edit OFF</button>
+
+        <button id="allEditOnBtn">All Edit Features ON</button>
+        <button id="allEditOffBtn">All Edit Features OFF</button>
+      </div>
+
+      <div class="map-panel">
+        <!-- Replace arc-map / arc-geojson-layer with your actual tag names if needed -->
+        <arc-map
+          id="arcMap"
+          basemap="streets-vector"
+          center='[-96.5, 38.5]'
+          zoom="4"
+        >
+          <arc-geojson-layer id="graphic-layer"></arc-geojson-layer>
+        </arc-map>
+      </div>
+
+      <div class="side-panel">
+        <div class="section-title">Map Click</div>
+        <div id="mapClickBox" class="box">Waiting...</div>
+
+        <div class="section-title">Extent Change</div>
+        <div id="extentBox" class="box">Waiting...</div>
+
+        <div class="section-title">Popup Features Set</div>
+        <div id="popupBox" class="box">Waiting...</div>
+
+        <div class="section-title">Transient Shape Coordinates</div>
+        <div id="transientBox" class="box">Waiting...</div>
+
+        <div class="section-title">Layer Click</div>
+        <div id="layerClickBox" class="box">Waiting...</div>
+
+        <div class="section-title">Double Click</div>
+        <div id="doubleClickBox" class="box">Waiting...</div>
+      </div>
+    </div>
+
+    <script type="module">
+      // IMPORTANT:
+      // Change this import path to your built component entry file.
+      // Examples:
+      // import './dist/index.js';
+      // import '/src/index.ts';
+      import './src/index.ts';
+
+      const map = document.getElementById('arcMap');
+      const geo = document.getElementById('graphic-layer');
+
+      const mapClickBox = document.getElementById('mapClickBox');
+      const extentBox = document.getElementById('extentBox');
+      const popupBox = document.getElementById('popupBox');
+      const transientBox = document.getElementById('transientBox');
+      const layerClickBox = document.getElementById('layerClickBox');
+      const doubleClickBox = document.getElementById('doubleClickBox');
+
+      function setBox(idOrEl, value) {
+        const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+        el.textContent =
+          typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      }
+
+      // -------------------------------------------------------------------
+      // TEST DATA
+      // -------------------------------------------------------------------
+      const testGeoJson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [-104.9903, 39.7392]
+            },
+            properties: {
+              id: 'point-1',
+              firstField: 'Denver Point',
+              secondField: 'Popup test point',
+              listDescription: 'Point feature description'
+            }
+          },
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [-122.4194, 37.7749],
+                [-115.1398, 36.1699],
+                [-104.9903, 39.7392],
+                [-87.6298, 41.8781]
+              ]
+            },
+            properties: {
+              id: 'line-1',
+              firstField: 'Line Feature',
+              secondField: 'Polyline popup test',
+              listDescription: 'LineString feature description'
+            }
+          },
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [-99.5, 35.8],
+                [-94.2, 37.8],
+                [-92.3, 34.1],
+                [-97.8, 33.2],
+                [-99.5, 35.8]
+              ]]
+            },
+            properties: {
+              id: 'polygon-1',
+              firstField: 'Polygon Feature',
+              secondField: 'Polygon popup test',
+              listDescription: 'Polygon feature description'
+            }
+          }
+        ]
+      };
+
+      // -------------------------------------------------------------------
+      // INITIAL CONFIG
+      // -------------------------------------------------------------------
+      geo.uniqueIdPropertyName = 'id';
+
+      geo.geojson = testGeoJson;
+
+      geo.infoTemplate = {
+        title: 'Details',
+        content: `
+          <div>First Field: \${firstField}</div>
+          <div>Second Field: \${secondField}</div>
+        `
+      };
+
+      // Keep renderer SIMPLE. Do not use old esriSMS style JSON here.
+      geo.renderer = {
+        type: 'simple',
+        symbol: {
+          type: 'simple-fill',
+          color: [173, 216, 230, 0.35],
+          outline: {
+            color: [0, 0, 0, 1],
+            width: 2
+          }
+        }
+      };
+
+      geo.name = 'Test GeoJSON Layer';
+
+      // -------------------------------------------------------------------
+      // EDIT FLAGS
+      // -------------------------------------------------------------------
+      function setAllEditFlags(enabled) {
+        geo.enableUserEdit = enabled;
+        geo.enableUserEditMove = enabled;
+        geo.enableUserEditVertices = enabled;
+        geo.enableUserEditAddVertices = enabled;
+        geo.enableUserEditDeleteVertices = enabled;
+        geo.enableUserEditScaling = enabled;
+        geo.enableUserEditUniformScaling = enabled;
+        geo.enableUserEditRotating = enabled;
+        geo.enableUserEditRemove = enabled;
+      }
+
+      // start with edit OFF so popup can be tested first
+      setAllEditFlags(false);
+
+      // -------------------------------------------------------------------
+      // BUTTONS
+      // -------------------------------------------------------------------
+      document.getElementById('drawPointBtn').addEventListener('click', () => {
+        geo.startDrawing('point');
+      });
+
+      document.getElementById('drawPolylineBtn').addEventListener('click', () => {
+        geo.startDrawing('polyline');
+      });
+
+      document.getElementById('drawPolygonBtn').addEventListener('click', () => {
+        geo.startDrawing('polygon');
+      });
+
+      document.getElementById('cancelDrawingBtn').addEventListener('click', () => {
+        geo.cancelDrawing();
+      });
+
+      document.getElementById('editOnBtn').addEventListener('click', () => {
+        geo.enableUserEdit = true;
+      });
+
+      document.getElementById('editOffBtn').addEventListener('click', () => {
+        geo.enableUserEdit = false;
+      });
+
+      document.getElementById('allEditOnBtn').addEventListener('click', () => {
+        setAllEditFlags(true);
+      });
+
+      document.getElementById('allEditOffBtn').addEventListener('click', () => {
+        setAllEditFlags(false);
+      });
+
+      document.getElementById('zoomToFeatureBtn').addEventListener('click', async () => {
+        try {
+          await geo.zoomTo('point-1', 7);
+        } catch (e) {
+          console.error('zoomTo failed', e);
+        }
+      });
+
+      document.getElementById('openPopupBtn').addEventListener('click', async () => {
+        try {
+          await geo.openPopup('point-1');
+        } catch (e) {
+          console.error('openPopup failed', e);
+        }
+      });
+
+      // -------------------------------------------------------------------
+      // EVENTS
+      // -------------------------------------------------------------------
+      geo.addEventListener('layerClick', (event) => {
+        setBox(layerClickBox, event.detail);
+      });
+
+      geo.addEventListener('doubleClick', (event) => {
+        setBox(doubleClickBox, event.detail);
+      });
+
+      geo.addEventListener('userDrawItemAdded', (event) => {
+        console.log('userDrawItemAdded', event.detail);
+        setBox(transientBox, event.detail);
+      });
+
+      geo.addEventListener('userEditItemUpdated', (event) => {
+        console.log('userEditItemUpdated', event.detail);
+        setBox(transientBox, event.detail);
+      });
+
+      geo.addEventListener('userEditItemRemoved', (event) => {
+        console.log('userEditItemRemoved', event.detail);
+        setBox(transientBox, event.detail);
+      });
+
+      // Optional map events if your map component exposes them
+      map?.addEventListener?.('mapClick', (event) => {
+        setBox(mapClickBox, event.detail);
+      });
+
+      map?.addEventListener?.('extentChange', (event) => {
+        setBox(extentBox, event.detail);
+      });
+
+      map?.addEventListener?.('popupFeaturesSet', (event) => {
+        setBox(popupBox, event.detail);
+      });
+
+      // -------------------------------------------------------------------
+      // TEST GUIDE IN CONSOLE
+      // -------------------------------------------------------------------
+      console.log(`
+TEST GUIDE
+
+1. Popup test
+   - Keep edit OFF
+   - Click point / line / polygon
+   - Popup should appear
+
+2. Edit test
+   - Click "All Edit Features ON"
+   - Double-click a feature
+   - Editor should appear
+
+3. Vertex add/delete test
+   - With edit ON, double-click polygon/polyline
+   - Add/move/delete vertices
+
+4. Remove test
+   - With edit ON and remove enabled
+   - Ctrl+Click a feature
+
+5. Draw test
+   - Click Start Point/Polyline/Polygon Drawing
+   - Complete drawing
+   - New shape should stay visible
+      `);
+    </script>
+  </body>
+</html>
