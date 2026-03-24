@@ -1,0 +1,658 @@
+import { LitElement } from 'lit';
+import { property, state } from 'lit/decorators.js';
+
+import Graphic from '@arcgis/core/Graphic';
+import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
+import SketchViewModel from '@arcgis/core/widgets/Sketch/SketchViewModel';
+import Point from '@arcgis/core/geometry/Point';
+import type Geometry from '@arcgis/core/geometry/Geometry';
+import type MapView from '@arcgis/core/views/MapView';
+
+// Adjust types if your project uses __esri types directly
+type UpdateTool = 'transform' | 'reshape' | 'move' | null;
+
+export class ArcGeoJsonLayer extends LitElement {
+  // ------------------------------------------------------------------
+  // PUBLIC API / existing properties
+  // ------------------------------------------------------------------
+  @property({ type: Object }) geojson: any = {
+    type: 'FeatureCollection',
+    features: []
+  };
+
+  @property({ type: Object }) infoTemplate: any = null;
+  @property({ type: Object }) renderer: any = null;
+  @property({ type: String }) uniqueIdPropertyName = 'id';
+
+  @property({ type: Boolean }) enableUserEdit = false;
+  @property({ type: Boolean }) enableUserEditMove = false;
+  @property({ type: Boolean }) enableUserEditVertices = false;
+  @property({ type: Boolean }) enableUserEditAddVertices = false;
+  @property({ type: Boolean }) enableUserEditDeleteVertices = false;
+  @property({ type: Boolean }) enableUserEditScaling = false;
+  @property({ type: Boolean }) enableUserEditUniformScaling = false;
+  @property({ type: Boolean }) enableUserEditRotating = false;
+  @property({ type: Boolean }) enableUserEditRemove = false;
+
+  // ancestor map / map view reference
+  @state() private view: MapView | null = null;
+
+  // ------------------------------------------------------------------
+  // INTERNAL STATE
+  // ------------------------------------------------------------------
+  private sketchLayer: GraphicsLayer | null = null;
+  private sketchVM: SketchViewModel | null = null;
+
+  private inDrawingMode = false;
+  private editingUniqueId: string | number | null = null;
+
+  private suppressMapInteractionUntil = 0;
+  private editActivationInProgress = false;
+  private editorActive = false;
+
+  // if your project already has handles collection, keep that instead
+  private handles = {
+    items: new Map<string, any[]>(),
+    add: (handle: any, key: string) => {
+      const arr = this.handles.items.get(key) ?? [];
+      arr.push(handle);
+      this.handles.items.set(key, arr);
+    },
+    remove: (key: string) => {
+      const arr = this.handles.items.get(key) ?? [];
+      arr.forEach((h) => {
+        try {
+          if (typeof h?.remove === 'function') h.remove();
+        } catch {
+          // ignore
+        }
+      });
+      this.handles.items.delete(key);
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // LIFECYCLE
+  // ------------------------------------------------------------------
+  connectedCallback(): void {
+    super.connectedCallback();
+    // If your project resolves view differently, keep that approach.
+    queueMicrotask(() => {
+      this.bootstrap();
+    });
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+
+    this.handles.remove('view-click');
+    this.handles.remove('native-dblclick');
+    this.handles.remove('sketch-create');
+    this.handles.remove('sketch-update');
+
+    this.sketchVM?.cancel();
+    this.sketchLayer?.removeAll();
+  }
+
+  // ------------------------------------------------------------------
+  // BOOTSTRAP
+  // ------------------------------------------------------------------
+  private async bootstrap(): Promise<void> {
+    // Keep your existing view resolution logic if you already have it.
+    // This is just a placeholder pattern.
+    const mapHost: any =
+      (this.parentElement as any) ??
+      (this.getRootNode() as ShadowRoot)?.host;
+
+    this.view = mapHost?.view ?? mapHost?.mapView ?? null;
+
+    if (!this.view) {
+      console.warn('ArcGeoJsonLayer: view not found during bootstrap');
+      return;
+    }
+
+    this.ensureSketchLayer();
+    this.ensureSketchViewModel();
+    this.registerLayerEvents();
+
+    // Keep your existing initial render / refresh flow here
+    await this.createOrRefreshFeatureLayerIfNeeded();
+  }
+
+  // ------------------------------------------------------------------
+  // POPUP HELPERS
+  // ------------------------------------------------------------------
+  private shouldSuppressMapInteraction(): boolean {
+    return Date.now() < this.suppressMapInteractionUntil;
+  }
+
+  private closeMapPopup(): void {
+    const popup = (this.view as any)?.popup;
+    if (!popup) return;
+
+    if (typeof popup.close === 'function') {
+      popup.close();
+    } else {
+      popup.visible = false;
+      if ('features' in popup) {
+        popup.features = [];
+      }
+    }
+  }
+
+  private openMapPopup(graphic: Graphic, location: Point): void {
+    const popup = (this.view as any)?.popup;
+    if (!popup) return;
+
+    if (typeof popup.open === 'function') {
+      popup.open({
+        features: [graphic],
+        location
+      });
+    }
+  }
+
+  private enableInfoPopupWindow(enable: boolean): void {
+    if (!this.view) return;
+
+    const allowPopup =
+      enable &&
+      !this.enableUserEdit &&
+      !this.inDrawingMode &&
+      !this.editorActive;
+
+    if (!allowPopup) {
+      this.closeMapPopup();
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // EDITING STATE
+  // ------------------------------------------------------------------
+  private syncEditingState(): void {
+    if (!this.sketchVM) return;
+
+    this.sketchVM.defaultUpdateOptions = {
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      toggleToolOnClick: false,
+      multipleSelectionEnabled: false
+    };
+  }
+
+  private getUpdateTool(): UpdateTool {
+    if (
+      this.enableUserEditVertices ||
+      this.enableUserEditAddVertices ||
+      this.enableUserEditDeleteVertices
+    ) {
+      return 'reshape';
+    }
+
+    if (this.enableUserEditScaling || this.enableUserEditRotating) {
+      return 'transform';
+    }
+
+    if (this.enableUserEditMove) {
+      return 'move';
+    }
+
+    return null;
+  }
+
+  // ------------------------------------------------------------------
+  // DRAWING / EDITING ENTRY POINTS
+  // ------------------------------------------------------------------
+  async startDrawing(drawGeometryType: string): Promise<void> {
+    if (!this.sketchVM) {
+      this.ensureSketchLayer();
+      this.ensureSketchViewModel();
+    }
+    if (!this.sketchVM || !this.sketchLayer) return;
+
+    const tool = this.determineSketchCreateTool(drawGeometryType);
+    if (!tool) {
+      console.error(`Unsupported draw geometry type: ${drawGeometryType}`);
+      return;
+    }
+
+    this.sketchVM.cancel();
+    this.sketchLayer.removeAll();
+
+    this.closeMapPopup();
+
+    this.inDrawingMode = true;
+    this.editingUniqueId = null;
+    this.editorActive = false;
+
+    this.enableInfoPopupWindow(false);
+
+    console.log('NEW CHANGE: drawing started', drawGeometryType);
+
+    this.sketchVM.create(tool);
+  }
+
+  async cancelDrawing(): Promise<void> {
+    this.inDrawingMode = false;
+    this.editingUniqueId = null;
+    this.editorActive = false;
+
+    this.sketchVM?.cancel();
+    this.sketchLayer?.removeAll();
+
+    this.closeMapPopup();
+    this.enableInfoPopupWindow(true);
+
+    console.log('NEW CHANGE: cancelDrawing executed');
+  }
+
+  private async activateGraphicsEditor(featureGraphic: Graphic): Promise<void> {
+    if (!this.enableUserEdit || !this.sketchVM || !this.sketchLayer) return;
+    if (this.editorActive || this.editActivationInProgress) return;
+
+    const uniqueId = featureGraphic.attributes?.[this.uniqueIdPropertyName];
+    this.editingUniqueId = uniqueId ?? null;
+
+    this.closeMapPopup();
+    this.enableInfoPopupWindow(false);
+
+    this.sketchVM.cancel();
+    this.sketchLayer.removeAll();
+
+    const editGraphic = featureGraphic.clone();
+    editGraphic.popupTemplate = null;
+
+    this.sketchLayer.add(editGraphic);
+
+    this.syncEditingState();
+
+    const updateTool = this.getUpdateTool();
+    if (!updateTool) {
+      console.error('No update tool available');
+      return;
+    }
+
+    await Promise.resolve();
+
+    this.editorActive = true;
+
+    console.log('NEW CHANGE: activateGraphicsEditor', {
+      uniqueId: this.editingUniqueId,
+      updateTool
+    });
+
+    this.sketchVM.update([editGraphic], {
+      tool: updateTool,
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      toggleToolOnClick: false,
+      multipleSelectionEnabled: false
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // SKETCH LAYER / SKETCH VM
+  // ------------------------------------------------------------------
+  private ensureSketchLayer(): void {
+    if (!this.view || this.sketchLayer) return;
+
+    this.sketchLayer = new GraphicsLayer({
+      listMode: 'hide'
+    });
+
+    this.view.map.add(this.sketchLayer);
+  }
+
+  private ensureSketchViewModel(): void {
+    if (!this.view || !this.sketchLayer || this.sketchVM) return;
+
+    this.sketchVM = new SketchViewModel({
+      view: this.view,
+      layer: this.sketchLayer,
+      defaultUpdateOptions: {
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        toggleToolOnClick: false,
+        multipleSelectionEnabled: false
+      }
+    });
+
+    // CREATE
+    this.handles.add(
+      this.sketchVM.on('create', async (event: any) => {
+        console.log('NEW CHANGE: sketch create event', event.state);
+
+        if (event.state !== 'complete' || !event.graphic) return;
+
+        const createdGraphic = event.graphic;
+        createdGraphic.popupTemplate = null;
+
+        if (!createdGraphic.attributes) {
+          createdGraphic.attributes = {};
+        }
+
+        if (
+          createdGraphic.attributes[this.uniqueIdPropertyName] === undefined ||
+          createdGraphic.attributes[this.uniqueIdPropertyName] === null
+        ) {
+          createdGraphic.attributes[this.uniqueIdPropertyName] =
+            crypto.randomUUID?.() ?? `id-${Date.now()}`;
+        }
+
+        const feature = this.graphicToGeoJsonFeature(createdGraphic);
+
+        await this.appendFeatureToGeoJson(feature);
+
+        this.dispatchEvent(
+          new CustomEvent('userDrawItemAdded', {
+            detail: feature,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.inDrawingMode = false;
+        this.editingUniqueId = null;
+        this.editorActive = false;
+
+        this.sketchVM?.cancel();
+        this.sketchLayer?.removeAll();
+
+        this.closeMapPopup();
+        this.enableInfoPopupWindow(true);
+
+        this.suppressMapInteractionUntil = Date.now() + 80;
+
+        console.log('draw complete', feature);
+      }),
+      'sketch-create'
+    );
+
+    // UPDATE
+    this.handles.add(
+      this.sketchVM.on('update', async (event: any) => {
+        console.log('NEW CHANGE: sketch update event', event.state);
+
+        if (event.state === 'start') {
+          this.editorActive = true;
+          this.closeMapPopup();
+          return;
+        }
+
+        if (event.state !== 'complete' || !event.graphics?.length) return;
+
+        const updatedGraphic = event.graphics[0];
+        updatedGraphic.popupTemplate = null;
+
+        const feature = this.graphicToGeoJsonFeature(updatedGraphic);
+
+        if (this.editingUniqueId != null) {
+          (feature.properties as any)[this.uniqueIdPropertyName] = this.editingUniqueId;
+          await this.updateGeoJsonWithChanges(feature);
+        }
+
+        this.dispatchEvent(
+          new CustomEvent('userEditItemUpdated', {
+            detail: feature,
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        this.inDrawingMode = false;
+        this.editingUniqueId = null;
+        this.editorActive = false;
+
+        this.sketchVM?.cancel();
+        this.sketchLayer?.removeAll();
+
+        this.closeMapPopup();
+        this.enableInfoPopupWindow(true);
+
+        this.suppressMapInteractionUntil = Date.now() + 80;
+
+        console.log('updatecomplete', feature);
+      }),
+      'sketch-update'
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // EVENT REGISTRATION
+  // ------------------------------------------------------------------
+  private registerLayerEvents(): void {
+    if (!this.view) return;
+
+    console.log('NEW CHANGE: registerLayerEvents called');
+
+    this.handles.remove('view-click');
+    this.handles.remove('native-dblclick');
+
+    // SINGLE CLICK
+    this.handles.add(
+      this.view.on('click', async (event: __esri.ViewClickEvent) => {
+        console.log('NEW CHANGE: single click fired', {
+          enableUserEdit: this.enableUserEdit,
+          inDrawingMode: this.inDrawingMode,
+          editorActive: this.editorActive,
+          suppress: this.shouldSuppressMapInteraction()
+        });
+
+        if (!this.view || this.inDrawingMode || this.editorActive) return;
+        if (this.shouldSuppressMapInteraction()) return;
+
+        // IMPORTANT:
+        // when edit mode is ON, single click does nothing
+        if (this.enableUserEdit) {
+          this.closeMapPopup();
+          return;
+        }
+
+        const hit = await this.view.hitTest(event);
+
+        const result = (hit.results ?? []).find((r: any) => {
+          return r?.type === 'graphic' && this.resultBelongsToManagedLayerResult(r);
+        }) as any;
+
+        if (!result?.graphic) {
+          this.closeMapPopup();
+          return;
+        }
+
+        const graphic = result.graphic as Graphic;
+        const uniqueId = graphic.attributes?.[this.uniqueIdPropertyName];
+        const location = event.mapPoint ?? this.getPopupLocation(graphic.geometry);
+
+        if (location) {
+          this.openMapPopup(graphic, location);
+        }
+
+        this.dispatchEvent(
+          new CustomEvent('layerClick', {
+            detail: {
+              graphic,
+              uniqueId,
+              attributes: graphic.attributes ?? {}
+            },
+            bubbles: true,
+            composed: true
+          })
+        );
+      }),
+      'view-click'
+    );
+
+    // NATIVE DOUBLE CLICK
+    const container = this.view.container as HTMLElement | null;
+    if (!container) return;
+
+    const nativeDblClickHandler = async (evt: MouseEvent) => {
+      console.log('NEW CHANGE: native dblclick fired', {
+        enableUserEdit: this.enableUserEdit,
+        inDrawingMode: this.inDrawingMode,
+        editorActive: this.editorActive,
+        suppress: this.shouldSuppressMapInteraction(),
+        editActivationInProgress: this.editActivationInProgress
+      });
+
+      // EDIT ON => editor
+      if (this.enableUserEdit) {
+        if (!this.view || this.inDrawingMode || this.editorActive) return;
+        if (this.shouldSuppressMapInteraction()) return;
+
+        evt.preventDefault();
+        evt.stopPropagation();
+
+        this.closeMapPopup();
+
+        const rect = container.getBoundingClientRect();
+        const screenPoint = {
+          x: evt.clientX - rect.left,
+          y: evt.clientY - rect.top
+        };
+
+        const hit = await this.view.hitTest(screenPoint as any);
+
+        console.log('NEW CHANGE: native dblclick hit results', hit.results);
+
+        const result = (hit.results ?? []).find((r: any) => {
+          return r?.type === 'graphic' && this.resultBelongsToManagedLayerResult(r);
+        }) as any;
+
+        if (!result?.graphic) {
+          console.log('NEW CHANGE: no graphic hit on dblclick');
+          return;
+        }
+
+        if (this.editActivationInProgress) return;
+        this.editActivationInProgress = true;
+
+        try {
+          const graphic = result.graphic as Graphic;
+          const uniqueId = graphic.attributes?.[this.uniqueIdPropertyName];
+
+          await this.activateGraphicsEditor(graphic);
+
+          this.dispatchEvent(
+            new CustomEvent('doubleClick', {
+              detail: {
+                graphic,
+                uniqueId,
+                attributes: graphic.attributes ?? {}
+              },
+              bubbles: true,
+              composed: true
+            })
+          );
+        } finally {
+          setTimeout(() => {
+            this.editActivationInProgress = false;
+          }, 100);
+        }
+
+        return;
+      }
+
+      // EDIT OFF => popup on double click too
+      if (!this.view || this.inDrawingMode || this.editorActive) return;
+      if (this.shouldSuppressMapInteraction()) return;
+
+      evt.preventDefault();
+      evt.stopPropagation();
+
+      const rect = container.getBoundingClientRect();
+      const screenPoint = {
+        x: evt.clientX - rect.left,
+        y: evt.clientY - rect.top
+      };
+
+      const hit = await this.view.hitTest(screenPoint as any);
+
+      const result = (hit.results ?? []).find((r: any) => {
+        return r?.type === 'graphic' && this.resultBelongsToManagedLayerResult(r);
+      }) as any;
+
+      if (!result?.graphic) {
+        this.closeMapPopup();
+        return;
+      }
+
+      const graphic = result.graphic as Graphic;
+      const uniqueId = graphic.attributes?.[this.uniqueIdPropertyName];
+      const location = this.getPopupLocation(graphic.geometry);
+
+      if (location) {
+        this.openMapPopup(graphic, location);
+      }
+
+      this.dispatchEvent(
+        new CustomEvent('doubleClick', {
+          detail: {
+            graphic,
+            uniqueId,
+            attributes: graphic.attributes ?? {}
+          },
+          bubbles: true,
+          composed: true
+        })
+      );
+    };
+
+    container.addEventListener('dblclick', nativeDblClickHandler);
+
+    this.handles.add(
+      {
+        remove: () => container.removeEventListener('dblclick', nativeDblClickHandler)
+      } as __esri.Handle,
+      'native-dblclick'
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // PLACEHOLDERS - KEEP YOUR EXISTING IMPLEMENTATIONS
+  // ------------------------------------------------------------------
+  private async createOrRefreshFeatureLayerIfNeeded(): Promise<void> {
+    // KEEP your current implementation here
+  }
+
+  private determineSketchCreateTool(drawGeometryType: string): string | null {
+    // KEEP your current implementation here
+    return drawGeometryType;
+  }
+
+  private resultBelongsToManagedLayerResult(r: any): boolean {
+    // KEEP your current implementation here
+    return !!r?.graphic;
+  }
+
+  private graphicToGeoJsonFeature(graphic: Graphic): any {
+    // KEEP your current implementation here
+    return {
+      type: 'Feature',
+      geometry: null,
+      properties: graphic.attributes ?? {}
+    };
+  }
+
+  private async appendFeatureToGeoJson(feature: any): Promise<void> {
+    // KEEP your current implementation here
+  }
+
+  private async updateGeoJsonWithChanges(feature: any): Promise<void> {
+    // KEEP your current implementation here
+  }
+
+  private async removeById(id: string | number): Promise<void> {
+    // KEEP your current implementation here
+  }
+
+  private getPopupLocation(geometry: Geometry): Point | null {
+    // KEEP your current implementation here
+    return null;
+  }
+}
+
+customElements.define('arc-geojson-layer', ArcGeoJsonLayer);
