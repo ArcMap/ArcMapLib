@@ -1,70 +1,91 @@
-// NOTE: add this right after this.view.map?.add(this.displayLayer)
-if (this.layerClass) {
-  (this.displayLayer as any).layerClass = this.layerClass;
-}
 
-// NOTE: add this block alongside the other changed.has() blocks
-if (changed.has('layerClass')) {
-  this.applyLayerClass(this.layerClass);
-}
+// NOTE: replace existing doubleClick dispatchEvent with this
+// adds mapPoint coordinates to match the docs' expected detail shape
+this.dispatchEvent(new CustomEvent('doubleClick', {
+  detail: {
+    graphic,
+    uniqueId,
+    attributes: graphic.attributes ?? {},
+    mapPoint: {
+      x: evt.clientX - rect.left,
+      y: evt.clientY - rect.top
+    }
+  },
+  bubbles: true,
+  composed: true
+}));
 
-// NOTE: entirely new method.
-// GraphicsLayer does not have a built-in className prop like FeatureLayer.
-// We wait for the view to finish rendering then find the layer's
-// DOM container and apply the CSS class directly to it.
-private applyLayerClass(className: string): void {
-  if (!this.view || !this.displayLayer) return;
 
-  // Use whenLayerView to get the LayerView, then find its container
-  (this.view as any).whenLayerView(this.displayLayer)
-    .then((layerView: any) => {
-      // The underlying canvas/svg container is on the layerView
-      const el =
-        layerView?.container?.element ??   // ArcGIS 4.x canvas renderer
-        layerView?.container ??
-        null;
+// NOTE: entirely new — add after the view.on('click') handle block
+// Tracks which graphic the mouse is currently over to avoid
+// firing mouseOver repeatedly for the same graphic.
+let currentHoveredId: string | number | null = null;
 
-      if (!el) {
-        // Fallback: search the view's container for the layer's element
-        const viewContainer = (this.view as any).container as HTMLElement | null;
-        if (!viewContainer) return;
+this.handles.add(
+  this.view.on('pointer-move', async (event: any) => {
+    if (!this.view || this.inDrawingMode || this.editorActive) return;
 
-        // ArcGIS renders each GraphicsLayer into a <canvas> or <div>
-        // tagged with the layer id
-        const layerId = (this.displayLayer as any).id;
-        const layerEl = viewContainer.querySelector(
-          `[data-layer-id="${layerId}"], #${layerId}`
-        ) as HTMLElement | null;
+    const hit = await this.view.hitTest(event);
+    const result = (hit.results ?? []).find((r: any) =>
+      r?.type === 'graphic' && r?.graphic?.layer === this.displayLayer
+    ) as any;
 
-        if (layerEl && className) {
-          // Clear old classes first
-          layerEl.className = layerEl.className
-            .split(' ')
-            .filter(c => !c.startsWith('gc-'))  // remove old layer classes
-            .join(' ');
-          layerEl.classList.add(className);
-        }
-        return;
+    const graphic = result?.graphic as Graphic | undefined;
+    const uniqueId = graphic?.attributes?.[this.uniqueIdPropertyName] ?? null;
+
+    if (graphic && uniqueId !== currentHoveredId) {
+      // Fired mouseOut for the previously hovered graphic
+      if (currentHoveredId !== null) {
+        const prevGraphic = this.findDisplayGraphic(currentHoveredId);
+        this.dispatchEvent(new CustomEvent('layerMouseOut', {
+          detail: {
+            graphic: prevGraphic ?? null,
+            uniqueId: currentHoveredId,
+            attributes: prevGraphic?.attributes ?? {}
+          },
+          bubbles: true,
+          composed: true
+        }));
       }
 
-      if (className) {
-        (el as HTMLElement).classList.add(className);
-      }
-    })
-    .catch(() => {
-      // LayerView not ready yet — retry after view is ready
-      if (typeof (this.view as any).when === 'function') {
-        (this.view as any).when().then(() => this.applyLayerClass(className));
-      }
-    });
-}
+      // Fire mouseOver for newly hovered graphic
+      currentHoveredId = uniqueId;
+      this.dispatchEvent(new CustomEvent('layerMouseOver', {
+        detail: {
+          graphic,
+          uniqueId,
+          attributes: graphic.attributes ?? {},
+          mapPoint: hit.results[0]?.mapPoint ?? null
+        },
+        bubbles: true,
+        composed: true
+      }));
 
-// NOTE: add before displayLayer is destroyed
-if (this.layerClass && this.view && this.displayLayer) {
-  (this.view as any).whenLayerView(this.displayLayer)
-    .then((layerView: any) => {
-      const el = layerView?.container?.element ?? layerView?.container;
-      if (el) (el as HTMLElement).classList.remove(this.layerClass);
-    })
-    .catch(() => {/* ignore on disconnect */});
-}
+      // Change cursor to pointer to signal interactivity
+      if (this.view) {
+        (this.view as any).cursor = 'pointer';
+      }
+
+    } else if (!graphic && currentHoveredId !== null) {
+      // Mouse left a feature and is now over empty map
+      const prevGraphic = this.findDisplayGraphic(currentHoveredId);
+      this.dispatchEvent(new CustomEvent('layerMouseOut', {
+        detail: {
+          graphic: prevGraphic ?? null,
+          uniqueId: currentHoveredId,
+          attributes: prevGraphic?.attributes ?? {}
+        },
+        bubbles: true,
+        composed: true
+      }));
+
+      currentHoveredId = null;
+
+      // Restore default cursor
+      if (this.view) {
+        (this.view as any).cursor = 'default';
+      }
+    }
+  }),
+  'pointer-move'
+);
