@@ -1,3 +1,111 @@
+
+private async activateGraphicsEditor(featureGraphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !this.sketchVM || !this.sketchLayer) return;
+  if (this.editorActive) return;
+
+  const uniqueId = featureGraphic.attributes?.[this.uniqueIdPropertyName];
+  this.editingUniqueId = uniqueId ?? null;
+
+  this.closePopup();
+  this.enableInfoPopupWindow(false);
+
+  this.sketchVM.cancel();
+  this.sketchLayer.removeAll();
+
+  // FIX: build a brand-new Graphic with no layer reference.
+  // Do NOT use featureGraphic.clone() — the clone carries the FeatureLayer
+  // reference and causes AbortError when the FeatureLayer is rebuilt.
+  const freshGeometry = featureGraphic.geometry?.clone();
+  if (!freshGeometry) return;
+
+  const editGraphic = new Graphic({
+    geometry: freshGeometry,
+    attributes: { ...(featureGraphic.attributes ?? {}) },
+    symbol: featureGraphic.symbol ?? undefined
+  });
+  editGraphic.popupTemplate = null;
+
+  this.sketchLayer.add(editGraphic);
+
+  const updateTool = this.getUpdateTool();
+  if (!updateTool) {
+    console.warn(
+      'ArcGeoJsonLayer: no update tool configured. ' +
+      'Enable at least one of: enableUserEditMove, enableUserEditVertices, ' +
+      'enableUserEditScaling, enableUserEditRotating.'
+    );
+    return;
+  }
+
+  // Wait for sketch layer to render the new graphic
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  // Hard-clear the flag so no stale state from draw-complete can bleed in
+  this.sketchVMCancelledProgrammatically = false;
+  this.editorActive = true;
+
+  this.sketchVM.update([editGraphic], {
+    tool: updateTool,
+    enableRotation: this.enableUserEditRotating,
+    enableScaling: this.enableUserEditScaling,
+    preserveAspectRatio: this.enableUserEditUniformScaling,
+    toggleToolOnClick: false,
+    multipleSelectionEnabled: false
+  });
+}
+
+
+
+
+this.sketchVM.on('create', async (event: any) => {
+  if (event.state !== 'complete' || !event.graphic) return;
+
+  const graphic = event.graphic;
+  graphic.popupTemplate = null;
+  if (!graphic.attributes) graphic.attributes = {};
+  if (graphic.attributes[this.uniqueIdPropertyName] == null) {
+    graphic.attributes[this.uniqueIdPropertyName] =
+      crypto.randomUUID?.() ?? `id-${Date.now()}`;
+  }
+
+  const feature = this.graphicToGeoJsonFeature(graphic);
+
+  // FIX: clear sketch layer BEFORE appending + rebuilding feature layers
+  // so there is no window where both the sketch graphic and the
+  // new FeatureLayer graphic exist at the same time.
+  this.sketchLayer?.removeAll();
+  this.sketchVM?.cancel();    // direct cancel — no flag
+  this.inDrawingMode = false;
+  this.editingUniqueId = null;
+
+  await this.appendFeatureToGeoJson(feature);
+
+  this.dispatchEvent(new CustomEvent('userDrawItemAdded', {
+    detail: feature, bubbles: true, composed: true
+  }));
+
+  if (this.view && (this.view as any).popupEnabled) {
+    this.closePopup();
+  }
+
+  console.log('draw complete', feature);
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { PropertyValues } from 'lit';
