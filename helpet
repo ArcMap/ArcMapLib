@@ -1,108 +1,70 @@
-// NOTE: entirely new method — renders one TextSymbol graphic per
-// feature per label def, positioned at the feature's centre point.
-private refreshLabelLayer(): void {
-  if (!this.labelLayer) return;
-  this.labelLayer.removeAll();
-
-  if (!this.labelJson) return;
-
-  const fc = this.parseFC(this.geojson);
-  if (!fc) return;
-
-  const defs = this.parseLabelDefs(this.labelJson);
-  if (!defs.length) return;
-
-  fc.features.forEach((feature) => {
-    if (!feature.geometry) return;
-    const geometry = this.toArcGisGeometry(feature.geometry);
-    if (!geometry) return;
-    const center = this.getGeometryCenter(geometry);
-    if (!center) return;
-    const props = feature.properties ?? {};
-
-    for (const def of defs) {
-      if (def.where && !this.evaluateWhere(def.where, props)) continue;
-      const text = this.resolveLabelText(def, props);
-      if (!text) continue;
-
-      const sym = this.buildTextSymbol(def, text);
-      this.labelLayer!.add(new Graphic({ geometry: center, symbol: sym }));
-    }
-  });
+// NOTE: add this right after this.view.map?.add(this.displayLayer)
+if (this.layerClass) {
+  (this.displayLayer as any).layerClass = this.layerClass;
 }
 
-// NOTE: parses labelJson into an array of label definition objects
-private parseLabelDefs(input: string | object | object[]): any[] {
-  try {
-    const parsed = typeof input === 'string' ? JSON.parse(input) : input;
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    console.error('arc-geojson-layer: invalid labelJson');
-    return [];
-  }
+// NOTE: add this block alongside the other changed.has() blocks
+if (changed.has('layerClass')) {
+  this.applyLayerClass(this.layerClass);
 }
 
-// NOTE: resolves label text from a definition + feature properties.
-// Supports classic "[FIELD]" and Arcade-lite "$feature.FIELD" formats.
-private resolveLabelText(def: any, props: Record<string, any>): string {
-  if (def.labelExpression) {
-    return def.labelExpression.replace(/\[([^\]]+)\]/g,
-      (_: string, f: string) => props[f] != null ? String(props[f]) : ''
-    );
-  }
-  if (def.labelExpressionInfo?.expression) {
-    return def.labelExpressionInfo.expression.replace(
-      /\$feature\.(\w+)/g,
-      (_: string, f: string) => props[f] != null ? String(props[f]) : ''
-    );
-  }
-  return '';
+// NOTE: entirely new method.
+// GraphicsLayer does not have a built-in className prop like FeatureLayer.
+// We wait for the view to finish rendering then find the layer's
+// DOM container and apply the CSS class directly to it.
+private applyLayerClass(className: string): void {
+  if (!this.view || !this.displayLayer) return;
+
+  // Use whenLayerView to get the LayerView, then find its container
+  (this.view as any).whenLayerView(this.displayLayer)
+    .then((layerView: any) => {
+      // The underlying canvas/svg container is on the layerView
+      const el =
+        layerView?.container?.element ??   // ArcGIS 4.x canvas renderer
+        layerView?.container ??
+        null;
+
+      if (!el) {
+        // Fallback: search the view's container for the layer's element
+        const viewContainer = (this.view as any).container as HTMLElement | null;
+        if (!viewContainer) return;
+
+        // ArcGIS renders each GraphicsLayer into a <canvas> or <div>
+        // tagged with the layer id
+        const layerId = (this.displayLayer as any).id;
+        const layerEl = viewContainer.querySelector(
+          `[data-layer-id="${layerId}"], #${layerId}`
+        ) as HTMLElement | null;
+
+        if (layerEl && className) {
+          // Clear old classes first
+          layerEl.className = layerEl.className
+            .split(' ')
+            .filter(c => !c.startsWith('gc-'))  // remove old layer classes
+            .join(' ');
+          layerEl.classList.add(className);
+        }
+        return;
+      }
+
+      if (className) {
+        (el as HTMLElement).classList.add(className);
+      }
+    })
+    .catch(() => {
+      // LayerView not ready yet — retry after view is ready
+      if (typeof (this.view as any).when === 'function') {
+        (this.view as any).when().then(() => this.applyLayerClass(className));
+      }
+    });
 }
 
-// NOTE: builds a TextSymbol from a label def.
-// def.symbol.font.size and def.symbol.color take precedence
-// over the labelSize and labelColor component properties.
-private buildTextSymbol(def: any, text: string): TextSymbol {
-  const s = def.symbol ?? {};
-  return new TextSymbol({
-    text,
-    color: s.color ?? this.labelColor,
-    haloColor: s.haloColor ?? [255, 255, 255, 255],
-    haloSize:  s.haloSize  ?? 1,
-    font: {
-      size:   s.font?.size   ?? this.labelSize,
-      weight: s.font?.weight ?? 'normal'
-    },
-    xoffset: s.xoffset ?? 0,
-    yoffset: s.yoffset ?? 0
-  });
+// NOTE: add before displayLayer is destroyed
+if (this.layerClass && this.view && this.displayLayer) {
+  (this.view as any).whenLayerView(this.displayLayer)
+    .then((layerView: any) => {
+      const el = layerView?.container?.element ?? layerView?.container;
+      if (el) (el as HTMLElement).classList.remove(this.layerClass);
+    })
+    .catch(() => {/* ignore on disconnect */});
 }
-
-// NOTE: simple WHERE clause evaluator.
-// Handles "FIELD = 'value'" and "FIELD IS NOT NULL" patterns.
-private evaluateWhere(where: string, props: Record<string, any>): boolean {
-  try {
-    const expr = where.replace(/\[?(\w+)\]?(?=\s*=|\s+IS)/g,
-      (match, f) => f in props ? JSON.stringify(props[f] ?? null) : match
-    );
-    // eslint-disable-next-line no-new-func
-    return Boolean(new Function(`return (${expr})`)());
-  } catch {
-    return true; // show label if we can't evaluate
-  }
-}
-
-// NOTE: new helper used by refreshLabelLayer to find label anchor point
-private getGeometryCenter(geometry: Geometry): Point | null {
-  if (geometry.type === 'point') return geometry as Point;
-  return (geometry as any).extent?.center ?? null;
-}
-
-// NOTE: every place you call:
-this.refreshDisplayLayer();
-// also add immediately after:
-this.refreshLabelLayer();
-
-// This applies in: appendFeature(), updateFeature(),
-// removeById(), and the sketch update complete handler.
-
