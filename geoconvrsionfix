@@ -177,3 +177,85 @@ this.featureLayer.when(async () => {
   this.geojson = geoJson;
   this.blockGeoJsonUpdate = false;
 });
+
+
+===#
+private _getArcGisJson(geojson: string | FeatureCollection | object): any {
+  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
+  if (geojsonParseResult.error) {
+    console.error('Unable to parse geojson string', geojsonParseResult.error);
+    return null;
+  }
+
+  const parsed = geojsonParseResult.parsedJson;
+  if (!parsed?.features || !Array.isArray(parsed.features)) {
+    console.error('JSON value for geojson attribute could not be converted as geojson');
+    return null;
+  }
+
+  const features = parsed.features.map((feature: any, index: number) => ({
+    geometry: feature.geometry,
+    attributes: {
+      ...feature.properties,
+      OBJECTID: index,
+      [this.uniqueIdPropertyName]:
+        feature.id ??
+        feature.properties?.[this.uniqueIdPropertyName] ??
+        index,
+    },
+  }));
+
+  // ✅ ArcGIS 4.x FeatureLayer.geometryType uses SHORT names NOT esri prefix
+  let esriGeomType = 'polygon'; // default
+  if (features.length > 0 && features[0].geometry) {
+    const gtype = features[0].geometry.type;
+    switch (gtype) {
+      case 'LineString':
+      case 'MultiLineString':
+        esriGeomType = 'polyline'; break;
+      case 'Point':
+        esriGeomType = 'point'; break;
+      case 'MultiPoint':
+        esriGeomType = 'multipoint'; break;
+      case 'Polygon':
+      case 'MultiPolygon':
+        esriGeomType = 'polygon'; break;
+    }
+  }
+
+  return {
+    jsonFS: {
+      displayFieldName: 'LABEL',
+      geometryType: esriGeomType,
+      spatialReference: { wkid: 4326 },
+      fields: [this.objectIdField],
+      features,
+    },
+  };
+}
+
+
+static determineFeatureLayerGeometryType(drawGeometryType: string): string {
+  switch (drawGeometryType.toUpperCase()) {
+    case DrawEditUtils.DrawGeometryTypes.FREEHAND_POLYLINE:
+    case DrawEditUtils.DrawGeometryTypes.LINE:
+    case DrawEditUtils.DrawGeometryTypes.POLYLINE:
+      return 'polyline'; // ✅ NOT 'esriGeometryPolyline'
+    case DrawEditUtils.DrawGeometryTypes.MULTI_POINT:
+      return 'multipoint'; // ✅ NOT 'esriGeometryMultipoint'
+    case DrawEditUtils.DrawGeometryTypes.POINT:
+      return 'point'; // ✅ NOT 'esriGeometryPoint'
+    default:
+      return 'polygon'; // ✅ NOT 'esriGeometryPolygon'
+  }
+}
+
+
+static getEsriGeomTypeFor(jsonEsriGeom: any): string {
+  // ✅ Return short 4.x geometry type strings
+  if (jsonEsriGeom.paths) return 'polyline';
+  else if (jsonEsriGeom.rings) return 'polygon';
+  else if (jsonEsriGeom.points) return 'multipoint';
+  return 'point';
+}
+
