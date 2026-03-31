@@ -920,5 +920,46 @@ export class ArcGeoJsonLayer extends LitElement {
         composed: true,
       })
     );
+
+}
+
+
+
+async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
+  const graphicMatch: Graphic = await this.findFeatureByUniqueId(id);
+  if (graphicMatch === undefined) {
+    console.warn(
+      'No feature found with a',
+      this.uniqueIdPropertyName,
+      'value of',
+      id,
+      '. Cannot zoom to.'
+    );
+    return;
+  }
+
+  const esriMap = await this.ancestorMap.getEsriMap();
+  const view = esriMap as any;
+
+  // ✅ Cast geometry to any to avoid TypeScript narrowing issues
+  const geometry = graphicMatch.geometry as any;
+
+  if (!geometry) {
+    console.warn('zoomTo: graphic has no geometry');
+    return;
+  }
+
+  if (geometry.type === 'point') {
+    return view.goTo({ target: geometry, zoom: zoomLevel });
+  } else if (
+    geometry.type === 'polyline' ||
+    geometry.type === 'polygon'
+  ) {
+    return view.goTo(geometry.extent);
+  } else {
+    console.error(
+      'Unrecognized geometry type',
+      geometry.type
+    );
   }
 }
