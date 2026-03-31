@@ -1,0 +1,179 @@
+// ❌ OLD
+const features = geojsonToArcGIS(geojsonParseResult.parsedJson);
+
+// ✅ NEW - manual conversion using @arcgis/core
+private _geojsonFeaturesToArcGIS(geojsonFeatureCollection: any): any[] {
+  if (!geojsonFeatureCollection?.features) return [];
+  return geojsonFeatureCollection.features.map((feature: any, index: number) => {
+    return {
+      geometry: feature.geometry,
+      attributes: {
+        ...feature.properties,
+        OBJECTID: index,
+        [this.uniqueIdPropertyName]: feature.id ?? feature.properties?.[this.uniqueIdPropertyName] ?? index,
+      },
+    };
+  });
+}
+
+
+// ❌ OLD
+const convertedGraphic = arcgisToGeoJSON(graphic.toJSON());
+
+// ✅ NEW
+private _arcGisGraphicToGeoJson(graphic: Graphic): any {
+  const json = graphic.toJSON();
+  return {
+    type: 'Feature',
+    id: graphic.attributes?.[this.uniqueIdPropertyName],
+    geometry: json.geometry ?? null,
+    properties: { ...graphic.attributes },
+  };
+}
+
+
+// ❌ OLD
+const convertedGeoJson = arcgisToGeoJSON(
+  (this.featureLayer as any).toJSON().featureSet
+);
+
+// ✅ NEW
+private async _getCurrentGeoJson(): Promise<any> {
+  const result = await this.featureLayer.queryFeatures();
+  return {
+    type: 'FeatureCollection',
+    features: result.features.map(g => this._arcGisGraphicToGeoJson(g)),
+  };
+}
+
+
+private _getArcGisJson(geojson: string | FeatureCollection | object): any {
+  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
+  if (geojsonParseResult.error) {
+    console.error('Unable to parse geojson string', geojsonParseResult.error);
+    return null;
+  }
+
+  const parsed = geojsonParseResult.parsedJson;
+  if (!parsed?.features || !Array.isArray(parsed.features)) {
+    console.error('JSON value for geojson attribute could not be converted as geojson');
+    return null;
+  }
+
+  // ✅ Convert GeoJSON features to ArcGIS format manually
+  const features = parsed.features.map((feature: any, index: number) => ({
+    geometry: feature.geometry,
+    attributes: {
+      ...feature.properties,
+      OBJECTID: index,
+      [this.uniqueIdPropertyName]:
+        feature.id ??
+        feature.properties?.[this.uniqueIdPropertyName] ??
+        index,
+    },
+  }));
+
+  let esriGeomType = 'esriGeometryPolygon';
+  if (features.length > 0 && features[0].geometry) {
+    const gtype = features[0].geometry.type;
+    switch (gtype) {
+      case 'LineString':
+      case 'MultiLineString':
+        esriGeomType = 'esriGeometryPolyline'; break;
+      case 'Point':
+        esriGeomType = 'esriGeometryPoint'; break;
+      case 'MultiPoint':
+        esriGeomType = 'esriGeometryMultipoint'; break;
+      case 'Polygon':
+      case 'MultiPolygon':
+        esriGeomType = 'esriGeometryPolygon'; break;
+    }
+  }
+
+  return {
+    jsonFS: {
+      displayFieldName: 'LABEL',
+      geometryType: esriGeomType,
+      spatialReference: { wkid: 4326 },
+      fields: [this.objectIdField],
+      features,
+    },
+  };
+}
+
+
+private async addToGeoJson(newGraphic: Graphic) {
+  await this.featureLayer.applyEdits({ addFeatures: [newGraphic] });
+
+  // ✅ No terraformer needed
+  const convertedGraphic = this._arcGisGraphicToGeoJson(newGraphic);
+  const newGeoJson = JsonUtils.getJsonFor(this.geojson);
+  (newGeoJson.parsedJson as any).features.push(convertedGraphic);
+  this.geojson = newGeoJson.parsedJson;
+
+  this.dispatchEvent(new CustomEvent('userDrawItemAdded', {
+    detail: convertedGraphic, bubbles: true, composed: true,
+  }));
+}
+
+private async removeFromGeoJson(graphicToRemove: Graphic) {
+  await this.featureLayer.applyEdits({ deleteFeatures: [graphicToRemove] });
+
+  const convertedGraphic = this._arcGisGraphicToGeoJson(graphicToRemove);
+  const idToRemove = graphicToRemove.attributes?.[this.uniqueIdPropertyName];
+
+  const newGeoJson = JsonUtils.getJsonFor(this.geojson);
+  const newFeatures: any[] = newGeoJson.parsedJson.features;
+  const indexToRemove = newFeatures.findIndex(
+    (f) => f.id === idToRemove ||
+      f.properties?.[this.uniqueIdPropertyName] === idToRemove
+  );
+  if (indexToRemove > -1) newFeatures.splice(indexToRemove, 1);
+  this.geojson = newGeoJson.parsedJson;
+
+  this.dispatchEvent(new CustomEvent('userEditItemRemoved', {
+    detail: convertedGraphic, bubbles: true, composed: true,
+  }));
+}
+
+
+private async updateGeoJsonWithChanges(graphicToUpdate: Graphic) {
+  await this.featureLayer.applyEdits({ updateFeatures: [graphicToUpdate] });
+
+  const convertedGraphic = this._arcGisGraphicToGeoJson(graphicToUpdate);
+  const idToUpdate = graphicToUpdate.attributes?.[this.uniqueIdPropertyName];
+
+  const newGeoJson = JsonUtils.getJsonFor(this.geojson);
+  for (let i = 0; i < newGeoJson.parsedJson.features.length; i++) {
+    const f = newGeoJson.parsedJson.features[i];
+    if (
+      f.id === idToUpdate ||
+      f.properties?.[this.uniqueIdPropertyName] === idToUpdate
+    ) {
+      newGeoJson.parsedJson.features[i] = convertedGraphic;
+      break;
+    }
+  }
+  this.geojson = newGeoJson.parsedJson;
+
+  this.dispatchEvent(new CustomEvent('userEditItemUpdated', {
+    detail: convertedGraphic, bubbles: true, composed: true,
+  }));
+}
+
+
+// ❌ OLD
+const convertedGeoJson = arcgisToGeoJSON(
+  (this.featureLayer as any).toJSON().featureSet
+);
+this.blockGeoJsonUpdate = true;
+this.geojson = convertedGeoJson as any;
+this.blockGeoJsonUpdate = false;
+
+// ✅ NEW
+this.featureLayer.when(async () => {
+  const geoJson = await this._getCurrentGeoJson();
+  this.blockGeoJsonUpdate = true;
+  this.geojson = geoJson;
+  this.blockGeoJsonUpdate = false;
+});
