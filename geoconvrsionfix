@@ -336,5 +336,73 @@ static getJsonLabelFor(color: number[], fontSize: number): object {
       },
     },
   }];
+"########
+
+static async updatePopup(
+  newInfoTemplate: any,
+  mapElement: ArcMapElement,
+  featureLayer: FeatureLayer,
+) {
+  if (!featureLayer) return;
+
+  // ✅ Guard: if empty/null/undefined, just clear popup and return
+  if (!newInfoTemplate || newInfoTemplate === '') {
+    featureLayer.popupTemplate = null as any;
+    return;
+  }
+
+  const templateParseResult = JsonUtils.getJsonFor(newInfoTemplate);
+  if (templateParseResult.error) {
+    console.warn('could not parse infoTemplate value', templateParseResult.error);
+    return;
+  }
+
+  // rest of method unchanged...
 }
+
+static getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+  // ✅ Guard empty/null values
+  if (jsonObj === null || jsonObj === undefined || jsonObj === '') {
+    return { parsedJson: null };
+  }
+  if (typeof jsonObj === 'string') {
+    try {
+      return { parsedJson: JSON.parse(jsonObj) };
+    } catch (e) {
+      return { error: e as Error };
+    }
+  }
+  return { parsedJson: jsonObj };
+}
+
+
+private async _onGeojsonChanged(newGeojson: string | FeatureCollection) {
+  // ✅ Check blockGeoJsonUpdate FIRST before any other check
+  if (this.blockGeoJsonUpdate) return;
+  if (this.removingItem) return;
+
+  // Only warn if actively editing/drawing, not on initial load
+  if ((this.enableUserEdit || this.inDrawingMode) && this.featureLayer) {
+    console.warn('Cannot update GeoJson while user is editing or drawing new features.');
+    return;
+  }
+
+  if (!this.featureLayer) {
+    this.createLayer(newGeojson);
+    return;
+  }
+
+  // ... rest of method
+}
+
+
+// ✅ Block the watcher BEFORE setting geojson internally
+this.featureLayer.when(async () => {
+  const geoJson = await this._getCurrentGeoJson();
+  this.blockGeoJsonUpdate = true;
+  this.geojson = geoJson;
+  // Use requestUpdate to ensure Lit processes this
+  await this.requestUpdate('geojson');
+  this.blockGeoJsonUpdate = false;
+});
 
