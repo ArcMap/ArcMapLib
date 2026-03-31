@@ -1,0 +1,252 @@
+import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
+import { ArcLayerList } from './arc-layer-list';
+
+// ─── Mock reactiveUtils ───────────────────────────────────────────
+jest.mock('@arcgis/core/core/reactiveUtils', () => ({
+  watch: jest.fn().mockReturnValue({ remove: jest.fn() }),
+}));
+
+// ─── Mock MapView ─────────────────────────────────────────────────
+const mockMapView = {
+  when: jest.fn().mockResolvedValue(undefined),
+  map: {
+    allLayers: { length: 1 },
+    basemap: {
+      baseLayers: { length: 0 },
+      referenceLayers: { length: 0 },
+    },
+  },
+};
+
+// ─── Mock <up-map> ────────────────────────────────────────────────
+class MockUpMap extends HTMLElement {
+  async getViewInstance() {
+    return mockMapView;
+  }
+}
+if (!customElements.get('up-map')) {
+  customElements.define('up-map', MockUpMap);
+}
+
+// ─── Mock <arcgis-layer-list> web component ───────────────────────
+class MockArcgisLayerList extends HTMLElement {
+  view?: any;
+}
+if (!customElements.get('arcgis-layer-list')) {
+  customElements.define('arcgis-layer-list', MockArcgisLayerList);
+}
+
+// ─── Mock <arc-layer-list> ────────────────────────────────────────
+if (!customElements.get('arc-layer-list')) {
+  customElements.define('arc-layer-list', ArcLayerList);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+const getArcgisLayerListEl = (el: ArcLayerList) =>
+  el.shadowRoot?.querySelector('arcgis-layer-list') as MockArcgisLayerList;
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+// ─── Tests ────────────────────────────────────────────────────────
+describe('ArcLayerList (<arc-layer-list>)', () => {
+
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+    jest.clearAllMocks();
+  });
+
+  // ─── Rendering ──────────────────────────────────────────────
+
+  describe('rendering', () => {
+    it('renders <arcgis-layer-list> web component inside shadow root', async () => {
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      container.appendChild(el);
+      await el.updateComplete;
+
+      expect(getArcgisLayerListEl(el)).toBeTruthy();
+    });
+
+    it('does not render deprecated esri LayerList widget markup', async () => {
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      container.appendChild(el);
+      await el.updateComplete;
+
+      expect(el.shadowRoot?.querySelector('.esri-layer-list')).toBeFalsy();
+    });
+  });
+
+  // ─── Ancestor Mode (no map-id) ───────────────────────────────
+
+  describe('ancestor mode — no map-id', () => {
+    it('finds nearest <up-map> ancestor and sets view', async () => {
+      const upMap = document.createElement('up-map') as MockUpMap;
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      upMap.appendChild(el);
+      container.appendChild(upMap);
+
+      await el.updateComplete;
+      await tick();
+
+      expect(getArcgisLayerListEl(el)?.view).toBe(mockMapView);
+    });
+
+    it('logs error when no ancestor <up-map> found', async () => {
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      container.appendChild(el);
+
+      await el.updateComplete;
+      await tick();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Must be inside <up-map>')
+      );
+    });
+  });
+
+  // ─── Map ID Mode ─────────────────────────────────────────────
+
+  describe('map-id mode — sibling <up-map>', () => {
+    it('finds <up-map> by id in same root and sets view', async () => {
+      const upMap = document.createElement('up-map') as MockUpMap;
+      upMap.id = 'map1';
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      el.setAttribute('map-id', 'map1');
+
+      container.appendChild(upMap);
+      container.appendChild(el);
+
+      await el.updateComplete;
+      await tick();
+
+      expect(getArcgisLayerListEl(el)?.view).toBe(mockMapView);
+    });
+
+    it('logs error when map-id does not match any <up-map>', async () => {
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      el.setAttribute('map-id', 'nonexistent');
+      container.appendChild(el);
+
+      await el.updateComplete;
+      await tick();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No <up-map id="nonexistent">')
+      );
+    });
+  });
+
+  // ─── Map ID Change (Refresh) ──────────────────────────────────
+
+  describe('map-id change', () => {
+    it('detaches from old map and attaches to new map on map-id change', async () => {
+      const upMap1 = document.createElement('up-map') as MockUpMap;
+      upMap1.id = 'mapA';
+
+      const upMap2 = document.createElement('up-map') as MockUpMap;
+      upMap2.id = 'mapB';
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      el.setAttribute('map-id', 'mapA');
+
+      container.appendChild(upMap1);
+      container.appendChild(upMap2);
+      container.appendChild(el);
+
+      await el.updateComplete;
+      await tick();
+
+      // Change to mapB
+      el.setAttribute('map-id', 'mapB');
+      await el.updateComplete;
+      await tick();
+
+      expect(getArcgisLayerListEl(el)?.view).toBe(mockMapView);
+    });
+
+    it('clears view during detach before re-attaching', async () => {
+      const upMap = document.createElement('up-map') as MockUpMap;
+      upMap.id = 'mapX';
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      el.setAttribute('map-id', 'mapX');
+
+      container.appendChild(upMap);
+      container.appendChild(el);
+
+      await el.updateComplete;
+      await tick();
+
+      const arcgisEl = getArcgisLayerListEl(el);
+      expect(arcgisEl?.view).toBe(mockMapView);
+
+      // Trigger map-id change to unknown — view should clear
+      el.setAttribute('map-id', 'unknown');
+      await el.updateComplete;
+      await tick();
+
+      expect(arcgisEl?.view).toBeUndefined();
+    });
+  });
+
+  // ─── Disconnection ────────────────────────────────────────────
+
+  describe('disconnection', () => {
+    it('clears view and watchers on disconnect', async () => {
+      const upMap = document.createElement('up-map');
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      upMap.appendChild(el);
+      container.appendChild(upMap);
+
+      await el.updateComplete;
+      await tick();
+
+      const arcgisEl = getArcgisLayerListEl(el);
+      expect(arcgisEl?.view).toBeDefined();
+
+      upMap.removeChild(el);
+
+      expect(arcgisEl?.view).toBeUndefined();
+    });
+  });
+
+  // ─── getViewInstance failure ──────────────────────────────────
+
+  describe('getViewInstance edge cases', () => {
+    it('logs error if getViewInstance returns null', async () => {
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      // Override getViewInstance to return null
+      const upMap = document.createElement('up-map') as MockUpMap;
+      upMap.getViewInstance = async () => null as any;
+
+      const el = document.createElement('arc-layer-list') as ArcLayerList;
+      upMap.appendChild(el);
+      container.appendChild(upMap);
+
+      await el.updateComplete;
+      await tick();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('getViewInstance() returned null')
+      );
+    });
+  });
+});
