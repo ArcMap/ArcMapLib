@@ -257,5 +257,84 @@ static getEsriGeomTypeFor(jsonEsriGeom: any): string {
   else if (jsonEsriGeom.rings) return 'polygon';
   else if (jsonEsriGeom.points) return 'multipoint';
   return 'point';
+####
+
+static getJsonSymbolFor(geomType: string, color: number[], markerSize: number): object {
+  // ✅ In 4.x SimpleRenderer just needs type: 'simple' and a symbol object
+  const symbolJson: any = {
+    type: 'simple',       // renderer type
+    symbol: undefined,
+  };
+
+  switch (geomType) {
+    case 'point':
+    case 'multipoint':
+      // ✅ 4.x uses 'simple-marker' not 'esriSMS'
+      symbolJson.symbol = {
+        type: 'simple-marker',
+        color: color,
+        size: markerSize,
+        outline: {
+          type: 'simple-line',
+          color: [0, 0, 0, 200],
+          width: 1,
+        },
+      };
+      break;
+
+    case 'polyline':
+      // ✅ 4.x uses 'simple-line' not 'esriSLS'
+      symbolJson.symbol = {
+        type: 'simple-line',
+        color: color,
+        width: markerSize,
+        style: 'solid',
+      };
+      break;
+
+    case 'polygon':
+      // ✅ 4.x uses 'simple-fill' not 'esriSFS'
+      symbolJson.symbol = {
+        type: 'simple-fill',
+        color: color,
+        style: 'solid',
+        outline: {
+          type: 'simple-line',
+          color: [110, 110, 110, 255],
+          width: markerSize,
+        },
+      };
+      break;
+
+    default:
+      symbolJson.symbol = {
+        type: 'simple-marker',
+        color: color,
+        size: markerSize,
+      };
+      break;
+  }
+
+  return symbolJson;
+}
+
+
+static getJsonLabelFor(color: number[], fontSize: number): object {
+  return [{
+    labelExpressionInfo: { expression: '$feature.LABEL' },
+    symbol: {
+      type: 'text',          // ✅ 4.x uses 'text' not 'esriTS'
+      color: color,
+      haloColor: 'black',
+      haloSize: 1,
+      xoffset: 3,
+      yoffset: 3,
+      font: {
+        size: fontSize,
+        family: 'sans-serif',
+        weight: 'bolder',
+      },
+    },
+  }];
 }
 
