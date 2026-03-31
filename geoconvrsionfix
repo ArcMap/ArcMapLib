@@ -2,211 +2,118 @@ private _getDefaultSymbol(geomType: string): any {
   switch (geomType) {
     case 'point':
     case 'multipoint':
-      return {
-        type: 'simple-marker',
+      return new SimpleMarkerSymbol({
         color: this.DEFAULT_SYMBOL_COLOR,
-        size: ArcGeoJsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+        size: 10,
         outline: {
-          type: 'simple-line',
           color: [0, 0, 0, 255],
           width: 1,
         },
-      };
+      });
     case 'polyline':
-      return {
-        type: 'simple-line',
+      return new SimpleLineSymbol({
         color: this.DEFAULT_SYMBOL_COLOR,
         width: 2,
-      };
+      });
     case 'polygon':
     default:
-      return {
-        type: 'simple-fill',
+      return new SimpleFillSymbol({
         color: [
           this.DEFAULT_SYMBOL_COLOR[0],
           this.DEFAULT_SYMBOL_COLOR[1],
           this.DEFAULT_SYMBOL_COLOR[2],
           100,
         ],
-        style: 'solid',
-        outline: {
-          type: 'simple-line',
+        outline: new SimpleLineSymbol({
           color: this.DEFAULT_SYMBOL_COLOR,
           width: 1,
-        },
-      };
+        }),
+      });
   }
 }
 
-
-private _getArcGisJson(geojson: string | FeatureCollection | object): any {
-  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
-  if (geojsonParseResult.error) {
-    console.error('Unable to parse geojson string', geojsonParseResult.error);
-    return null;
-  }
-
-  const parsed = geojsonParseResult.parsedJson;
-  if (!parsed?.features || !Array.isArray(parsed.features)) {
-    console.error('JSON value for geojson attribute could not be converted as geojson');
-    return null;
-  }
-
-  // ✅ Convert each GeoJSON feature into a real ArcGIS Graphic object
-  const features = parsed.features.map((feature: any, index: number) => {
-    // ✅ Convert raw geometry to real ArcGIS geometry object
-    const geometry = this._geojsonGeometryToArcGIS(feature.geometry);
-
-    return new Graphic({
-      geometry,
-      attributes: {
-        ...feature.properties,
-        OBJECTID: index,
-        [this.uniqueIdPropertyName]:
-          feature.id ??
-          feature.properties?.[this.uniqueIdPropertyName] ??
-          index,
-      },
-    });
-  });
-
-  // ✅ Detect geometry type from GeoJSON type string
-  let geomType = 'polygon';
-  if (parsed.features.length > 0 && parsed.features[0].geometry) {
-    switch (parsed.features[0].geometry.type) {
-      case 'Point':
-        geomType = 'point'; break;
-      case 'MultiPoint':
-        geomType = 'multipoint'; break;
-      case 'LineString':
-      case 'MultiLineString':
-        geomType = 'polyline'; break;
-      case 'Polygon':
-      case 'MultiPolygon':
-        geomType = 'polygon'; break;
+static getLabelJson(userLabel: any, userColor: any, userSize: any): any {
+  // ✅ Guard empty/null label json
+  if (!userLabel || userLabel === '') {
+    // Skip parsing, go straight to default
+    let labelColor = this.DEFAULT_LABEL_COLOR;
+    const colorJson = this.getJsonFor(userColor);
+    if (!colorJson.error && colorJson.parsedJson) {
+      labelColor = colorJson.parsedJson;
     }
+    let labelSize = this.DEFAULT_LABEL_SIZE;
+    if (!isNaN(userSize) && userSize > 0) {
+      labelSize = userSize;
+    }
+    return this.getJsonLabelFor(labelColor, labelSize);
+  }
+
+  const labelJson = this.getJsonFor(userLabel);
+  if (labelJson.error || !labelJson.parsedJson) {
+    if (labelJson.error) {
+      console.warn('Could not parse label json', labelJson.error);
+    }
+    return this.getJsonLabelFor(this.DEFAULT_LABEL_COLOR, this.DEFAULT_LABEL_SIZE);
+  }
+  return labelJson.parsedJson;
+}
+
+
+private _arcGisGraphicToGeoJson(graphic: Graphic): any {
+  // ✅ Guard against undefined/null graphic
+  if (!graphic) {
+    console.warn('_arcGisGraphicToGeoJson: graphic is undefined');
+    return null;
+  }
+
+  // ✅ Guard against missing geometry
+  if (!graphic.geometry) {
+    return {
+      type: 'Feature',
+      id: graphic.attributes?.[this.uniqueIdPropertyName],
+      geometry: null,
+      properties: { ...graphic.attributes },
+    };
+  }
+
+  const geometryJson = graphic.geometry.toJSON();
+
+  // Convert ArcGIS geometry JSON to GeoJSON format
+  let geoJsonGeometry: any = null;
+
+  switch (graphic.geometry.type) {
+    case 'point': {
+      const g = graphic.geometry as Point;
+      geoJsonGeometry = {
+        type: 'Point',
+        coordinates: [g.longitude, g.latitude],
+      };
+      break;
+    }
+    case 'polyline': {
+      const g = graphic.geometry as Polyline;
+      geoJsonGeometry = {
+        type: g.paths.length === 1 ? 'LineString' : 'MultiLineString',
+        coordinates: g.paths.length === 1 ? g.paths[0] : g.paths,
+      };
+      break;
+    }
+    case 'polygon': {
+      const g = graphic.geometry as Polygon;
+      geoJsonGeometry = {
+        type: 'Polygon',
+        coordinates: g.rings,
+      };
+      break;
+    }
+    default:
+      geoJsonGeometry = null;
   }
 
   return {
-    jsonFS: {
-      geometryType: geomType,
-      spatialReference: { wkid: 4326 },
-      fields: [this.objectIdField],
-      features,
-    },
+    type: 'Feature',
+    id: graphic.attributes?.[this.uniqueIdPropertyName],
+    geometry: geoJsonGeometry,
+    properties: { ...graphic.attributes },
   };
 }
-
-
-private createLayer(geojson: string | FeatureCollection): void {
-  if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
-
-  const fsInfo = this._getArcGisJson(geojson);
-  if (fsInfo == null) {
-    console.error('<arc-geojson-layer> unable to create geojson layer');
-    return;
-  }
-
-  // ✅ Create FeatureLayer with real Graphic source and correct fields
-  const featureLayer = new FeatureLayer({
-    source: fsInfo.jsonFS.features,
-    geometryType: fsInfo.jsonFS.geometryType as any,
-    spatialReference: { wkid: 4326 },
-    objectIdField: 'OBJECTID',
-    fields: [
-      {
-        name: 'OBJECTID',
-        alias: 'OBJECTID',
-        type: 'oid',
-      },
-      {
-        name: this.uniqueIdPropertyName,
-        alias: this.uniqueIdPropertyName,
-        type: 'string',
-      },
-    ],
-    // ✅ Set renderer immediately so features are visible right away
-    renderer: new SimpleRenderer({
-      symbol: this._getDefaultSymbol(fsInfo.jsonFS.geometryType) as any,
-    }),
-    title: this.name,
-    labelsVisible: true,
-  });
-
-  this.featureLayer = featureLayer;
-
-  // ✅ Add to map
-  this.ancestorMap.addLayer(this.featureLayer, this);
-
-  // ✅ Debug: verify features loaded
-  this.featureLayer.when(async () => {
-    const result = await this.featureLayer.queryFeatures();
-    console.log('Features loaded:', result.features.length);
-
-    // Apply custom renderer if provided
-    if (this.renderer) {
-      this._updateRenderer(this.renderer);
-    }
-
-    // Apply label
-    const labelJson = JsonUtils.getLabelJson(
-      this.labelJson,
-      this.labelColor as any,
-      this.labelSize
-    );
-    JsonUtils.updateLabelJson(labelJson, this.featureLayer);
-
-    // Apply popup
-    PopupUtils.updatePopup(
-      this.infoTemplate,
-      this.ancestorMap,
-      this.featureLayer
-    );
-
-    // Wire mouse events
-    const esriEventToCustomEvent = new Map<string, string>([
-      ['click', 'layerClick'],
-      ['dbl-click', 'doubleClick'],
-      ['mouse-over', 'layerMouseOver'],
-      ['mouse-out', 'layerMouseOut'],
-    ]);
-
-    esriEventToCustomEvent.forEach((customEventName, esriEvent) => {
-      const handle = (this.featureLayer as any).on(
-        esriEvent,
-        (evt: any) => {
-          import('@arcgis/core/geometry/support/webMercatorUtils').then(
-            ({ webMercatorToGeographic }) => {
-              const coords = webMercatorToGeographic(evt.mapPoint) as any;
-              const detail: LayerMouseEvent = {
-                coordinates: {
-                  latitude: coords?.y,
-                  longitude: coords?.x,
-                },
-                attributes: evt.graphic?.attributes,
-              };
-              this.dispatchEvent(
-                new CustomEvent(customEventName, {
-                  detail,
-                  bubbles: true,
-                  composed: true,
-                })
-              );
-            }
-          );
-        }
-      );
-      this.eventHandles.push(handle);
-    });
-
-    // Setup editor
-    this.createEditor();
-
-    // Sync geojson back
-    const geoJson = await this._getCurrentGeoJson();
-    this.blockGeoJsonUpdate = true;
-    this.geojson = geoJson;
-    this.blockGeoJsonUpdate = false;
-  });
-}
-
