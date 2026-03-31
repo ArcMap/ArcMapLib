@@ -1,3 +1,32 @@
+
+// ✅ ADD THIS — listen on the view, then hit-test for the feature layer
+const view = await this.ancestorMap.getEsriMap();
+const clickHandle = (view as any).on('click', async (evt: any) => {
+  if (!this.enableUserEdit) return;
+
+  const hitResult = await view.hitTest(evt);
+  const hit = hitResult.results.find(
+    (r: any) => r.graphic?.layer === this.featureLayer
+  );
+  if (!hit) return;
+
+  const graphic = (hit as any).graphic;
+
+  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+    this.removingItem = true;
+    this.removeFromGeoJson(graphic);
+    this.graphicsEditor.cancel();
+    this.removingItem = false;
+    return;
+  }
+
+  this.activateGraphicsEditor(graphic);
+});
+this.eventHandles.push(clickHandle);
+
+
+
+
 import { LitElement, PropertyValues } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
