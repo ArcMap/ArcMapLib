@@ -1,3 +1,33 @@
+
+private _getDefaultSymbol(esriGeomType: string): any {
+  switch (esriGeomType) {
+    case 'esriGeometryPoint':
+    case 'esriGeometryMultipoint':
+      return new SimpleMarkerSymbol({
+        color: this.DEFAULT_SYMBOL_COLOR,
+        size: UpGeoJsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+      });
+    case 'esriGeometryPolyline':
+      return new SimpleLineSymbol({
+        color: this.DEFAULT_SYMBOL_COLOR,
+        width: UpGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+      });
+    case 'esriGeometryPolygon':
+      return new SimpleFillSymbol({
+        color: this.DEFAULT_SYMBOL_COLOR,
+        outline: {
+          color: this.DEFAULT_SYMBOL_COLOR,
+          width: UpGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+        },
+      });
+    default:
+      return new SimpleMarkerSymbol();
+  }
+}
+
+
+
+
 private async createLayer(geojson: string | FeatureCollection): Promise<void> {
   if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
 
