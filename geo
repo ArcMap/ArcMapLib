@@ -1035,3 +1035,76 @@ export type ArcMapElement = HTMLElement & {
   enableInfoWindow(enable: boolean): void;
   updateComplete: Promise<boolean>;
 };
+
+private async createEditor() {
+  if (!this.featureLayer) return;
+
+  const esriMap = await this.ancestorMap.getEsriMap();
+  const sketchLayer = new GraphicsLayer();
+  (esriMap as any).add(sketchLayer);
+
+  this.graphicsEditor = new SketchViewModel({
+    view: esriMap as any,
+    layer: sketchLayer,
+  });
+
+  this.graphicsEditor.on('update', (evt: any) => {
+    if (!evt.toolEventInfo) return;
+    const type = evt.toolEventInfo.type as string;
+
+    if (type === 'move-start') this.graphicMoved = false;
+    if (type === 'move') this.graphicMoved = true;
+
+    if (
+      type === 'rotate-stop' ||
+      type === 'scale-stop' ||
+      type === 'vertex-add' ||
+      type === 'vertex-remove' ||
+      type === 'reshape-stop'
+    ) {
+      evt.graphics?.forEach((g: Graphic) =>
+        this.updateGeoJsonWithChanges(g)
+      );
+    }
+
+    if (type === 'move-stop' && this.graphicMoved) {
+      this.graphicMoved = false;
+      evt.graphics?.forEach((g: Graphic) =>
+        this.updateGeoJsonWithChanges(g)
+      );
+    }
+  });
+
+  this.graphicsEditor.on('delete', (evt: any) => {
+    evt.graphics?.forEach((g: Graphic) => this.removeFromGeoJson(g));
+  });
+
+  // ✅ Listen on MapView, not FeatureLayer
+  const clickHandle = (esriMap as any).on('click', async (evt: any) => {
+    if (!this.enableUserEdit) return;
+
+    // Hit test to find if click is on our featureLayer
+    const response = await (esriMap as any).hitTest(evt);
+    const hit = response.results?.find(
+      (r: any) => r.graphic?.layer === this.featureLayer
+    );
+
+    if (!hit) return;
+
+    const graphic = hit.graphic;
+
+    // ✅ Ctrl+Click to delete
+    if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+      this.removingItem = true;
+      this.removeFromGeoJson(graphic);
+      this.graphicsEditor.cancel();
+      this.removingItem = false;
+      return;
+    }
+
+    // Activate editor on the clicked graphic
+    this.activateGraphicsEditor(graphic);
+  });
+
+  this.eventHandles.push(clickHandle);
+}
