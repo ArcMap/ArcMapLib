@@ -406,3 +406,62 @@ this.featureLayer.when(async () => {
   this.blockGeoJsonUpdate = false;
 });
 
+
+// In createLayer(), when building features array:
+import Point from '@arcgis/core/geometry/Point';
+import Polyline from '@arcgis/core/geometry/Polyline';
+import Polygon from '@arcgis/core/geometry/Polygon';
+import { fromJSON } from '@arcgis/core/geometry/support/jsonUtils';
+import Graphic from '@arcgis/core/Graphic';
+import SpatialReference from '@arcgis/core/geometry/SpatialReference';
+
+// ✅ Convert raw geojson geometry to ArcGIS Geometry objects
+private _geojsonGeometryToArcGIS(geojsonGeometry: any): any {
+  if (!geojsonGeometry) return null;
+  
+  const sr = new SpatialReference({ wkid: 4326 });
+  
+  switch (geojsonGeometry.type) {
+    case 'Point':
+      return new Point({
+        longitude: geojsonGeometry.coordinates[0],
+        latitude: geojsonGeometry.coordinates[1],
+        spatialReference: sr,
+      });
+
+    case 'LineString':
+      return new Polyline({
+        paths: [geojsonGeometry.coordinates],
+        spatialReference: sr,
+      });
+
+    case 'MultiLineString':
+      return new Polyline({
+        paths: geojsonGeometry.coordinates,
+        spatialReference: sr,
+      });
+
+    case 'Polygon':
+      return new Polygon({
+        rings: geojsonGeometry.coordinates,
+        spatialReference: sr,
+      });
+
+    case 'MultiPolygon':
+      return new Polygon({
+        rings: geojsonGeometry.coordinates.flat(1),
+        spatialReference: sr,
+      });
+
+    case 'MultiPoint':
+      return new Polyline({
+        paths: [geojsonGeometry.coordinates],
+        spatialReference: sr,
+      });
+
+    default:
+      return null;
+  }
+}
+
+
