@@ -1,119 +1,127 @@
-private _getDefaultSymbol(geomType: string): any {
-  switch (geomType) {
-    case 'point':
-    case 'multipoint':
-      return new SimpleMarkerSymbol({
-        color: this.DEFAULT_SYMBOL_COLOR,
-        size: 10,
-        outline: {
-          color: [0, 0, 0, 255],
-          width: 1,
-        },
-      });
-    case 'polyline':
-      return new SimpleLineSymbol({
-        color: this.DEFAULT_SYMBOL_COLOR,
-        width: 2,
-      });
-    case 'polygon':
-    default:
-      return new SimpleFillSymbol({
-        color: [
-          this.DEFAULT_SYMBOL_COLOR[0],
-          this.DEFAULT_SYMBOL_COLOR[1],
-          this.DEFAULT_SYMBOL_COLOR[2],
-          100,
-        ],
-        outline: new SimpleLineSymbol({
-          color: this.DEFAULT_SYMBOL_COLOR,
-          width: 1,
-        }),
-      });
+private createLayer(geojson: string | FeatureCollection): void {
+  if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
+
+  const fsInfo = this._getArcGisJson(geojson);
+  if (fsInfo == null) {
+    console.error('<arc-geojson-layer> unable to create geojson layer');
+    return;
   }
+
+  // ✅ In 5.0: pass features in source AT constructor time
+  const featureLayer = new FeatureLayer({
+    source: fsInfo.jsonFS.features, // ✅ Pass here, not via applyEdits
+    geometryType: fsInfo.jsonFS.geometryType as any,
+    spatialReference: { wkid: 4326 },
+    objectIdField: 'OBJECTID',
+    fields: [
+      { name: 'OBJECTID', alias: 'OBJECTID', type: 'oid' },
+      {
+        name: this.uniqueIdPropertyName,
+        alias: this.uniqueIdPropertyName,
+        type: 'string',
+      },
+      { name: 'LABEL', alias: 'LABEL', type: 'string' },
+    ],
+    renderer: this._buildRenderer(fsInfo.jsonFS.geometryType),
+    title: this.name,
+    labelsVisible: true,
+  });
+
+  this.featureLayer = featureLayer;
+  this.ancestorMap.addLayer(this.featureLayer, this);
+
+  this.featureLayer.when(async () => {
+    console.log('FeatureLayer ready');
+    const result = await this.featureLayer.queryFeatures();
+    console.log('Features loaded:', result.features.length);
+
+    if (this.renderer) this._updateRenderer(this.renderer);
+
+    const labelJson = JsonUtils.getLabelJson(
+      this.labelJson,
+      this.labelColor as any,
+      this.labelSize
+    );
+    JsonUtils.updateLabelJson(labelJson, this.featureLayer);
+
+    PopupUtils.updatePopup(
+      this.infoTemplate,
+      this.ancestorMap,
+      this.featureLayer
+    );
+
+    // Wire mouse events
+    const esriEventToCustomEvent = new Map<string, string>([
+      ['click', 'layerClick'],
+      ['dbl-click', 'doubleClick'],
+      ['mouse-over', 'layerMouseOver'],
+      ['mouse-out', 'layerMouseOut'],
+    ]);
+
+    esriEventToCustomEvent.forEach((customEventName, esriEvent) => {
+      const handle = (this.featureLayer as any).on(
+        esriEvent,
+        (evt: any) => {
+          import('@arcgis/core/geometry/support/webMercatorUtils').then(
+            ({ webMercatorToGeographic }) => {
+              const coords = webMercatorToGeographic(evt.mapPoint) as any;
+              const detail: LayerMouseEvent = {
+                coordinates: {
+                  latitude: coords?.y,
+                  longitude: coords?.x,
+                },
+                attributes: evt.graphic?.attributes,
+              };
+              this.dispatchEvent(
+                new CustomEvent(customEventName, {
+                  detail,
+                  bubbles: true,
+                  composed: true,
+                })
+              );
+            }
+          );
+        }
+      );
+      this.eventHandles.push(handle);
+    });
+
+    this.createEditor();
+
+    const geoJson = await this._getCurrentGeoJson();
+    this.blockGeoJsonUpdate = true;
+    this.geojson = geoJson;
+    this.blockGeoJsonUpdate = false;
+  });
 }
 
-static getLabelJson(userLabel: any, userColor: any, userSize: any): any {
-  // ✅ Guard empty/null label json
-  if (!userLabel || userLabel === '') {
-    // Skip parsing, go straight to default
-    let labelColor = this.DEFAULT_LABEL_COLOR;
-    const colorJson = this.getJsonFor(userColor);
-    if (!colorJson.error && colorJson.parsedJson) {
-      labelColor = colorJson.parsedJson;
-    }
-    let labelSize = this.DEFAULT_LABEL_SIZE;
-    if (!isNaN(userSize) && userSize > 0) {
-      labelSize = userSize;
-    }
-    return this.getJsonLabelFor(labelColor, labelSize);
+// ✅ In 5.0, graphic.layer is removed — use graphic.origin.layer
+const clickHandle = (esriMap as any).on('click', async (evt: any) => {
+  if (!this.enableUserEdit) return;
+  const response = await (esriMap as any).hitTest(evt);
+  const hit = response.results?.find((r: any) => {
+    // ✅ 5.0: use r.graphic.origin.layer instead of r.graphic.layer
+    const layer = r.graphic?.origin?.layer ?? r.graphic?.layer;
+    return layer === this.featureLayer;
+  });
+  if (!hit) return;
+  const graphic = hit.graphic;
+  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+    this.removingItem = true;
+    this.removeFromGeoJson(graphic);
+    this.graphicsEditor.cancel();
+    this.removingItem = false;
+    return;
   }
-
-  const labelJson = this.getJsonFor(userLabel);
-  if (labelJson.error || !labelJson.parsedJson) {
-    if (labelJson.error) {
-      console.warn('Could not parse label json', labelJson.error);
-    }
-    return this.getJsonLabelFor(this.DEFAULT_LABEL_COLOR, this.DEFAULT_LABEL_SIZE);
-  }
-  return labelJson.parsedJson;
-}
+  this.activateGraphicsEditor(graphic);
+});
 
 
-private _arcGisGraphicToGeoJson(graphic: Graphic): any {
-  // ✅ Guard against undefined/null graphic
-  if (!graphic) {
-    console.warn('_arcGisGraphicToGeoJson: graphic is undefined');
-    return null;
-  }
+// Find this in _onGeojsonChanged popup section and replace:
 
-  // ✅ Guard against missing geometry
-  if (!graphic.geometry) {
-    return {
-      type: 'Feature',
-      id: graphic.attributes?.[this.uniqueIdPropertyName],
-      geometry: null,
-      properties: { ...graphic.attributes },
-    };
-  }
+// ❌ OLD
+if (detailsFeature?.layer !== this.featureLayer) return;
 
-  const geometryJson = graphic.geometry.toJSON();
-
-  // Convert ArcGIS geometry JSON to GeoJSON format
-  let geoJsonGeometry: any = null;
-
-  switch (graphic.geometry.type) {
-    case 'point': {
-      const g = graphic.geometry as Point;
-      geoJsonGeometry = {
-        type: 'Point',
-        coordinates: [g.longitude, g.latitude],
-      };
-      break;
-    }
-    case 'polyline': {
-      const g = graphic.geometry as Polyline;
-      geoJsonGeometry = {
-        type: g.paths.length === 1 ? 'LineString' : 'MultiLineString',
-        coordinates: g.paths.length === 1 ? g.paths[0] : g.paths,
-      };
-      break;
-    }
-    case 'polygon': {
-      const g = graphic.geometry as Polygon;
-      geoJsonGeometry = {
-        type: 'Polygon',
-        coordinates: g.rings,
-      };
-      break;
-    }
-    default:
-      geoJsonGeometry = null;
-  }
-
-  return {
-    type: 'Feature',
-    id: graphic.attributes?.[this.uniqueIdPropertyName],
-    geometry: geoJsonGeometry,
-    properties: { ...graphic.attributes },
-  };
-}
+// ✅ NEW - 5.0 uses origin.layer
+const detailsLayer = detailsFeature?.origin?.layer ?? detailsFeature?.layer;
+if (detailsLayer !== this.featureLayer) return;
