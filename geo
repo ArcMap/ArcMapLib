@@ -963,3 +963,39 @@ async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
     );
   }
 }
+
+// ❌ OLD - className doesn't exist on FeatureLayer
+if (changedProperties.has('layerClass') && this.featureLayer) {
+  this.featureLayer.className = this.layerClass;
+}
+
+// ✅ NEW - store it as a custom property, apply to DOM after layer loads
+if (changedProperties.has('layerClass') && this.featureLayer) {
+  // FeatureLayer has no className — apply to the layer's DOM node if available
+  this.featureLayer.when(() => {
+    const layerView = (this.featureLayer as any).layerView;
+    if (layerView?.container?.element) {
+      layerView.container.element.className = this.layerClass;
+    }
+  });
+}
+
+
+// ❌ OLD - still using up-map and UpMap
+private async _init() {
+  this.ancestorMap = this.closest('up-map') as unknown as UpMap;
+
+// ✅ NEW - use arc-map and ArcMapElement
+private async _init() {
+  this.ancestorMap = this.closest('arc-map') as unknown as ArcMapElement;
+  if (!this.ancestorMap) {
+    console.error(
+      '<arc-geojson-layer> must be a descendent of a <arc-map> element'
+    );
+    return;
+  }
+  this.createLayer(this.geojson);
+}
+
+
+
