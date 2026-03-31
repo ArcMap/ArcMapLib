@@ -1,3 +1,37 @@
+private _updateRenderer(newRenderer: any) {
+  if (!this.featureLayer) return;
+
+  // If no custom renderer provided, apply default symbol — bypass JsonUtils
+  if (!newRenderer) {
+    this.featureLayer.renderer = {
+      type: 'simple',
+      symbol: this._getDefaultSymbol(this.featureLayer.geometryType),
+    } as any;
+    return;
+  }
+
+  // Custom renderer — ensure symbol has type property for ArcGIS 5.0 autocast
+  try {
+    const rendererJson = typeof newRenderer === 'string'
+      ? JSON.parse(newRenderer)
+      : newRenderer;
+
+    this.featureLayer.renderer = {
+      type: rendererJson.type ?? 'simple',
+      symbol: rendererJson.symbol ?? this._getDefaultSymbol(this.featureLayer.geometryType),
+      ...rendererJson,
+    } as any;
+  } catch {
+    // Fallback to default
+    this.featureLayer.renderer = {
+      type: 'simple',
+      symbol: this._getDefaultSymbol(this.featureLayer.geometryType),
+    } as any;
+  }
+}
+
+
+
 
 private _getDefaultSymbol(esriGeomType: string): any {
   switch (esriGeomType) {
