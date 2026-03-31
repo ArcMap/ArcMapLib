@@ -1,722 +1,203 @@
+private async createLayer(geojson: string | FeatureCollection): Promise<void> {
+  if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
 
-// ✅ ADD THIS — listen on the view, then hit-test for the feature layer
-const view = await this.ancestorMap.getEsriMap();
-const clickHandle = (view as any).on('click', async (evt: any) => {
-  if (!this.enableUserEdit) return;
+  const parsed = this._parseGeojson(geojson) ?? { type: 'FeatureCollection', features: [] } as FeatureCollection;
+  const esriGeomType = parsed.features.length > 0
+    ? getEsriGeometryType(parsed.features[0].geometry?.type ?? '')
+    : 'esriGeometryPoint';
 
-  const hitResult = await view.hitTest(evt);
-  const hit = hitResult.results.find(
-    (r: any) => r.graphic?.layer === this.featureLayer
+  // ArcGIS 5.0: FeatureLayer.source must be Graphic[], not raw JSON
+  const graphics: Graphic[] = parsed.features.map((feature, index) =>
+    new Graphic(geojsonFeatureToArcGIS(feature, index))
   );
-  if (!hit) return;
 
-  const graphic = (hit as any).graphic;
+  const featureLayer = new FeatureLayer({
+    id: (this as any).id || undefined,
+    source: graphics,
+    geometryType: esriGeomType as any,
+    spatialReference: { wkid: 4326 },
+    fields: [this.objectIdField as any],
+    objectIdField: 'OBJECTID',
+    title: this.name,
+  });
 
-  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-    this.removingItem = true;
-    this.removeFromGeoJson(graphic);
-    this.graphicsEditor.cancel();
-    this.removingItem = false;
-    return;
-  }
+  this.featureLayer = featureLayer;
 
-  this.activateGraphicsEditor(graphic);
-});
-this.eventHandles.push(clickHandle);
+  // MUST await — handles z-order insertion
+  await this.ancestorMap.addLayer(this.featureLayer, this);
 
-
-
-
-import { LitElement, PropertyValues } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import type { FeatureCollection, Feature, Geometry } from 'geojson';
-import { isEqual } from 'lodash-es';
-
-// ArcGIS 5.0 — import types directly, NOT via __esri namespace
-import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
-import Graphic from '@arcgis/core/Graphic';
-import Point from '@arcgis/core/geometry/Point';
-import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
-import Draw from '@arcgis/core/views/draw/Draw';
-import SketchViewModel from '@arcgis/core/widgets/Sketch/SketchViewModel';
-import SimpleRenderer from '@arcgis/core/renderers/SimpleRenderer';
-import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
-import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
-import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
-import type MapView from '@arcgis/core/views/MapView';
-
-import DrawEditUtils from './draw-edit-utils';
-import JsonUtils from './json-utils';
-import PopupUtils from './popup-utils';
-import ValidationService from './validation-service';
-import type { InfoTemplateDetails } from './external-api';
-
-// ─── Interfaces ───────────────────────────────────────────────────────────
-
-interface IHandle {
-  remove(): void;
-}
-
-type ArcMapElement = HTMLElement & {
-  getEsriMap(): Promise<MapView>;
-  addLayer(layer: FeatureLayer | GraphicsLayer, element?: HTMLElement): Promise<void>;
-  removeLayer(layer: FeatureLayer | GraphicsLayer): Promise<void>;
-  hideZoomSlider(): Promise<void>;
-  showZoomSlider(): Promise<void>;
-  hideScaleBar(): Promise<void>;
-  showScaleBar(): Promise<void>;
-  enableInfoWindow(enable: boolean): void;
-  updateComplete: Promise<boolean>;
-};
-
-// ─── Inline GeoJSON <-> ArcGIS JSON conversion (no external library) ──────
-
-function geojsonGeometryToArcGIS(geom: Geometry): any {
-  if (!geom) return null;
-  switch (geom.type) {
-    case 'Point':
-      return { x: geom.coordinates[0], y: geom.coordinates[1], spatialReference: { wkid: 4326 } };
-    case 'MultiPoint':
-      return { points: geom.coordinates, spatialReference: { wkid: 4326 } };
-    case 'LineString':
-      return { paths: [geom.coordinates], spatialReference: { wkid: 4326 } };
-    case 'MultiLineString':
-      return { paths: geom.coordinates, spatialReference: { wkid: 4326 } };
-    case 'Polygon':
-      return { rings: geom.coordinates, spatialReference: { wkid: 4326 } };
-    case 'MultiPolygon':
-      return { rings: geom.coordinates.flat(), spatialReference: { wkid: 4326 } };
-    default:
-      return null;
-  }
-}
-
-function geojsonFeatureToArcGIS(feature: Feature, objectId: number): any {
-  return {
-    geometry: feature.geometry ? geojsonGeometryToArcGIS(feature.geometry) : null,
-    attributes: { ...(feature.properties ?? {}), OBJECTID: objectId },
-  };
-}
-
-function arcGISGeometryToGeoJSON(esriGeometry: any): Geometry | null {
-  if (!esriGeometry) return null;
-  if (esriGeometry.x !== undefined) {
-    return { type: 'Point', coordinates: [esriGeometry.x, esriGeometry.y] };
-  }
-  if (esriGeometry.points) {
-    return { type: 'MultiPoint', coordinates: esriGeometry.points };
-  }
-  if (esriGeometry.paths) {
-    return esriGeometry.paths.length === 1
-      ? { type: 'LineString', coordinates: esriGeometry.paths[0] }
-      : { type: 'MultiLineString', coordinates: esriGeometry.paths };
-  }
-  if (esriGeometry.rings) {
-    return { type: 'Polygon', coordinates: esriGeometry.rings };
-  }
-  return null;
-}
-
-function graphicToGeoJSONFeature(graphic: Graphic): Feature {
-  const geomJson = graphic.geometry?.toJSON?.() ?? null;
-  const geojsonGeom = geomJson ? arcGISGeometryToGeoJSON(geomJson) : null;
-  const attrs = { ...(graphic.attributes ?? {}) };
-  const id = attrs[Object.keys(attrs).find(k => k !== 'OBJECTID') ?? ''];
-  delete attrs['OBJECTID'];
-  return {
-    type: 'Feature',
-    id,
-    geometry: geojsonGeom as Geometry,
-    properties: attrs,
-  };
-}
-
-function getEsriGeometryType(geojsonGeomType: string): string {
-  switch (geojsonGeomType) {
-    case 'Point':        return 'esriGeometryPoint';
-    case 'MultiPoint':   return 'esriGeometryMultipoint';
-    case 'LineString':
-    case 'MultiLineString': return 'esriGeometryPolyline';
-    case 'Polygon':
-    case 'MultiPolygon': return 'esriGeometryPolygon';
-    default:             return 'esriGeometryPoint';
-  }
-}
-
-// ─── Component ────────────────────────────────────────────────────────────
-
-@customElement('arc-geojson-layer')
-export class ArcGeoJsonLayer extends LitElement {
-
-  // ─── Private fields ─────────────────────────────────────────────────────
-  private graphicsEditor!: SketchViewModel;
-  private ancestorMap!: ArcMapElement;
-  private readonly DEFAULT_SYMBOL_COLOR: number[] = JsonUtils.getRandomColor();
-  private static readonly DEFAULT_SYMBOL_LINE_WIDTH = 1;
-  private static readonly DEFAULT_SYMBOL_MARKER_SIZE = 10;
-  private featureLayer!: FeatureLayer;
-  private esriDraw!: Draw;
-  private eventHandles: IHandle[] = [];
-
-  private inDrawingMode = false;
-  private removingItem = false;
-  private blockGeoJsonUpdate = false;
-  private graphicMoved = false;
-
-  private objectIdField = {
-    name: 'OBJECTID',
-    type: 'oid' as const,
-    alias: 'OBJECTID',
-  };
-
-  // ─── Properties ─────────────────────────────────────────────────────────
-
-  @property({ type: Boolean }) enableUserEdit = false;
-  @property({ type: Boolean }) enableUserEditAddVertices = true;
-  @property({ type: Boolean }) enableUserEditDeleteVertices = true;
-  @property({ type: Boolean }) enableUserEditMove = true;
-  @property({ type: Boolean }) enableUserEditRemove = true;
-  @property({ type: Boolean }) enableUserEditRotating = true;
-  @property({ type: Boolean }) enableUserEditScaling = true;
-  @property({ type: Boolean }) enableUserEditUniformScaling = true;
-  @property({ type: Boolean }) enableUserEditVertices = true;
-
-  @property() geojson: string | FeatureCollection = '';
-  @property() infoTemplate: string | InfoTemplateDetails = '';
-  @property({ type: Array }) labelColor: string | number[] = this.DEFAULT_SYMBOL_COLOR;
-  @property() labelJson: string | object | object[] = '';
-  @property({ type: Number }) labelSize: number = JsonUtils.DEFAULT_LABEL_SIZE;
-  @property() layerClass: string = '';
-  @property({ reflect: true }) name: string = '';
-  @property({ type: Object }) renderer: any = null;
-  @property() uniqueIdPropertyName: string = 'id';
-
-  // ─── Lit Lifecycle ───────────────────────────────────────────────────────
-
-  createRenderRoot() { return this; }
-  render() { return null; }
-
-  connectedCallback() {
-    super.connectedCallback();
-    this._init();
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    this._cleanup();
-  }
-
-  updated(changedProperties: PropertyValues) {
-    super.updated(changedProperties);
-
-    if (changedProperties.has('enableUserEdit')) {
-      this.updateEditing(this.enableUserEdit);
-    }
-    if (
-      changedProperties.has('enableUserEditAddVertices') ||
-      changedProperties.has('enableUserEditDeleteVertices') ||
-      changedProperties.has('enableUserEditMove') ||
-      changedProperties.has('enableUserEditRotating') ||
-      changedProperties.has('enableUserEditScaling') ||
-      changedProperties.has('enableUserEditUniformScaling')
-    ) {
-      this.graphicsEditor?.cancel();
-    }
-    if (changedProperties.has('geojson')) {
-      this._onGeojsonChanged(this.geojson);
-    }
-    if (changedProperties.has('infoTemplate') && this.featureLayer) {
-      PopupUtils.updatePopup(this.infoTemplate, this.ancestorMap, this.featureLayer);
-    }
-    if (changedProperties.has('labelJson') && this.featureLayer) {
-      JsonUtils.updateLabelJson(this.labelJson, this.featureLayer);
-    }
-    if (changedProperties.has('layerClass') && this.featureLayer) {
+  // Apply CSS class after layer is on the map
+  if (this.layerClass) {
+    this.featureLayer.when(() => {
       try { (this.featureLayer as any).set?.('className', this.layerClass); } catch (_) { /**/ }
-    }
-    if (changedProperties.has('renderer')) {
-      this._updateRenderer(this.renderer);
-    }
+    });
   }
 
-  // ─── Init / Cleanup ──────────────────────────────────────────────────────
-
-  private async _init() {
-    this.ancestorMap = this.closest('arc-map') as unknown as ArcMapElement;
-    if (!this.ancestorMap) {
-      console.error('<arc-geojson-layer> must be a descendant of an <arc-map> element');
-      return;
-    }
-    await this.ancestorMap.updateComplete;
-    await this.createLayer(this.geojson);
-  }
-
-  private async _cleanup() {
-    if (this.ancestorMap && this.featureLayer) {
-      await this.ancestorMap.removeLayer(this.featureLayer);
-    }
-    this.eventHandles.forEach(h => h.remove());
-    this.eventHandles = [];
-    this.blockGeoJsonUpdate = false;
-    this.featureLayer = null as any;
-  }
-
-  // ─── GeoJSON Watcher ─────────────────────────────────────────────────────
-
-  private async _onGeojsonChanged(newGeojson: string | FeatureCollection) {
-    if (this.enableUserEdit || this.inDrawingMode) {
-      console.warn('Cannot update GeoJson while user is editing or drawing new features.');
-      return;
-    }
-    if (this.removingItem || this.blockGeoJsonUpdate) return;
-
-    if (!this.featureLayer) {
-      await this.createLayer(newGeojson);
-      return;
-    }
-
+  // Renderer
+  if (this.renderer && graphics.length > 0) {
     this._updateRenderer(this.renderer);
+  } else {
+    const symbolJson = this.getSymbolJson(esriGeomType);
+    this.featureLayer.renderer = new SimpleRenderer(symbolJson as any);
+  }
 
-    const parsed = this._parseGeojson(newGeojson);
-    if (!parsed) return;
+  // Labels
+  const labelJson = JsonUtils.getLabelJson(this.labelJson, this.labelColor, this.labelSize);
+  JsonUtils.updateLabelJson(labelJson, this.featureLayer);
+  this.featureLayer.labelsVisible = true;
 
-    if (parsed.features.length === 0) {
-      const existingAll = await this.featureLayer.queryFeatures({ where: '1=1', outFields: ['*'], returnGeometry: true });
-      if (existingAll.features.length > 0) {
-        await this.featureLayer.applyEdits({ deleteFeatures: existingAll.features });
-      }
-      return;
-    }
+  // Popup
+  PopupUtils.updatePopup(this.infoTemplate, this.ancestorMap, this.featureLayer);
 
-    const esriGeomType = getEsriGeometryType(parsed.features[0].geometry?.type ?? '');
-    if (esriGeomType !== this.featureLayer.geometryType) {
-      await this._cleanup();
-      await this.createLayer(newGeojson);
-      return;
-    }
+  // Get the view for all event wiring
+  const view = await this.ancestorMap.getEsriMap();
 
-    const featuresToAdd: Graphic[] = [];
-    const featuresToUpdate: Graphic[] = [];
+  // ─── Mouse events via view.hitTest (ArcGIS 5.0 — FeatureLayer.on('click') removed) ───
 
-    for (let i = 0; i < parsed.features.length; i++) {
-      const feature = parsed.features[i];
-      const uid = (feature.properties as any)?.[this.uniqueIdPropertyName];
-      const matchingFeature = await this.findFeatureByUniqueId(uid);
-      const arcgisFeature = geojsonFeatureToArcGIS(feature, i);
-      if (matchingFeature) {
-        arcgisFeature.attributes.OBJECTID = (matchingFeature as any).attributes.OBJECTID;
-        featuresToUpdate.push(new Graphic(arcgisFeature));
-      } else {
-        featuresToAdd.push(new Graphic(arcgisFeature));
-      }
-    }
+  // Track hover state for mouseOver / mouseOut
+  let isHovered = false;
 
-    const newUniqueIds = parsed.features.map(
-      (f) => (f.properties as any)?.[this.uniqueIdPropertyName]
+  const clickHandle = (view as any).on('click', async (evt: any) => {
+    const hitResult = await view.hitTest(evt);
+    const hit = hitResult.results.find(
+      (r: any) => r.graphic?.layer === this.featureLayer
     );
-    const existingResult = await this.featureLayer.queryFeatures({
-      where: '1=1', outFields: ['*'], returnGeometry: true,
-    });
-    const featuresToRemove = existingResult.features.filter((g: any) => {
-      const uid = g.attributes[this.uniqueIdPropertyName];
-      return uid === undefined || !newUniqueIds.includes(uid);
-    });
+    if (!hit) return;
 
-    await this.featureLayer.applyEdits({
-      addFeatures: featuresToAdd,
-      updateFeatures: featuresToUpdate,
-      deleteFeatures: featuresToRemove,
-    });
+    const graphic = (hit as any).graphic;
+    const { webMercatorToGeographic } = await import(
+      '@arcgis/core/geometry/support/webMercatorUtils'
+    );
+    const coords = webMercatorToGeographic(evt.mapPoint) as any;
 
-    // Update open popup
-    const view = await this.ancestorMap.getEsriMap();
-    const popup = (view as any).popup;
-    if (!popup?.visible || !popup?.features?.length) return;
+    this.dispatchEvent(new CustomEvent('layerClick', {
+      detail: {
+        coordinates: { latitude: coords?.y, longitude: coords?.x },
+        attributes: graphic?.attributes,
+      },
+      bubbles: true,
+      composed: true,
+    }));
+  });
+  this.eventHandles.push(clickHandle);
 
-    if (popup.features.length === 1) {
-      const df = popup.features[0];
-      if (df.getLayer?.() !== this.featureLayer) return;
-      const removed = featuresToRemove.some(
-        (f: any) => f.attributes[this.uniqueIdPropertyName] === df.attributes[this.uniqueIdPropertyName]
+  const dblClickHandle = (view as any).on('double-click', async (evt: any) => {
+    const hitResult = await view.hitTest(evt);
+    const hit = hitResult.results.find(
+      (r: any) => r.graphic?.layer === this.featureLayer
+    );
+    if (!hit) return;
+
+    const graphic = (hit as any).graphic;
+    const { webMercatorToGeographic } = await import(
+      '@arcgis/core/geometry/support/webMercatorUtils'
+    );
+    const coords = webMercatorToGeographic(evt.mapPoint) as any;
+
+    this.dispatchEvent(new CustomEvent('doubleClick', {
+      detail: {
+        coordinates: { latitude: coords?.y, longitude: coords?.x },
+        attributes: graphic?.attributes,
+      },
+      bubbles: true,
+      composed: true,
+    }));
+  });
+  this.eventHandles.push(dblClickHandle);
+
+  const pointerMoveHandle = (view as any).on('pointer-move', async (evt: any) => {
+    const hitResult = await view.hitTest(evt);
+    const hit = hitResult.results.find(
+      (r: any) => r.graphic?.layer === this.featureLayer
+    );
+
+    if (hit && !isHovered) {
+      isHovered = true;
+      const graphic = (hit as any).graphic;
+      const { webMercatorToGeographic } = await import(
+        '@arcgis/core/geometry/support/webMercatorUtils'
       );
-      if (removed) {
-        popup.visible = false;
-      } else if (!isEqual(popup.features[0]?.geometry, df.geometry)) {
-        popup.features = [df];
-        popup.location = ArcGeoJsonLayer.getPopupPoint(df.geometry);
-        popup.visible = true;
-      }
-    } else {
-      const keep = popup.features.filter((f: any) =>
-        !featuresToRemove.some(
-          (r: any) => r.attributes[this.uniqueIdPropertyName] === f.attributes[this.uniqueIdPropertyName]
-        )
-      );
-      popup.features = keep;
-      if (keep.length === 0) popup.visible = false;
+      const coords = webMercatorToGeographic(evt.mapPoint) as any;
+
+      this.dispatchEvent(new CustomEvent('layerMouseOver', {
+        detail: {
+          coordinates: { latitude: coords?.y, longitude: coords?.x },
+          attributes: graphic?.attributes,
+        },
+        bubbles: true,
+        composed: true,
+      }));
+    } else if (!hit && isHovered) {
+      isHovered = false;
+      this.dispatchEvent(new CustomEvent('layerMouseOut', {
+        detail: {},
+        bubbles: true,
+        composed: true,
+      }));
     }
-  }
+  });
+  this.eventHandles.push(pointerMoveHandle);
 
-  // ─── Layer Creation ───────────────────────────────────────────────────────
+  // ─── Editor setup ────────────────────────────────────────────────────────
+  await this.createEditor();
 
-  private async createLayer(geojson: string | FeatureCollection): Promise<void> {
-    if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
+  // Sync internal geojson without triggering the watcher
+  this.blockGeoJsonUpdate = true;
+  this.geojson = geojson;
+  this.blockGeoJsonUpdate = false;
+}
 
-    const parsed = this._parseGeojson(geojson) ?? { type: 'FeatureCollection', features: [] } as FeatureCollection;
-    const esriGeomType = parsed.features.length > 0
-      ? getEsriGeometryType(parsed.features[0].geometry?.type ?? '')
-      : 'esriGeometryPoint';
 
-    // ArcGIS 5.0: FeatureLayer.source must be Graphic[], not raw JSON
-    const graphics: Graphic[] = parsed.features.map((feature, index) =>
-      new Graphic(geojsonFeatureToArcGIS(feature, index))
+private async createEditor(): Promise<void> {
+  if (!this.featureLayer) return;
+
+  const view = await this.ancestorMap.getEsriMap();
+  const sketchLayer = new GraphicsLayer({ listMode: 'hide' });
+  (view as any).map.add(sketchLayer);
+
+  this.graphicsEditor = new SketchViewModel({
+    view: view as any,
+    layer: sketchLayer,
+  });
+
+  // ArcGIS 4.x/5.0: all edit events come through 'update'
+  this.graphicsEditor.on('update', (evt: any) => {
+    if (!evt.toolEventInfo) return;
+    const type: string = evt.toolEventInfo.type;
+
+    if (type === 'move-start') this.graphicMoved = false;
+    if (type === 'move') this.graphicMoved = true;
+
+    if (['rotate-stop', 'scale-stop', 'vertex-add', 'vertex-remove', 'reshape-stop'].includes(type)) {
+      evt.graphics?.forEach((g: Graphic) => this.updateGeoJsonWithChanges(g));
+    }
+    if (type === 'move-stop' && this.graphicMoved) {
+      this.graphicMoved = false;
+      evt.graphics?.forEach((g: Graphic) => this.updateGeoJsonWithChanges(g));
+    }
+  });
+
+  // ArcGIS 5.0: use view.on('click') + hitTest instead of featureLayer.on('click')
+  const clickHandle = (view as any).on('click', async (evt: any) => {
+    if (!this.enableUserEdit) return;
+
+    const hitResult = await view.hitTest(evt);
+    const hit = hitResult.results.find(
+      (r: any) => r.graphic?.layer === this.featureLayer
     );
+    if (!hit) return;
 
-    const featureLayer = new FeatureLayer({
-      id: (this as any).id || undefined,
-      source: graphics,
-      geometryType: esriGeomType as any,
-      spatialReference: { wkid: 4326 },
-      fields: [this.objectIdField as any],
-      objectIdField: 'OBJECTID',
-      title: this.name,
-    });
+    const graphic = (hit as any).graphic;
 
-    this.featureLayer = featureLayer;
-
-    // MUST await — handles z-order insertion
-    await this.ancestorMap.addLayer(this.featureLayer, this);
-
-    if (this.layerClass) {
-      this.featureLayer.when(() => {
-        try { (this.featureLayer as any).set?.('className', this.layerClass); } catch (_) { /**/ }
-      });
-    }
-
-    if (this.renderer && graphics.length > 0) {
-      this._updateRenderer(this.renderer);
-    } else {
-      const symbolJson = this.getSymbolJson(esriGeomType);
-      this.featureLayer.renderer = new SimpleRenderer(symbolJson as any);
-    }
-
-    const labelJson = JsonUtils.getLabelJson(this.labelJson, this.labelColor, this.labelSize);
-    JsonUtils.updateLabelJson(labelJson, this.featureLayer);
-    this.featureLayer.labelsVisible = true;
-
-    PopupUtils.updatePopup(this.infoTemplate, this.ancestorMap, this.featureLayer);
-
-    const mouseEventMap: Array<[string, string]> = [
-      ['click',         'layerClick'],
-      ['double-click',  'doubleClick'],
-      ['pointer-enter', 'layerMouseOver'],
-      ['pointer-leave', 'layerMouseOut'],
-    ];
-    for (const [esriEvent, litEvent] of mouseEventMap) {
-      const handle = this.featureLayer.on(esriEvent as any, async (evt: any) => {
-        const view = await this.ancestorMap.getEsriMap();
-        const { webMercatorToGeographic } = await import(
-          '@arcgis/core/geometry/support/webMercatorUtils'
-        );
-        const coords = webMercatorToGeographic(evt.mapPoint) as any;
-        this.dispatchEvent(new CustomEvent(litEvent, {
-          detail: {
-            coordinates: { latitude: coords?.y, longitude: coords?.x },
-            attributes: evt.graphic?.attributes,
-          },
-          bubbles: true,
-          composed: true,
-        }));
-      });
-      this.eventHandles.push(handle);
-    }
-
-    await this.createEditor();
-
-    this.blockGeoJsonUpdate = true;
-    this.geojson = geojson;
-    this.blockGeoJsonUpdate = false;
-  }
-
-  // ─── Editor (SketchViewModel) ─────────────────────────────────────────────
-
-  private async createEditor(): Promise<void> {
-    if (!this.featureLayer) return;
-
-    const view = await this.ancestorMap.getEsriMap();
-    const sketchLayer = new GraphicsLayer({ listMode: 'hide' });
-    (view as any).map.add(sketchLayer);
-
-    this.graphicsEditor = new SketchViewModel({
-      view: view as any,
-      layer: sketchLayer,
-    });
-
-    // ArcGIS 4.x/5.0: 'rotate' and 'scale' are NOT separate events.
-    // All interactions come through 'update' via evt.toolEventInfo.type
-    this.graphicsEditor.on('update', (evt: any) => {
-      if (!evt.toolEventInfo) return;
-      const type: string = evt.toolEventInfo.type;
-
-      if (type === 'move-start') this.graphicMoved = false;
-      if (type === 'move') this.graphicMoved = true;
-
-      if (['rotate-stop', 'scale-stop', 'vertex-add', 'vertex-remove', 'reshape-stop'].includes(type)) {
-        evt.graphics?.forEach((g: Graphic) => this.updateGeoJsonWithChanges(g));
-      }
-      if (type === 'move-stop' && this.graphicMoved) {
-        this.graphicMoved = false;
-        evt.graphics?.forEach((g: Graphic) => this.updateGeoJsonWithChanges(g));
-      }
-    });
-
-    const clickHandle = this.featureLayer.on('click', (evt: any) => {
-      if (!this.enableUserEdit) return;
-      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-        this.removingItem = true;
-        this.removeFromGeoJson(evt.graphic);
-        this.graphicsEditor.cancel();
-        this.removingItem = false;
-        return;
-      }
-      this.activateGraphicsEditor(evt.graphic);
-    });
-    this.eventHandles.push(clickHandle);
-  }
-
-  // ─── Drawing ──────────────────────────────────────────────────────────────
-
-  async startDrawing(drawGeometryType: string): Promise<void> {
-    if (this.featureLayer) {
-      const existing = await this.featureLayer.queryFeatures({ where: '1=1' });
-      if (existing.features.length === 0) {
-        this.featureLayer.geometryType =
-          DrawEditUtils.determineFeatureLayerGeometryType(drawGeometryType) as any;
-      }
-    }
-
-    if (!DrawEditUtils.validGeometryType(drawGeometryType, this.featureLayer.geometryType)) return;
-    if (!(drawGeometryType.toUpperCase() in DrawEditUtils.DrawGeometryTypes)) {
-      console.error(`The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`);
+    if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+      this.removingItem = true;
+      this.removeFromGeoJson(graphic);
+      this.graphicsEditor.cancel();
+      this.removingItem = false;
       return;
     }
 
-    this.inDrawingMode = true;
-    this.enableInfoPopupWindow(false);
-
-    const view = await this.ancestorMap.getEsriMap();
-    if (!this.esriDraw) {
-      this.esriDraw = new Draw({ view: view as any });
-    } else {
-      this.esriDraw.reset();
-    }
-
-    // ArcGIS 4.x/5.0: Draw.create() returns a DrawAction — listen on the action
-    const action = this.esriDraw.create(drawGeometryType.toLowerCase() as any);
-
-    action.on('draw-complete', async (evt: any) => {
-      await this.ancestorMap.showZoomSlider();
-      await this.ancestorMap.showScaleBar();
-      this.esriDraw.reset();
-
-      const newGeometry = evt.geometry;
-      let graphic: Graphic;
-
-      if (this.renderer) {
-        graphic = new Graphic({ geometry: newGeometry });
-      } else {
-        let symbol: any;
-        switch (newGeometry.type) {
-          case 'point':
-          case 'multipoint': symbol = new SimpleMarkerSymbol(); break;
-          case 'polyline':   symbol = new SimpleLineSymbol(); break;
-          default:           symbol = new SimpleFillSymbol();
-        }
-        graphic = new Graphic({ geometry: newGeometry, symbol });
-      }
-
-      const existingResult = await this.featureLayer.queryFeatures({ where: '1=1' });
-      const addingFirstGeometry = existingResult.features.length === 0;
-
-      this.addToGeoJson(graphic);
-      if (this.renderer && addingFirstGeometry) this._updateRenderer(this.renderer);
-
-      this.inDrawingMode = false;
-      this.enableInfoPopupWindow(true);
-    });
-
-    await this.ancestorMap.hideZoomSlider();
-    await this.ancestorMap.hideScaleBar();
-  }
-
-  async cancelDrawing(): Promise<void> {
-    this.inDrawingMode = false;
-    this.esriDraw?.reset();
-    await this.ancestorMap.showZoomSlider();
-    await this.ancestorMap.showScaleBar();
-    this.enableInfoPopupWindow(true);
-  }
-
-  // ─── Public Methods ───────────────────────────────────────────────────────
-
-  async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
-    if (!this.featureLayer) return undefined;
-    for (const where of [
-      `${this.uniqueIdPropertyName} = '${uniqueId}'`,
-      `${this.uniqueIdPropertyName} = ${uniqueId}`,
-    ]) {
-      try {
-        const result = await this.featureLayer.queryFeatures({
-          where, outFields: ['*'], returnGeometry: true,
-        });
-        if (result.features.length > 0) return result.features[0];
-      } catch { /* try next */ }
-    }
-    return undefined;
-  }
-
-  async getLayerId(): Promise<string> {
-    return this.featureLayer?.id ?? '';
-  }
-
-  async openPopup(id: string | number): Promise<void> {
-    const graphicMatch = await this.findFeatureByUniqueId(id);
-    if (!graphicMatch) {
-      console.warn('No feature found with a', this.uniqueIdPropertyName, 'value of', id, '. Cannot open popup.');
-      return;
-    }
-    const view = await this.ancestorMap.getEsriMap();
-    const popup = (view as any).popup;
-    popup.features = [graphicMatch];
-    popup.location = ArcGeoJsonLayer.getPopupPoint(graphicMatch.geometry);
-    popup.visible = true;
-  }
-
-  async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
-    const graphicMatch = await this.findFeatureByUniqueId(id);
-    if (!graphicMatch) {
-      console.warn('No feature found with a', this.uniqueIdPropertyName, 'value of', id, '. Cannot zoom to.');
-      return;
-    }
-    const view = await this.ancestorMap.getEsriMap();
-    if (ValidationService.isPoint(graphicMatch.geometry)) {
-      await (view as any).goTo({ target: graphicMatch.geometry, zoom: zoomLevel });
-    } else {
-      await (view as any).goTo(graphicMatch.geometry);
-    }
-  }
-
-  // ─── Private Helpers ──────────────────────────────────────────────────────
-
-  private updateEditing(enableEdit: boolean) {
-    this.enableInfoPopupWindow(!enableEdit);
-    if (!enableEdit) this.graphicsEditor?.cancel();
-  }
-
-  private _updateRenderer(newRenderer: any) {
-    if (!this.featureLayer) return;
-    const symbolJson = this.getSymbolJson(this.featureLayer.geometryType);
-    JsonUtils.updateRenderer(newRenderer, this.featureLayer, {
-      simple: 'simple',
-      uniqueValue: 'unique-value',
-      classBreaks: 'class-breaks',
-    }, symbolJson);
-  }
-
-  private enableInfoPopupWindow(enable: boolean) {
-    const enablePopup = enable && !this.enableUserEdit && !this.inDrawingMode;
-    this.ancestorMap?.enableInfoWindow(enablePopup);
-  }
-
-  private activateGraphicsEditor(graphic: Graphic) {
-    if (!this.graphicsEditor) return;
-    const hasAnyTool =
-      this.enableUserEditMove || this.enableUserEditVertices ||
-      this.enableUserEditScaling || this.enableUserEditRotating;
-    if (!hasAnyTool) {
-      console.error('Cannot edit. All editing features have been turned off.');
-      return;
-    }
-    this.graphicsEditor.update([graphic], {
-      tool: 'transform',
-      allowAddVertices: this.enableUserEditAddVertices,
-      allowDeleteVertices: this.enableUserEditDeleteVertices,
-      uniformScaling: this.enableUserEditUniformScaling,
-    } as any);
-  }
-
-  private addToGeoJson(newGraphic: Graphic) {
-    this.featureLayer.applyEdits({ addFeatures: [newGraphic] });
-    const feature = graphicToGeoJSONFeature(newGraphic);
-    const current = this._parseGeojson(this.geojson) ?? { type: 'FeatureCollection', features: [] } as FeatureCollection;
-    current.features.push(feature);
-    this.blockGeoJsonUpdate = true;
-    this.geojson = { ...current };
-    this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userDrawItemAdded', {
-      detail: feature, bubbles: true, composed: true,
-    }));
-  }
-
-  private removeFromGeoJson(graphicToRemove: Graphic) {
-    this.featureLayer.applyEdits({ deleteFeatures: [graphicToRemove] });
-    const feature = graphicToGeoJSONFeature(graphicToRemove);
-    const uid = (graphicToRemove.attributes ?? {})[this.uniqueIdPropertyName];
-    const current = this._parseGeojson(this.geojson) ?? { type: 'FeatureCollection', features: [] } as FeatureCollection;
-    const idx = current.features.findIndex(
-      (f) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid
-    );
-    if (idx !== -1) current.features.splice(idx, 1);
-    this.blockGeoJsonUpdate = true;
-    this.geojson = { ...current };
-    this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userEditItemRemoved', {
-      detail: feature, bubbles: true, composed: true,
-    }));
-  }
-
-  private updateGeoJsonWithChanges(graphicToUpdate: Graphic) {
-    this.featureLayer.applyEdits({ updateFeatures: [graphicToUpdate] });
-    const feature = graphicToGeoJSONFeature(graphicToUpdate);
-    const uid = (graphicToUpdate.attributes ?? {})[this.uniqueIdPropertyName];
-    const current = this._parseGeojson(this.geojson) ?? { type: 'FeatureCollection', features: [] } as FeatureCollection;
-    const idx = current.features.findIndex(
-      (f) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid
-    );
-    if (idx !== -1) current.features[idx] = feature;
-    this.blockGeoJsonUpdate = true;
-    this.geojson = { ...current };
-    this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userEditItemUpdated', {
-      detail: feature, bubbles: true, composed: true,
-    }));
-  }
-
-  private _parseGeojson(geojson: string | FeatureCollection): FeatureCollection | null {
-    if (!geojson) return null;
-    if (typeof geojson === 'string') {
-      try { return JSON.parse(geojson) as FeatureCollection; } catch { return null; }
-    }
-    return geojson;
-  }
-
-  private static getPopupPoint(geometry: any): Point {
-    if (ValidationService.isPoint(geometry)) return geometry as Point;
-    if (ValidationService.isPolyline(geometry)) {
-      const midIdx = Math.floor(geometry.paths[0].length / 2);
-      return geometry.getPoint(0, midIdx);
-    }
-    if (ValidationService.isPolygon(geometry)) return geometry.centroid;
-    return null as any;
-  }
-
-  private getSymbolJson(geomType: string): object {
-    return JsonUtils.getSymbolJson(
-      geomType,
-      this.DEFAULT_SYMBOL_COLOR,
-      ArcGeoJsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
-      ArcGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
-      ArcGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
-    );
-  }
+    this.activateGraphicsEditor(graphic);
+  });
+  this.eventHandles.push(clickHandle);
 }
