@@ -1,4 +1,74 @@
 
+(action as any).on('draw-complete', async (evt: any) => {
+  console.log('draw-complete full evt:', evt);
+
+  await this.ancestorMap.showZoomSlider();
+  await this.ancestorMap.showScaleBar();
+  this.esriDraw.reset();
+
+  // ArcGIS 5.0 draw-complete: geometry is built from vertices/coordinates
+  // not directly on evt.geometry for point draws
+  let newGeometry = evt?.geometry;
+
+  if (!newGeometry) {
+    // Build geometry manually from coordinates
+    const view = await this._getView();
+    const coords = evt?.coordinates ?? evt?.vertices?.[0];
+
+    if (!coords) {
+      console.error('No coordinates in draw-complete event');
+      this.inDrawingMode = false;
+      this.enableInfoPopupWindow(true);
+      return;
+    }
+
+    const drawType = drawGeometryType.toLowerCase();
+    if (drawType === 'point') {
+      const { Point } = await import('@arcgis/core/geometry/Point');
+      newGeometry = new Point({
+        x: coords[0],
+        y: coords[1],
+        spatialReference: view.spatialReference,
+      });
+    } else if (drawType === 'polyline' || drawType === 'freehand-polyline') {
+      const Polyline = (await import('@arcgis/core/geometry/Polyline')).default;
+      newGeometry = new Polyline({
+        paths: [evt.vertices ?? evt.coordinates],
+        spatialReference: view.spatialReference,
+      });
+    } else {
+      const Polygon = (await import('@arcgis/core/geometry/Polygon')).default;
+      newGeometry = new Polygon({
+        rings: [evt.vertices ?? evt.coordinates],
+        spatialReference: view.spatialReference,
+      });
+    }
+  }
+
+  const geomType = newGeometry.type as string;
+  let symbolType = 'simple-fill';
+  if (geomType === 'point' || geomType === 'multipoint') symbolType = 'simple-marker';
+  else if (geomType === 'polyline') symbolType = 'simple-line';
+
+  const graphic = new Graphic({
+    geometry: newGeometry,
+    symbol: this.renderer ? undefined : ({ type: symbolType } as any),
+  });
+
+  const existingResult = await this.featureLayer.queryFeatures({ where: '1=1' });
+  const addingFirstGeometry = existingResult.features.length === 0;
+
+  this.addToGeoJson(graphic);
+  if (this.renderer && addingFirstGeometry) this._updateRenderer(this.renderer);
+
+  this.inDrawingMode = false;
+  this.enableInfoPopupWindow(true);
+});
+
+
+
+
+
 async startDrawing(drawGeometryType: string): Promise<void> {
   if (!(drawGeometryType.toUpperCase() in DrawEditUtils.DrawGeometryTypes)) {
     console.error(`The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`);
