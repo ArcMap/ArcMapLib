@@ -1,4 +1,31 @@
 
+
+
+private static getPopupPoint(geometry: any): Point {
+  if (!geometry) return null as any;
+  try {
+    if (ValidationService.isPoint(geometry)) {
+      return geometry as Point;
+    }
+    if (ValidationService.isPolyline(geometry)) {
+      if (!geometry.paths?.length) return null as any;
+      const midIdx = Math.floor(geometry.paths[0].length / 2);
+      return geometry.getPoint(0, midIdx) as Point;
+    }
+    if (ValidationService.isPolygon(geometry)) {
+      return geometry.centroid as Point;
+    }
+  } catch (_) {
+    // Fallback — return geometry itself if it has x/y
+    if (geometry?.x !== undefined && geometry?.y !== undefined) {
+      return geometry as Point;
+    }
+  }
+  return null as any;
+}
+
+
+
 const clickHandle = (view as any).on('click', async (evt: any) => {
   const hitResult = await view.hitTest(evt);
   const hit = hitResult.results.find(
