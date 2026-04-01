@@ -1,4 +1,71 @@
 
+// Replace PopupUtils.updatePopup call in createLayer with this:
+if (this.infoTemplate) {
+  try {
+    const template = typeof this.infoTemplate === 'string'
+      ? JSON.parse(this.infoTemplate)
+      : this.infoTemplate;
+
+    this.featureLayer.popupTemplate = {
+      title: template.title ?? '{name}',
+      content: template.content ?? [
+        {
+          type: 'fields',
+          fieldInfos: Object.keys(
+            (parsed.features[0]?.properties ?? {})
+          ).map(key => ({
+            fieldName: key,
+            label: key,
+            visible: true,
+          })),
+        },
+      ],
+    } as any;
+  } catch {
+    // Default popup showing all fields
+    this.featureLayer.popupTemplate = {
+      title: this.name || 'Feature Info',
+      content: [
+        {
+          type: 'fields',
+          fieldInfos: Object.keys(
+            (parsed.features[0]?.properties ?? {})
+          ).map(key => ({
+            fieldName: key,
+            label: key,
+            visible: true,
+          })),
+        },
+      ],
+    } as any;
+  }
+}
+
+
+if (changedProperties.has('infoTemplate') && this.featureLayer) {
+  // Same logic as above
+  if (this.infoTemplate) {
+    try {
+      const template = typeof this.infoTemplate === 'string'
+        ? JSON.parse(this.infoTemplate as string)
+        : this.infoTemplate as any;
+
+      this.featureLayer.popupTemplate = {
+        title: template.title ?? this.name ?? 'Feature Info',
+        content: template.content ?? [],
+      } as any;
+    } catch {
+      this.featureLayer.popupTemplate = {
+        title: this.name || 'Feature Info',
+        content: [],
+      } as any;
+    }
+  } else {
+    this.featureLayer.popupTemplate = null as any;
+  }
+}
+
+
 
 const clickHandle = (view as any).on('click', async (evt: any) => {
   const hitResult = await view.hitTest(evt);
