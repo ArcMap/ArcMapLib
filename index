@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arc GeoJSON Layer Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+
+    .controls {
+      padding: 10px;
+      background: #1e1e1e;
+      color: white;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .controls button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      background: #0078d4;
+      color: white;
+    }
+    .controls button:hover { background: #005fa3; }
+    .controls button.danger { background: #c00; }
+    .controls button.success { background: #107c10; }
+
+    .controls select, .controls input {
+      padding: 5px 8px;
+      border-radius: 4px;
+      border: 1px solid #555;
+      background: #2d2d2d;
+      color: white;
+      font-size: 13px;
+    }
+
+    .controls label { font-size: 13px; color: #ccc; }
+
+    arc-map {
+      flex: 1;
+      display: block;
+      width: 100%;
+    }
+
+    .log-panel {
+      height: 140px;
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+      padding: 8px;
+      overflow-y: auto;
+      border-top: 1px solid #333;
+    }
+    .log-panel .entry { padding: 1px 0; border-bottom: 1px solid #222; }
+    .log-panel .entry.error { color: #f55; }
+    .log-panel .entry.event { color: #ff0; }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <label>Layer:</label>
+    <select id="layerSelect">
+      <option value="point">Point Layer</option>
+      <option value="polygon">Polygon Layer</option>
+      <option value="polyline">Polyline Layer</option>
+    </select>
+
+    <button onclick="loadPointLayer()">Load Point</button>
+    <button onclick="loadPolygonLayer()">Load Polygon</button>
+    <button onclick="loadPolylineLayer()">Load Polyline</button>
+    <button onclick="clearLayer()">Clear Layer</button>
+
+    <span style="color:#555">|</span>
+
+    <label>Draw:</label>
+    <select id="drawType">
+      <option value="point">Point</option>
+      <option value="polyline">Polyline</option>
+      <option value="polygon">Polygon</option>
+      <option value="rectangle">Rectangle</option>
+      <option value="circle">Circle</option>
+    </select>
+    <button class="success" onclick="startDraw()">Start Drawing</button>
+    <button onclick="cancelDraw()">Cancel Draw</button>
+
+    <span style="color:#555">|</span>
+
+    <button onclick="toggleEdit()">Toggle Edit</button>
+    <button onclick="zoomToFeature()">Zoom To ID=1</button>
+    <button onclick="openFeaturePopup()">Open Popup ID=1</button>
+    <button class="danger" onclick="clearLog()">Clear Log</button>
+  </div>
+
+  <arc-map
+    id="arcMap"
+    center="-95.7129, 37.0902"
+    zoom="4"
+    basemap="gray"
+  >
+    <arc-geojson-layer
+      id="pointLayer"
+      name="Point Layer"
+      unique-id-property-name="id"
+    ></arc-geojson-layer>
+
+    <arc-geojson-layer
+      id="polygonLayer"
+      name="Polygon Layer"
+      unique-id-property-name="id"
+    ></arc-geojson-layer>
+
+    <arc-geojson-layer
+      id="polylineLayer"
+      name="Polyline Layer"
+      unique-id-property-name="id"
+    ></arc-geojson-layer>
+  </arc-map>
+
+  <div class="log-panel" id="logPanel">
+    <div class="entry">Ready — use controls above to test</div>
+  </div>
+
+  <script type="module">
+    import './src/components/arc-map/arc-map.js';
+    import './src/components/arc-geojson-layer/arc-geojson-layer.js';
+
+    // ─── Test GeoJSON Data ─────────────────────────────────────────────────
+
+    const POINT_GEOJSON = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 1,
+          geometry: { type: 'Point', coordinates: [-87.6298, 41.8781] },
+          properties: { id: 1, name: 'Chicago' },
+        },
+        {
+          type: 'Feature',
+          id: 2,
+          geometry: { type: 'Point', coordinates: [-73.9857, 40.7484] },
+          properties: { id: 2, name: 'New York' },
+        },
+        {
+          type: 'Feature',
+          id: 3,
+          geometry: { type: 'Point', coordinates: [-118.2437, 34.0522] },
+          properties: { id: 3, name: 'Los Angeles' },
+        },
+      ],
+    };
+
+    const POLYGON_GEOJSON = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 1,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [-90, 35], [-80, 35], [-80, 45], [-90, 45], [-90, 35],
+            ]],
+          },
+          properties: { id: 1, name: 'Test Polygon 1' },
+        },
+        {
+          type: 'Feature',
+          id: 2,
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [-105, 30], [-95, 30], [-95, 40], [-105, 40], [-105, 30],
+            ]],
+          },
+          properties: { id: 2, name: 'Test Polygon 2' },
+        },
+      ],
+    };
+
+    const POLYLINE_GEOJSON = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 1,
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [-120, 35], [-110, 40], [-100, 38], [-90, 42], [-80, 38],
+            ],
+          },
+          properties: { id: 1, name: 'Route 1' },
+        },
+        {
+          type: 'Feature',
+          id: 2,
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [-115, 30], [-105, 33], [-95, 31], [-85, 35],
+            ],
+          },
+          properties: { id: 2, name: 'Route 2' },
+        },
+      ],
+    };
+
+    // ─── Layer References ──────────────────────────────────────────────────
+
+    const pointLayer   = document.getElementById('pointLayer');
+    const polygonLayer = document.getElementById('polygonLayer');
+    const polylineLayer = document.getElementById('polylineLayer');
+
+    // ─── Logging ───────────────────────────────────────────────────────────
+
+    function log(msg, type = '') {
+      const panel = document.getElementById('logPanel');
+      const entry = document.createElement('div');
+      entry.className = `entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      panel.appendChild(entry);
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    window.clearLog = () => {
+      document.getElementById('logPanel').innerHTML = '';
+    };
+
+    // ─── Wire Events ───────────────────────────────────────────────────────
+
+    [pointLayer, polygonLayer, polylineLayer].forEach(layer => {
+      layer.addEventListener('layerClick', (e) => {
+        log(`layerClick — ${layer.id} — attrs: ${JSON.stringify(e.detail.attributes)}`, 'event');
+      });
+      layer.addEventListener('doubleClick', (e) => {
+        log(`doubleClick — ${layer.id}`, 'event');
+      });
+      layer.addEventListener('layerMouseOver', (e) => {
+        log(`mouseOver — ${layer.id} — ${e.detail.attributes?.name ?? ''}`, 'event');
+      });
+      layer.addEventListener('layerMouseOut', () => {
+        log(`mouseOut — ${layer.id}`, 'event');
+      });
+      layer.addEventListener('userDrawItemAdded', (e) => {
+        log(`userDrawItemAdded — ${layer.id} — ${JSON.stringify(e.detail.geometry?.type)}`, 'event');
+      });
+      layer.addEventListener('userEditItemUpdated', (e) => {
+        log(`userEditItemUpdated — ${layer.id}`, 'event');
+      });
+      layer.addEventListener('userEditItemRemoved', (e) => {
+        log(`userEditItemRemoved — ${layer.id}`, 'event');
+      });
+    });
+
+    // ─── Control Functions ─────────────────────────────────────────────────
+
+    function getActiveLayer() {
+      const val = document.getElementById('layerSelect').value;
+      if (val === 'point')    return pointLayer;
+      if (val === 'polygon')  return polygonLayer;
+      if (val === 'polyline') return polylineLayer;
+      return pointLayer;
+    }
+
+    window.loadPointLayer = () => {
+      pointLayer.geojson = POINT_GEOJSON;
+      log('Loaded point GeoJSON');
+    };
+
+    window.loadPolygonLayer = () => {
+      polygonLayer.geojson = POLYGON_GEOJSON;
+      log('Loaded polygon GeoJSON');
+    };
+
+    window.loadPolylineLayer = () => {
+      polylineLayer.geojson = POLYLINE_GEOJSON;
+      log('Loaded polyline GeoJSON');
+    };
+
+    window.clearLayer = () => {
+      const layer = getActiveLayer();
+      layer.geojson = { type: 'FeatureCollection', features: [] };
+      log(`Cleared ${layer.id}`);
+    };
+
+    window.startDraw = async () => {
+      const layer = getActiveLayer();
+      const type = document.getElementById('drawType').value;
+      log(`Starting draw — type: ${type} on ${layer.id}`);
+      await layer.startDrawing(type);
+    };
+
+    window.cancelDraw = async () => {
+      const layer = getActiveLayer();
+      await layer.cancelDrawing();
+      log(`Drawing cancelled on ${layer.id}`);
+    };
+
+    let editEnabled = false;
+    window.toggleEdit = () => {
+      editEnabled = !editEnabled;
+      const layer = getActiveLayer();
+      layer.enableUserEdit = editEnabled;
+      log(`Edit mode: ${editEnabled ? 'ON' : 'OFF'} on ${layer.id}`);
+    };
+
+    window.zoomToFeature = async () => {
+      const layer = getActiveLayer();
+      await layer.zoomTo(1, 8);
+      log(`Zoomed to id=1 on ${layer.id}`);
+    };
+
+    window.openFeaturePopup = async () => {
+      const layer = getActiveLayer();
+      await layer.openPopup(1);
+      log(`Opened popup for id=1 on ${layer.id}`);
+    };
+
+    // Auto-load all layers on startup
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        pointLayer.geojson   = POINT_GEOJSON;
+        polygonLayer.geojson = POLYGON_GEOJSON;
+        polylineLayer.geojson = POLYLINE_GEOJSON;
+        log('All layers loaded on startup');
+      }, 2000);
+    });
+  </script>
+
+</body>
+</html>
