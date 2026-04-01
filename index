@@ -338,3 +338,20 @@
 
 </body>
 </html>
+
+const arcMap = document.querySelector('arc-map');
+console.log('arcMap element:', arcMap);
+console.log('getEsriMap:', typeof arcMap.getEsriMap);
+arcMap.getEsriMap().then(result => {
+  console.log('getEsriMap result:', result);
+  console.log('result.type:', result?.type);
+  console.log('result.map:', result?.map);
+  console.log('result.layers:', result?.layers);
+});
+
+console.log('getViewInstance:', typeof arcMap.getViewInstance);
+arcMap.getViewInstance?.().then(v => {
+  console.log('getViewInstance result:', v);
+  console.log('type:', v?.type);
+});
+
