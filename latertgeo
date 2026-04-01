@@ -1,3 +1,78 @@
+
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!(drawGeometryType.toUpperCase() in DrawEditUtils.DrawGeometryTypes)) {
+    console.error(`The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`);
+    return;
+  }
+
+  if (this.featureLayer) {
+    const existing = await this.featureLayer.queryFeatures({ where: '1=1' });
+    if (existing.features.length === 0) {
+      // Layer is empty — set geometry type to match draw type
+      const newGeomType = getGeometryType(
+        drawGeometryType.charAt(0).toUpperCase() + drawGeometryType.slice(1)
+      );
+      this.featureLayer.geometryType = newGeomType as any;
+    } else {
+      // Layer has features — validate draw type matches existing geometry
+      const requestedType = getGeometryType(
+        drawGeometryType.charAt(0).toUpperCase() + drawGeometryType.slice(1)
+      );
+      if (requestedType !== this.featureLayer.geometryType) {
+        console.error(
+          `Cannot draw ${drawGeometryType} on a ${this.featureLayer.geometryType} layer.`
+        );
+        return;
+      }
+    }
+  }
+
+  this.inDrawingMode = true;
+  this.enableInfoPopupWindow(false);
+
+  const view = await this._getView();
+
+  if (!this.esriDraw) {
+    this.esriDraw = new Draw({ view: view as any });
+  } else {
+    this.esriDraw.reset();
+  }
+
+  const action = this.esriDraw.create(drawGeometryType.toLowerCase() as any);
+
+  (action as any).on('draw-complete', async (evt: any) => {
+    await this.ancestorMap.showZoomSlider();
+    await this.ancestorMap.showScaleBar();
+    this.esriDraw.reset();
+
+    const newGeometry = evt.geometry;
+    const geomType = newGeometry.type as string;
+
+    let symbolType = 'simple-fill';
+    if (geomType === 'point' || geomType === 'multipoint') symbolType = 'simple-marker';
+    else if (geomType === 'polyline') symbolType = 'simple-line';
+
+    const graphic = new Graphic({
+      geometry: newGeometry,
+      symbol: this.renderer ? undefined : ({ type: symbolType } as any),
+    });
+
+    const existingResult = await this.featureLayer.queryFeatures({ where: '1=1' });
+    const addingFirstGeometry = existingResult.features.length === 0;
+
+    this.addToGeoJson(graphic);
+    if (this.renderer && addingFirstGeometry) this._updateRenderer(this.renderer);
+
+    this.inDrawingMode = false;
+    this.enableInfoPopupWindow(true);
+  });
+
+  await this.ancestorMap.hideZoomSlider();
+  await this.ancestorMap.hideScaleBar();
+}
+
+
+
 import { LitElement, PropertyValues } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
