@@ -1,4 +1,49 @@
 
+const clickHandle = (view as any).on('click', async (evt: any) => {
+  const hitResult = await view.hitTest(evt);
+  const hit = hitResult.results.find(
+    (r: any) => r.graphic?.layer === this.featureLayer
+  );
+  if (!hit) return;
+
+  const graphic = (hit as any).graphic;
+
+  // Dispatch layerClick event
+  const { webMercatorToGeographic } = await import(
+    '@arcgis/core/geometry/support/webMercatorUtils'
+  );
+  const coords = webMercatorToGeographic(
+    evt.mapPoint ?? graphic.geometry
+  ) as any;
+
+  this.dispatchEvent(new CustomEvent('layerClick', {
+    detail: {
+      coordinates: { latitude: coords?.y, longitude: coords?.x },
+      attributes: graphic?.attributes,
+    },
+    bubbles: true, composed: true,
+  }));
+
+  // Show popup if infoTemplate set and not editing/drawing
+  if (this.infoTemplate && !this.enableUserEdit && !this.inDrawingMode) {
+    try {
+      const popup = (view as any).popup;
+      if (!popup) return;
+
+      // Use graphic.geometry for location — safer than evt.mapPoint
+      const popupLocation = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
+
+      popup.open({
+        location: popupLocation,
+        features: [graphic],
+      });
+    } catch (e) {
+      console.error('Error opening popup:', e);
+    }
+  }
+});
+
+
 // Replace PopupUtils.updatePopup call in createLayer with this:
 if (this.infoTemplate) {
   try {
