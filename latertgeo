@@ -1,4 +1,41 @@
 
+
+const clickHandle = (view as any).on('click', async (evt: any) => {
+  const hitResult = await view.hitTest(evt);
+  const hit = hitResult.results.find(
+    (r: any) => r.graphic?.layer === this.featureLayer
+  );
+  if (!hit) return;
+
+  const graphic = (hit as any).graphic;
+  const { webMercatorToGeographic } = await import(
+    '@arcgis/core/geometry/support/webMercatorUtils'
+  );
+  const coords = webMercatorToGeographic(evt.mapPoint) as any;
+
+  // Dispatch layerClick event
+  this.dispatchEvent(new CustomEvent('layerClick', {
+    detail: {
+      coordinates: { latitude: coords?.y, longitude: coords?.x },
+      attributes: graphic?.attributes,
+    },
+    bubbles: true, composed: true,
+  }));
+
+  // ✅ Show popup if infoTemplate is set and not in edit/draw mode
+  if (this.infoTemplate && !this.enableUserEdit && !this.inDrawingMode) {
+    const popup = (view as any).popup;
+    if (popup) {
+      popup.open({
+        location: evt.mapPoint,
+        features: [graphic],
+      });
+    }
+  }
+});
+
+
+
 async startDrawing(drawGeometryType: string): Promise<void> {
   if (!(drawGeometryType.toUpperCase() in DrawEditUtils.DrawGeometryTypes)) {
     console.error(`Invalid geometry type: ${drawGeometryType}`);
