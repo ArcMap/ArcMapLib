@@ -1,4 +1,95 @@
 
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!(drawGeometryType.toUpperCase() in DrawEditUtils.DrawGeometryTypes)) {
+    console.error(`Invalid geometry type: ${drawGeometryType}`);
+    return;
+  }
+
+  this.inDrawingMode = true;
+  this.enableInfoPopupWindow(false);
+
+  const view = await this._getView();
+  await view.when();
+
+  // Use SketchViewModel for drawing — Draw widget deprecated in ArcGIS 5.0
+  // SketchViewModel handles cursor changes correctly
+  this.graphicsEditor.create(
+    this._getSketchGeometryType(drawGeometryType) as any
+  );
+
+  // Listen for create event on SketchViewModel
+  const createHandle = this.graphicsEditor.on('create', async (evt: any) => {
+    if (evt.state !== 'complete') return;
+    createHandle.remove();
+
+    const graphic = evt.graphic;
+    if (!graphic?.geometry) {
+      this.inDrawingMode = false;
+      this.enableInfoPopupWindow(true);
+      return;
+    }
+
+    await this.ancestorMap.showZoomSlider();
+    await this.ancestorMap.showScaleBar();
+
+    const geomType = graphic.geometry.type as string;
+    let symbolType = 'simple-fill';
+    if (geomType === 'point' || geomType === 'multipoint') symbolType = 'simple-marker';
+    else if (geomType === 'polyline') symbolType = 'simple-line';
+
+    if (!this.renderer) {
+      graphic.symbol = { type: symbolType } as any;
+    }
+
+    const existingResult = await this.featureLayer.queryFeatures({ where: '1=1' });
+    const addingFirstGeometry = existingResult.features.length === 0;
+
+    this.addToGeoJson(graphic);
+    if (this.renderer && addingFirstGeometry) this._updateRenderer(this.renderer);
+
+    this.inDrawingMode = false;
+    this.enableInfoPopupWindow(true);
+  });
+
+  await this.ancestorMap.hideZoomSlider();
+  await this.ancestorMap.hideScaleBar();
+}
+
+async cancelDrawing(): Promise<void> {
+  this.inDrawingMode = false;
+  this.graphicsEditor?.cancel();
+  await this.ancestorMap.showZoomSlider();
+  await this.ancestorMap.showScaleBar();
+  this.enableInfoPopupWindow(true);
+}
+
+// Maps draw geometry type string to SketchViewModel create tool type
+private _getSketchGeometryType(drawGeometryType: string): string {
+  const type = drawGeometryType.toLowerCase();
+  switch (type) {
+    case 'point':          return 'point';
+    case 'multipoint':     return 'multipoint';
+    case 'polyline':
+    case 'freehand-polyline':
+    case 'line':           return 'polyline';
+    case 'polygon':
+    case 'freehand-polygon':
+    case 'rectangle':
+    case 'circle':
+    case 'triangle':
+    case 'arrow':          return 'polygon';
+    default:               return 'point';
+  }
+
+
+
+
+
+
+
+
+
+
 (action as any).on('draw-complete', async (evt: any) => {
   console.log('draw-complete full evt:', evt);
 
