@@ -1,0 +1,251 @@
+import { LitElement, html, css } from "lit";
+import { customElement, property, query } from "lit/decorators.js";
+import MapView from "@arcgis/core/views/MapView";
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
+import { UpMap } from "../map";
+
+@customElement("arc-layer-list")
+export class ArcLayerList extends LitElement {
+
+  @property({ type: String, reflect: true, attribute: "map-id" })
+  mapId?: string;
+
+  @query('arcgis-layer-list')
+  arcgisLayerList!: HTMLElement & {
+    view?: MapView;
+  };
+
+  private view?: MapView;
+  private stopHandles: Array<{ remove: () => void }> = [];
+
+  static styles = css`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #layer-list-container {
+      width: 100%;
+      height: 100%;
+      min-height: 200px;
+      overflow: auto;
+      box-sizing: border-box;
+    }
+    arcgis-layer-list {
+      width: 100%;
+      height: 100%;
+    }
+  `;
+
+  // ─── Lifecycle ────────────────────────────────────────────────
+
+  async firstUpdated(): Promise<void> {
+    // ✅ Wait for arcgis-layer-list to be fully upgraded
+    await customElements.whenDefined('arcgis-layer-list');
+    await this.resolveAndAttach();
+  }
+
+  async updated(changedProperties: Map<string, any>): Promise<void> {
+    if (changedProperties.has("mapId")) {
+      const oldMapId = changedProperties.get("mapId") as string | undefined;
+      if (oldMapId === undefined) return;
+      await this.detachFromCurrentMap();
+      await this.resolveAndAttach();
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.cleanup();
+  }
+
+  // ─── Map Resolution ───────────────────────────────────────────
+
+  private resolveMapElement(): UpMap | null {
+    const root = this.getRootNode() as Document | ShadowRoot;
+
+    if (this.mapId) {
+      const el = root.querySelector<UpMap>(`up-map[id="${this.mapId}"]`);
+      if (!el) {
+        console.error(
+          `<arc-layer-list>: No <up-map id="${this.mapId}"> ` +
+          `found in the same shadow root`
+        );
+      }
+      return el;
+    }
+
+    // Try closest ancestor
+    const closest = this.closest<UpMap>('up-map');
+    if (closest) return closest;
+
+    // Fallback: shadow root host
+    if (root instanceof ShadowRoot) {
+      const host = root.host;
+      if (host.tagName.toLowerCase() === 'up-map') {
+        return host as unknown as UpMap;
+      }
+      const hostClosest = host.closest<UpMap>('up-map');
+      if (hostClosest) return hostClosest;
+    }
+
+    console.error(
+      `<arc-layer-list>: Must be inside <up-map> ` +
+      `or provide a map-id attribute`
+    );
+    return null;
+  }
+
+  private async resolveAndAttach(): Promise<void> {
+    const mapElement = this.resolveMapElement();
+    if (!mapElement) return;
+
+    const view = await mapElement.getViewInstance();
+    if (!view) {
+      console.error('<arc-layer-list>: getViewInstance() returned null');
+      return;
+    }
+
+    await view.when();
+    this.view = view;
+    await this.updateComplete;
+
+    // ✅ Hide internal/basemap layers BEFORE setting view
+    this.hideInternalLayers(view);
+
+    if (this.arcgisLayerList) {
+      this.arcgisLayerList.view = view;
+    }
+
+    this.attachToMapEvents(view);
+  }
+
+  // ─── Hide Internal Layers ─────────────────────────────────────
+
+  private hideInternalLayers(view: MapView): void {
+    const applyHide = (layer: any) => {
+      // ✅ Get basemap layer collections
+      const basemapBaseLayers =
+        view.map.basemap?.baseLayers ?? [];
+      const basemapRefLayers =
+        view.map.basemap?.referenceLayers ?? [];
+
+      // ✅ Rule 1: Always hide basemap layers
+      const isBasemapLayer =
+        basemapBaseLayers.includes(layer) ||
+        basemapRefLayers.includes(layer);
+
+      if (isBasemapLayer) {
+        layer.listMode = 'hide';
+        return;
+      }
+
+      // ✅ Rule 2: Hide internal SDK auto-created GraphicsLayers
+      //    These have no title AND sdk-generated id (layer_0, layer_1 etc)
+      //    YOUR GraphicsLayers added via arc-geojson-layer will have
+      //    proper ids/titles so they won't be affected
+      const isInternalGraphicsLayer =
+        layer.declaredClass === 'esri.layers.GraphicsLayer' &&
+        (!layer.title || layer.title.trim() === '') &&
+        (!layer.id || layer.id.startsWith('layer_'));
+
+      if (isInternalGraphicsLayer) {
+        layer.listMode = 'hide';
+        return;
+      }
+
+      // ✅ Rule 3: Respect explicitly hidden layers
+      if (layer.listMode === 'hide') {
+        return;
+      }
+
+      // ✅ Everything else shows:
+      //    - FeatureLayer (with or without title)
+      //    - GraphicsLayer added by user
+      //    - Any other operational layer
+    };
+
+    // Apply to all existing layers
+    view.map.allLayers.forEach(applyHide);
+
+    // ✅ Watch for layers added later
+    this.stopHandles.push(
+      reactiveUtils.watch(
+        () => view.map.allLayers.length,
+        () => view.map.allLayers.forEach(applyHide)
+      )
+    );
+  }
+
+  // ─── Map Events ───────────────────────────────────────────────
+
+  private attachToMapEvents(view: MapView): void {
+    const map = view.map;
+
+    const handler = () => {
+      if (this.arcgisLayerList && this.view === view) {
+        this.arcgisLayerList.view = view;
+      }
+    };
+
+    this.stopHandles.push(
+      reactiveUtils.watch(
+        () => map?.allLayers.length,
+        handler
+      ),
+      reactiveUtils.watch(
+        () => map?.basemap?.baseLayers.length,
+        handler
+      ),
+      reactiveUtils.watch(
+        () => map?.basemap?.referenceLayers.length,
+        handler
+      )
+    );
+  }
+
+  // ─── Detach / Cleanup ─────────────────────────────────────────
+
+  private async detachFromCurrentMap(): Promise<void> {
+    this.clearWatchers();
+    if (this.arcgisLayerList) {
+      this.arcgisLayerList.view = undefined;
+    }
+    this.view = undefined;
+  }
+
+  private cleanup(): void {
+    this.clearWatchers();
+    if (this.arcgisLayerList) {
+      this.arcgisLayerList.view = undefined;
+    }
+    this.view = undefined;
+  }
+
+  private clearWatchers(): void {
+    for (const handle of this.stopHandles) {
+      handle.remove();
+    }
+    this.stopHandles = [];
+  }
+
+  // ─── Render ───────────────────────────────────────────────────
+
+  render() {
+    const generatedId = this.id ? `${this.id}_generated` : '';
+    return html`
+      <div id="layer-list-container">
+        <arcgis-layer-list
+          id="${generatedId}"
+          visibility-appearance="checkbox">
+        </arcgis-layer-list>
+      </div>
+    `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "arc-layer-list": ArcLayerList;
+  }
+}
