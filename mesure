@@ -1,25 +1,24 @@
-// arc-measurement.ts
 import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import MapUtils from '../../common/map-utils';
+import { customElement, property, state } from 'lit/decorators.js';
+import MapUtils from '../common/map-utils';
 
 @customElement('arc-measurement')
 export class ArcMeasurement extends LitElement {
-  private esriMeasurement: any;
-  private internalDivElement: HTMLDivElement;
 
-  @property({ type: String, reflect: true }) mapId: string;
+  @property({ type: String, reflect: true }) mapId: string = '';
 
   /**
-   * Default tool selected on start up. Valid choices are "area", "distance", "location".
+   * Default tool selected on start up. Valid choices are "area", "distance".
    * If a default is not provided then no tool is selected.
    */
   @property({ type: String, reflect: true }) defaultTool: string | null = null;
 
+  @state() private view: __esri.MapView | null = null;
+
   static styles = css`
-    :host {
-      display: block;
-    }
+    :host { display: block; }
+    .tool-container { display: none; }
+    .tool-container.active { display: block; }
   `;
 
   async firstUpdated() {
@@ -33,33 +32,25 @@ export class ArcMeasurement extends LitElement {
 
   async componentDidLoad() {
     const mapElement = MapUtils.findUpMapByIdOrDefault(this.mapId);
-    if (!mapElement) {
-      return;
-    }
+    if (!mapElement) return;
 
     const mapPromise = MapUtils.getEsriMapPromiseFromUpMapElement(mapElement);
+    this.view = await mapPromise;
 
-    const [{ default: MeasurementWidget }, { default: Units }] = await Promise.all([
-      import('@arcgis/core/widgets/Measurement'),
-      import('@arcgis/core/core/units'),
+    await Promise.all([
+      customElements.whenDefined('arcgis-area-measurement-2d'),
+      customElements.whenDefined('arcgis-distance-measurement-2d'),
     ]);
 
-    const esriMap = await mapPromise;
+    // Set view on both widgets after they are defined
+    const areEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
+    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
 
-    this.esriMeasurement = new MeasurementWidget({
-      view: esriMap,
-      linearUnit: 'feet',
-      areaUnit: 'square-miles',
-      container: this.internalDivElement,
-    });
+    if (areEl) areEl.view = this.view;
+    if (distEl) distEl.view = this.view;
 
-    if (
-      this.defaultTool !== null &&
-      (this.defaultTool === 'area' ||
-        this.defaultTool === 'distance' ||
-        this.defaultTool === 'location')
-    ) {
-      this.esriMeasurement.activeTool = this.defaultTool.toUpperCase() as any;
+    if (this.defaultTool === 'area' || this.defaultTool === 'distance') {
+      // activating tool is handled by showing the correct widget
     } else {
       console.log(
         'Measurement tool: No default tool selected. Valid choices are area, distance, or location.'
@@ -68,15 +59,20 @@ export class ArcMeasurement extends LitElement {
   }
 
   componentDidUnload() {
-    this.esriMeasurement?.destroy();
+    // web components clean up themselves
   }
 
   render() {
+    const showArea = this.defaultTool === 'area';
+    const showDistance = this.defaultTool === 'distance';
+
     return html`
-      <div
-        ${ref((el) => (this.internalDivElement = el as HTMLDivElement))}
-        id="${this.id ? this.id + '_generated' : ''}"
-      ></div>
+      <div class="tool-container ${showArea ? 'active' : ''}">
+        <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
+      </div>
+      <div class="tool-container ${showDistance ? 'active' : ''}">
+        <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
+      </div>
     `;
   }
 }
