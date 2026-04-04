@@ -1,0 +1,82 @@
+// arc-measurement.ts
+import { LitElement, html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import MapUtils from '../../common/map-utils';
+
+@customElement('arc-measurement')
+export class ArcMeasurement extends LitElement {
+  private esriMeasurement: any;
+  private internalDivElement: HTMLDivElement;
+
+  @property({ type: String, reflect: true }) mapId: string;
+
+  /**
+   * Default tool selected on start up. Valid choices are "area", "distance", "location".
+   * If a default is not provided then no tool is selected.
+   */
+  @property({ type: String, reflect: true }) defaultTool: string | null = null;
+
+  static styles = css`
+    :host {
+      display: block;
+    }
+  `;
+
+  async firstUpdated() {
+    await this.componentDidLoad();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.componentDidUnload();
+  }
+
+  async componentDidLoad() {
+    const mapElement = MapUtils.findUpMapByIdOrDefault(this.mapId);
+    if (!mapElement) {
+      return;
+    }
+
+    const mapPromise = MapUtils.getEsriMapPromiseFromUpMapElement(mapElement);
+
+    const [{ default: MeasurementWidget }, { default: Units }] = await Promise.all([
+      import('@arcgis/core/widgets/Measurement'),
+      import('@arcgis/core/core/units'),
+    ]);
+
+    const esriMap = await mapPromise;
+
+    this.esriMeasurement = new MeasurementWidget({
+      view: esriMap,
+      linearUnit: 'feet',
+      areaUnit: 'square-miles',
+      container: this.internalDivElement,
+    });
+
+    if (
+      this.defaultTool !== null &&
+      (this.defaultTool === 'area' ||
+        this.defaultTool === 'distance' ||
+        this.defaultTool === 'location')
+    ) {
+      this.esriMeasurement.activeTool = this.defaultTool.toUpperCase() as any;
+    } else {
+      console.log(
+        'Measurement tool: No default tool selected. Valid choices are area, distance, or location.'
+      );
+    }
+  }
+
+  componentDidUnload() {
+    this.esriMeasurement?.destroy();
+  }
+
+  render() {
+    return html`
+      <div
+        ${ref((el) => (this.internalDivElement = el as HTMLDivElement))}
+        id="${this.id ? this.id + '_generated' : ''}"
+      ></div>
+    `;
+  }
+}
