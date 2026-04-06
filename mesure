@@ -5,6 +5,14 @@ import { customElement, property, state } from 'lit/decorators.js';
 export class ArcMeasurement extends LitElement {
 
   @property({ type: String, reflect: true }) mapId: string = '';
+
+  /**
+   * Default tool selected on start up.
+   * Valid choices are "area", "distance", "location".
+   * If not provided, all three tools are shown.
+   */
+  @property({ type: String, reflect: true }) defaultTool: 'area' | 'distance' | 'location' | null = null;
+
   @state() private view: any = null;
 
   static styles = css`
@@ -14,6 +22,7 @@ export class ArcMeasurement extends LitElement {
       flex-direction: column;
       gap: 4px;
     }
+    .hidden { display: none; }
   `;
 
   async firstUpdated() {
@@ -73,11 +82,11 @@ export class ArcMeasurement extends LitElement {
     if (distEl) distEl.view = this.view;
     if (coordEl) coordEl.view = this.view;
 
-    // ── Area expand events ────────────────────────────────────────────────
     const areaExpand = this.shadowRoot?.querySelector('#area-expand') as any;
     const distExpand = this.shadowRoot?.querySelector('#dist-expand') as any;
     const coordExpand = this.shadowRoot?.querySelector('#coord-expand') as any;
 
+    // ── Area expand events ──────────────────────────────────────────────
     areaExpand?.addEventListener('arcgisExpand', async () => {
       if (distExpand?.expanded) { distExpand.expanded = false; distEl?.clear(); }
       if (coordExpand?.expanded) { coordExpand.expanded = false; }
@@ -89,7 +98,7 @@ export class ArcMeasurement extends LitElement {
       areaEl?.clear();
     });
 
-    // ── Distance expand events ────────────────────────────────────────────
+    // ── Distance expand events ──────────────────────────────────────────
     distExpand?.addEventListener('arcgisExpand', async () => {
       if (areaExpand?.expanded) { areaExpand.expanded = false; areaEl?.clear(); }
       if (coordExpand?.expanded) { coordExpand.expanded = false; }
@@ -101,12 +110,26 @@ export class ArcMeasurement extends LitElement {
       distEl?.clear();
     });
 
-    // ── Coordinate expand events ──────────────────────────────────────────
+    // ── Coordinate expand events ────────────────────────────────────────
     coordExpand?.addEventListener('arcgisExpand', async () => {
       if (areaExpand?.expanded) { areaExpand.expanded = false; areaEl?.clear(); }
       if (distExpand?.expanded) { distExpand.expanded = false; distEl?.clear(); }
       await coordEl?.componentOnReady();
     });
+
+    // ── Auto-open defaultTool if provided ───────────────────────────────
+    if (this.defaultTool === 'area' && areaExpand) {
+      areaExpand.expanded = true;
+      await areaEl?.componentOnReady();
+      areaEl?.start();
+    } else if (this.defaultTool === 'distance' && distExpand) {
+      distExpand.expanded = true;
+      await distEl?.componentOnReady();
+      distEl?.start();
+    } else if (this.defaultTool === 'location' && coordExpand) {
+      coordExpand.expanded = true;
+      await coordEl?.componentOnReady();
+    }
   }
 
   componentDidUnload() {
@@ -118,6 +141,12 @@ export class ArcMeasurement extends LitElement {
     coordEl?.destroy();
   }
 
+  private shouldShow(tool: 'area' | 'distance' | 'location'): boolean {
+    // If no defaultTool set, show all three
+    // If defaultTool set, show only that tool
+    return this.defaultTool === null || this.defaultTool === tool;
+  }
+
   render() {
     return html`
       <div class="measurement-container">
@@ -127,7 +156,8 @@ export class ArcMeasurement extends LitElement {
           id="area-expand"
           expand-icon="measure-area"
           expanded-icon="measure-area"
-          expand-tooltip="Measure Area">
+          expand-tooltip="Measure Area"
+          class="${this.shouldShow('area') ? '' : 'hidden'}">
           <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
         </arcgis-expand>
 
@@ -136,16 +166,18 @@ export class ArcMeasurement extends LitElement {
           id="dist-expand"
           expand-icon="measure-line"
           expanded-icon="measure-line"
-          expand-tooltip="Measure Distance">
+          expand-tooltip="Measure Distance"
+          class="${this.shouldShow('distance') ? '' : 'hidden'}">
           <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
         </arcgis-expand>
 
-        <!-- Location / Coordinate Conversion -->
+        <!-- Location -->
         <arcgis-expand
           id="coord-expand"
           expand-icon="pin-plus"
           expanded-icon="pin-plus"
-          expand-tooltip="Capture Location">
+          expand-tooltip="Capture Location"
+          class="${this.shouldShow('location') ? '' : 'hidden'}">
           <arcgis-coordinate-conversion></arcgis-coordinate-conversion>
         </arcgis-expand>
 
