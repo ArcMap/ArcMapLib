@@ -1,30 +1,335 @@
-// jest.config.js
-module.exports = {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  extensionsToFileExtensions: {
-    ts: ['ts'],
+// legend.spec.ts
+
+// ── Mock ALL ESM modules BEFORE imports ────────────────────────────────────
+jest.mock('lit', () => ({
+  LitElement: class LitElement {
+    shadowRoot: any = null;
+    updateComplete = Promise.resolve(true);
+    requestUpdate() {}
+    disconnectedCallback() {}
   },
-  transformIgnorePatterns: [
-    // Tell Jest to transform these ESM packages
-    'node_modules/(?!(lit|@lit|lit-html|lit-element|@arcgis|@esri)/)',
-  ],
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        tsconfig: {
-          allowJs: true,
-          esModuleInterop: true,
-        },
-      },
-    ],
-    '^.+\\.js$': 'babel-jest',
+  html: (strings: any, ...values: any[]) => ({ strings, values }),
+  css: (strings: any, ...values: any[]) => ({ strings, values }),
+}));
+
+jest.mock('lit/decorators.js', () => ({
+  customElement: () => () => {},
+  property: () => () => {},
+  state: () => () => {},
+  query: () => () => {},
+}));
+
+jest.mock('lit/directives/ref.js', () => ({
+  ref: () => () => {},
+  createRef: () => ({ value: null }),
+}));
+
+jest.mock('@arcgis/core/views/MapView', () => ({
+  default: class MapView {},
+}));
+
+jest.mock('@arcgis/core/core/Handles', () => ({
+  default: class Handles {
+    add = jest.fn();
+    removeAll = jest.fn();
   },
-  moduleNameMapper: {
-    // Mock all @arcgis imports
-    '^@arcgis/(.*)$': '<rootDir>/__mocks__/@arcgis/$1',
-    '^lit$': '<rootDir>/__mocks__/lit.ts',
-    '^lit/(.*)$': '<rootDir>/__mocks__/lit/$1',
+}));
+
+jest.mock('@arcgis/core/layers/Layer', () => ({
+  default: class Layer {},
+}));
+
+jest.mock('../common/map.utils', () => ({
+  default: {
+    getLayerName: jest.fn(() => 'LayerName'),
+  },
+}));
+
+// ── Now safe to import ─────────────────────────────────────────────────────
+import { UpLegend } from './legend';
+
+// ── Mocks ──────────────────────────────────────────────────────────────────
+
+const mockLayer1 = { visible: true, title: 'Layer 1' };
+const mockLayer2 = { visible: false, title: 'Layer 2' };
+const mockLayer3 = { visible: true, title: '' }; // no title — filtered out
+
+const mockLegendEl = {
+  view: null as any,
+  autoUpdate: false,
+  layerInfos: null as any,
+};
+
+const mockMap = {
+  layers: {
+    toArray: jest.fn(() => [mockLayer1, mockLayer2, mockLayer3]),
+    on: jest.fn(() => ({ remove: jest.fn() })),
+  },
+  allLayers: {
+    on: jest.fn(() => ({ remove: jest.fn() })),
   },
 };
+
+const mockView = {
+  when: jest.fn().mockResolvedValue(undefined),
+  map: mockMap,
+};
+
+const mockAncestorMap = {
+  getViewInstance: jest.fn().mockResolvedValue(mockView),
+};
+
+// ── Setup ──────────────────────────────────────────────────────────────────
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockLegendEl.view = null;
+  mockLegendEl.layerInfos = null;
+
+  (global as any).customElements = {
+    whenDefined: jest.fn().mockResolvedValue(undefined),
+    define: jest.fn(),
+    get: jest.fn(),
+  };
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+// ── Helper ─────────────────────────────────────────────────────────────────
+
+function createComponent(): UpLegend {
+  const el = new UpLegend() as any;
+  el.mapId = '';
+  el.align = 'left';
+  el.updateComplete = Promise.resolve(true);
+
+  // Mock Handles
+  el.eventHandles = {
+    add: jest.fn(),
+    removeAll: jest.fn(),
+  };
+
+  // Mock closest() — simulates being inside up-map
+  el.closest = jest.fn().mockReturnValue(mockAncestorMap);
+
+  // Mock legendElement via @query
+  el.legendElement = mockLegendEl;
+
+  // Mock shadowRoot
+  el.shadowRoot = {
+    querySelector: jest.fn().mockReturnValue(mockLegendEl),
+  };
+
+  return el;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Tests
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('UpLegend', () => {
+
+  // ── componentDidLoad ────────────────────────────────────────────────────
+
+  describe('componentDidLoad()', () => {
+    it('should log error and return if no ancestor up-map found', async () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const el = createComponent() as any;
+      el.closest = jest.fn().mockReturnValue(null);
+      await (el as any).componentDidLoad();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('<up-legend> must be inside <up-map>')
+      );
+      expect(mockAncestorMap.getViewInstance).not.toHaveBeenCalled();
+    });
+
+    it('should return if getViewInstance is not a function', async () => {
+      const el = createComponent() as any;
+      el.closest = jest.fn().mockReturnValue({ getViewInstance: 'not-a-function' });
+      await (el as any).componentDidLoad();
+      expect(mockView.when).not.toHaveBeenCalled();
+    });
+
+    it('should call getViewInstance on ancestor map', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockAncestorMap.getViewInstance).toHaveBeenCalled();
+    });
+
+    it('should log error and return if view is null', async () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      mockAncestorMap.getViewInstance.mockResolvedValueOnce(null);
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Could not resolve MapView from <up-map>')
+      );
+    });
+
+    it('should call view.when()', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockView.when).toHaveBeenCalled();
+    });
+
+    it('should wait for arcgis-legend custom element', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(customElements.whenDefined).toHaveBeenCalledWith('arcgis-legend');
+    });
+
+    it('should set view on legend element', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockLegendEl.view).toBe(mockView);
+    });
+
+    it('should set autoUpdate to true on legend element', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockLegendEl.autoUpdate).toBe(true);
+    });
+
+    it('should set layerInfos on legend element', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockLegendEl.layerInfos).not.toBeNull();
+    });
+
+    it('should register map layers change listener', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockMap.layers.on).toHaveBeenCalledWith(
+        'change',
+        expect.any(Function)
+      );
+    });
+
+    it('should register allLayers change listener', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+      expect(mockMap.allLayers.on).toHaveBeenCalledWith(
+        'change',
+        expect.any(Function)
+      );
+    });
+
+    it('should add both handles to eventHandles', async () => {
+      const el = createComponent() as any;
+      await (el as any).componentDidLoad();
+      expect(el.eventHandles.add).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── getLayerInfos ────────────────────────────────────────────────────────
+
+  describe('getLayerInfos()', () => {
+    it('should return empty array if view has no map', () => {
+      const result = (UpLegend as any).getLayerInfos({ map: null });
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array if view is undefined', () => {
+      const result = (UpLegend as any).getLayerInfos(undefined);
+      expect(result).toEqual([]);
+    });
+
+    it('should filter out invisible layers', () => {
+      const result = (UpLegend as any).getLayerInfos(mockView);
+      const hasInvisible = result.some(
+        (info: any) => info.layer === mockLayer2
+      );
+      expect(hasInvisible).toBe(false);
+    });
+
+    it('should filter out layers with no title', () => {
+      const result = (UpLegend as any).getLayerInfos(mockView);
+      const hasNoTitle = result.some(
+        (info: any) => info.layer === mockLayer3
+      );
+      expect(hasNoTitle).toBe(false);
+    });
+
+    it('should include visible layers with title', () => {
+      const result = (UpLegend as any).getLayerInfos(mockView);
+      expect(result.length).toBe(1);
+      expect(result[0].layer).toBe(mockLayer1);
+    });
+
+    it('should set title from MapUtils.getLayerName', () => {
+      const result = (UpLegend as any).getLayerInfos(mockView);
+      expect(result[0].title).toBe('LayerName');
+    });
+  });
+
+  // ── componentDidUnload ───────────────────────────────────────────────────
+
+  describe('componentDidUnload()', () => {
+    it('should set legendElement view to undefined', () => {
+      const el = createComponent() as any;
+      el.legendElement = mockLegendEl;
+      (el as any).componentDidUnload();
+      expect(mockLegendEl.view).toBeUndefined();
+    });
+
+    it('should call eventHandles.removeAll()', () => {
+      const el = createComponent() as any;
+      (el as any).componentDidUnload();
+      expect(el.eventHandles.removeAll).toHaveBeenCalled();
+    });
+
+    it('should not throw if legendElement is null', () => {
+      const el = createComponent() as any;
+      el.legendElement = null;
+      expect(() => (el as any).componentDidUnload()).not.toThrow();
+    });
+  });
+
+  // ── disconnectedCallback ─────────────────────────────────────────────────
+
+  describe('disconnectedCallback()', () => {
+    it('should call componentDidUnload on disconnect', () => {
+      const el = createComponent() as any;
+      const spy = jest.spyOn(el as any, 'componentDidUnload');
+      el.disconnectedCallback();
+      expect(spy).toHaveBeenCalled();
+    });
+  });
+
+  // ── refreshLayers ────────────────────────────────────────────────────────
+
+  describe('refreshLayers callback', () => {
+    it('should update layerInfos when layers change', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+
+      // Get the refresh callback passed to layers.on
+      const refreshCallback = mockMap.layers.on.mock.calls[0][1];
+      refreshCallback();
+
+      expect(mockLegendEl.layerInfos).not.toBeNull();
+    });
+
+    it('should not update if legendElement is null', async () => {
+      const el = createComponent() as any;
+      await (el as any).componentDidLoad();
+
+      el.legendElement = null;
+      const refreshCallback = mockMap.layers.on.mock.calls[0][1];
+
+      expect(() => refreshCallback()).not.toThrow();
+    });
+  });
+
+  // ── render ───────────────────────────────────────────────────────────────
+
+  describe('render()', () => {
+    it('should return html template', () => {
+      const el = createComponent() as any;
+      const result = el.render();
+      expect(result).toBeDefined();
+    });
+  });
+});
