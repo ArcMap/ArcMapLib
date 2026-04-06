@@ -1,24 +1,59 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import MapUtils from '../common/map-utils';
 
 @customElement('arc-measurement')
 export class ArcMeasurement extends LitElement {
 
   @property({ type: String, reflect: true }) mapId: string = '';
 
-  /**
-   * Default tool selected on start up. Valid choices are "area", "distance".
-   * If a default is not provided then no tool is selected.
-   */
-  @property({ type: String, reflect: true }) defaultTool: string | null = null;
-
-  @state() private view: __esri.MapView | null = null;
+  @state() private activeTool: 'area' | 'distance' | null = null;
+  @state() private view: any = null;
 
   static styles = css`
     :host { display: block; }
-    .tool-container { display: none; }
-    .tool-container.active { display: block; }
+
+    .hidden { display: none; }
+
+    .toolbar {
+      display: flex;
+      flex-direction: row;
+      gap: 4px;
+      background: white;
+      padding: 6px;
+      border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      margin-bottom: 4px;
+    }
+
+    .tool-btn {
+      width: 32px;
+      height: 32px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .tool-btn:hover {
+      background: #e8f0fb;
+      border-color: #0079c1;
+    }
+
+    .tool-btn.active {
+      background: #0079c1;
+      color: white;
+      border-color: #0079c1;
+    }
+
+    .tool-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
   `;
 
   async firstUpdated() {
@@ -30,49 +65,121 @@ export class ArcMeasurement extends LitElement {
     this.componentDidUnload();
   }
 
+  private resolveMapElement(): any | null {
+    if (this.mapId) {
+      const el = document.querySelector(`arc-map[id="${this.mapId}"]`);
+      if (!el) {
+        console.error(`No <arc-map> found with id "${this.mapId}"`);
+        return null;
+      }
+      return el;
+    } else {
+      const el = document.querySelector('arc-map');
+      if (!el) {
+        console.error('No <arc-map> found on page. Please provide a mapId.');
+        return null;
+      }
+      return el;
+    }
+  }
+
   async componentDidLoad() {
-    const mapElement = MapUtils.findUpMapByIdOrDefault(this.mapId);
+    const mapElement = this.resolveMapElement();
     if (!mapElement) return;
 
-    const mapPromise = MapUtils.getEsriMapPromiseFromUpMapElement(mapElement);
-    this.view = await mapPromise;
+    const view = await mapElement.getViewInstance();
+    if (!view) {
+      console.error('Could not get MapView from <arc-map>');
+      return;
+    }
+
+    await view.when();
+    this.view = view;
 
     await Promise.all([
       customElements.whenDefined('arcgis-area-measurement-2d'),
       customElements.whenDefined('arcgis-distance-measurement-2d'),
     ]);
 
-    // Set view on both widgets after they are defined
-    const areEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
+    await this.updateComplete;
+
+    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
     const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
 
-    if (areEl) areEl.view = this.view;
+    if (areaEl) areaEl.view = this.view;
     if (distEl) distEl.view = this.view;
-
-    if (this.defaultTool === 'area' || this.defaultTool === 'distance') {
-      // activating tool is handled by showing the correct widget
-    } else {
-      console.log(
-        'Measurement tool: No default tool selected. Valid choices are area, distance, or location.'
-      );
-    }
   }
 
   componentDidUnload() {
-    // web components clean up themselves
+    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
+    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
+    areaEl?.destroy();
+    distEl?.destroy();
+  }
+
+  private async onToolClick(tool: 'area' | 'distance') {
+    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
+    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
+
+    if (this.activeTool === tool) {
+      // Clicking active tool → deactivate
+      areaEl?.clear();
+      distEl?.clear();
+      this.activeTool = null;
+    } else {
+      // Switch tool → clear previous
+      areaEl?.clear();
+      distEl?.clear();
+      this.activeTool = tool;
+      await this.updateComplete;
+      if (tool === 'area') areaEl?.start();
+      if (tool === 'distance') distEl?.start();
+    }
   }
 
   render() {
-    const showArea = this.defaultTool === 'area';
-    const showDistance = this.defaultTool === 'distance';
-
     return html`
-      <div class="tool-container ${showArea ? 'active' : ''}">
+      <div class="toolbar">
+
+        <!-- Area icon -->
+        <button
+          class="tool-btn ${this.activeTool === 'area' ? 'active' : ''}"
+          title="Measure Area"
+          @click=${() => this.onToolClick('area')}>
+          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 1v14h14V1H1zm13 13H2V2h12v12zM4 4h8v8H4V4z"/>
+          </svg>
+        </button>
+
+        <!-- Distance icon -->
+        <button
+          class="tool-btn ${this.activeTool === 'distance' ? 'active' : ''}"
+          title="Measure Distance"
+          @click=${() => this.onToolClick('distance')}>
+          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 8h14M1 8l3-3M1 8l3 3M15 8l-3-3M15 8l-3 3"
+              stroke="currentColor" stroke-width="1.5"
+              fill="none" stroke-linecap="round"/>
+          </svg>
+        </button>
+
+      </div>
+
+      <!-- Area widget -->
+      <div class="${this.activeTool === 'area' ? '' : 'hidden'}">
         <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
       </div>
-      <div class="tool-container ${showDistance ? 'active' : ''}">
+
+      <!-- Distance widget -->
+      <div class="${this.activeTool === 'distance' ? '' : 'hidden'}">
         <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
       </div>
     `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'arc-measurement': ArcMeasurement;
   }
 }
