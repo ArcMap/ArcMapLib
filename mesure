@@ -1,142 +1,355 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+// arc-measurement.test.ts
+import { fixture, html, expect } from '@open-wc/testing';
+import { ArcMeasurement } from './arc-measurement';
 
-@customElement('arc-measurement')
-export class ArcMeasurement extends LitElement {
+// ── Mocks ──────────────────────────────────────────────────────────────────
 
-  @property({ type: String, reflect: true }) mapId: string = '';
-  @state() private view: any = null;
+const mockView = {
+  when: jest.fn().mockResolvedValue(undefined),
+};
 
-  static styles = css`
-    :host { display: block; }
-    .measurement-container {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+const mockAreaEl = {
+  view: null,
+  componentOnReady: jest.fn().mockResolvedValue(undefined),
+  start: jest.fn(),
+  clear: jest.fn(),
+  destroy: jest.fn(),
+};
+
+const mockDistEl = {
+  view: null,
+  componentOnReady: jest.fn().mockResolvedValue(undefined),
+  start: jest.fn(),
+  clear: jest.fn(),
+  destroy: jest.fn(),
+};
+
+const mockMapElement = {
+  getViewInstance: jest.fn().mockResolvedValue(mockView),
+};
+
+const mockAreaExpand = {
+  expanded: false,
+  addEventListener: jest.fn(),
+};
+
+const mockDistExpand = {
+  expanded: false,
+  addEventListener: jest.fn(),
+};
+
+// ── Setup ──────────────────────────────────────────────────────────────────
+
+beforeEach(() => {
+  jest.clearAllMocks();
+
+  // Mock document.querySelector for arc-map
+  jest.spyOn(document, 'querySelector').mockImplementation((selector: string) => {
+    if (selector.includes('arc-map')) return mockMapElement as any;
+    return null;
+  });
+
+  // Mock customElements.whenDefined
+  jest.spyOn(customElements, 'whenDefined').mockResolvedValue(undefined as any);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+// ── Helper ─────────────────────────────────────────────────────────────────
+
+function createComponent(mapId = 'myMap'): ArcMeasurement {
+  const el = document.createElement('arc-measurement') as ArcMeasurement;
+  el.mapId = mapId;
+
+  // Mock shadowRoot querySelector
+  jest.spyOn(el.shadowRoot as any, 'querySelector').mockImplementation(
+    (selector: string) => {
+      if (selector === 'arcgis-area-measurement-2d') return mockAreaEl;
+      if (selector === 'arcgis-distance-measurement-2d') return mockDistEl;
+      if (selector === '#area-expand') return mockAreaExpand;
+      if (selector === '#dist-expand') return mockDistExpand;
+      return null;
     }
-  `;
+  );
 
-  async firstUpdated() {
-    await this.componentDidLoad();
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    this.componentDidUnload();
-  }
-
-  private resolveMapElement(): any | null {
-    if (this.mapId) {
-      const el = document.querySelector(`arc-map[id="${this.mapId}"]`);
-      if (!el) {
-        console.error(`No <arc-map> found with id "${this.mapId}"`);
-        return null;
-      }
-      return el;
-    } else {
-      const el = document.querySelector('arc-map');
-      if (!el) {
-        console.error('No <arc-map> found on page. Please provide a mapId.');
-        return null;
-      }
-      return el;
-    }
-  }
-
-  async componentDidLoad() {
-    const mapElement = this.resolveMapElement();
-    if (!mapElement) return;
-
-    const view = await mapElement.getViewInstance();
-    if (!view) {
-      console.error('Could not get MapView from <arc-map>');
-      return;
-    }
-
-    await view.when();
-    this.view = view;
-
-    await Promise.all([
-      customElements.whenDefined('arcgis-expand'),
-      customElements.whenDefined('arcgis-area-measurement-2d'),
-      customElements.whenDefined('arcgis-distance-measurement-2d'),
-    ]);
-
-    await this.updateComplete;
-
-    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
-    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
-
-    if (areaEl) areaEl.view = this.view;
-    if (distEl) distEl.view = this.view;
-
-    // Auto-start when expand opens
-    const areaExpand = this.shadowRoot?.querySelector('#area-expand') as any;
-    const distExpand = this.shadowRoot?.querySelector('#dist-expand') as any;
-
-    areaExpand?.addEventListener('arcgisExpand', async () => {
-      // Close distance expand if open
-      if (distExpand?.expanded) {
-        distExpand.expanded = false;
-        distEl?.clear();
-      }
-      await areaEl?.componentOnReady();
-      areaEl?.start();
-    });
-
-    areaExpand?.addEventListener('arcgisCollapse', () => {
-      areaEl?.clear();
-    });
-
-    distExpand?.addEventListener('arcgisExpand', async () => {
-      // Close area expand if open
-      if (areaExpand?.expanded) {
-        areaExpand.expanded = false;
-        areaEl?.clear();
-      }
-      await distEl?.componentOnReady();
-      distEl?.start();
-    });
-
-    distExpand?.addEventListener('arcgisCollapse', () => {
-      distEl?.clear();
-    });
-  }
-
-  componentDidUnload() {
-    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
-    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
-    areaEl?.destroy();
-    distEl?.destroy();
-  }
-
-  render() {
-    return html`
-      <div class="measurement-container">
-
-        <arcgis-expand
-          id="area-expand"
-          expand-icon="measure-area"
-          expanded-icon="measure-area"
-          expand-tooltip="Measure Area">
-          <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
-        </arcgis-expand>
-
-        <arcgis-expand
-          id="dist-expand"
-          expand-icon="measure-line"
-          expanded-icon="measure-line"
-          expand-tooltip="Measure Distance">
-          <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
-        </arcgis-expand>
-
-      </div>
-    `;
-  }
+  return el;
 }
 
-declare global {
-  interface HTMLElementTagNameMap {
-    'arc-measurement': ArcMeasurement;
-  }
-}
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+describe('ArcMeasurement', () => {
+
+  // ── resolveMapElement ────────────────────────────────────────────────────
+
+  describe('resolveMapElement()', () => {
+    it('should find arc-map by mapId', () => {
+      const el = createComponent('myMap');
+      const spy = jest.spyOn(document, 'querySelector');
+      (el as any).resolveMapElement();
+      expect(spy).toHaveBeenCalledWith('arc-map[id="myMap"]');
+    });
+
+    it('should fallback to first arc-map if no mapId provided', () => {
+      const el = createComponent('');
+      const spy = jest.spyOn(document, 'querySelector');
+      (el as any).resolveMapElement();
+      expect(spy).toHaveBeenCalledWith('arc-map');
+    });
+
+    it('should return null and log error if arc-map not found', () => {
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const el = createComponent('missing');
+      const result = (el as any).resolveMapElement();
+      expect(result).toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No <arc-map> found with id "missing"')
+      );
+    });
+
+    it('should return null and log error if no arc-map on page', () => {
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const el = createComponent('');
+      const result = (el as any).resolveMapElement();
+      expect(result).toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No <arc-map> found on page')
+      );
+    });
+  });
+
+  // ── componentDidLoad ─────────────────────────────────────────────────────
+
+  describe('componentDidLoad()', () => {
+    it('should return early if mapElement not found', async () => {
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(mockMapElement.getViewInstance).not.toHaveBeenCalled();
+    });
+
+    it('should call getViewInstance on map element', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(mockMapElement.getViewInstance).toHaveBeenCalled();
+    });
+
+    it('should return early and log error if view is null', async () => {
+      mockMapElement.getViewInstance.mockResolvedValueOnce(null);
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Could not get MapView from <arc-map>')
+      );
+    });
+
+    it('should call view.when()', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(mockView.when).toHaveBeenCalled();
+    });
+
+    it('should wait for custom elements to be defined', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(customElements.whenDefined).toHaveBeenCalledWith('arcgis-expand');
+      expect(customElements.whenDefined).toHaveBeenCalledWith(
+        'arcgis-area-measurement-2d'
+      );
+      expect(customElements.whenDefined).toHaveBeenCalledWith(
+        'arcgis-distance-measurement-2d'
+      );
+    });
+
+    it('should set view on area and distance elements', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(mockAreaEl.view).toBe(mockView);
+      expect(mockDistEl.view).toBe(mockView);
+    });
+
+    it('should attach arcgisExpand and arcgisCollapse listeners to both expands', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+      expect(mockAreaExpand.addEventListener).toHaveBeenCalledWith(
+        'arcgisExpand',
+        expect.any(Function)
+      );
+      expect(mockAreaExpand.addEventListener).toHaveBeenCalledWith(
+        'arcgisCollapse',
+        expect.any(Function)
+      );
+      expect(mockDistExpand.addEventListener).toHaveBeenCalledWith(
+        'arcgisExpand',
+        expect.any(Function)
+      );
+      expect(mockDistExpand.addEventListener).toHaveBeenCalledWith(
+        'arcgisCollapse',
+        expect.any(Function)
+      );
+    });
+  });
+
+  // ── arcgisExpand events ──────────────────────────────────────────────────
+
+  describe('arcgisExpand event on area expand', () => {
+    it('should call areaEl.start() when area expand opens', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      // Get the arcgisExpand handler for area
+      const areaExpandHandler = mockAreaExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisExpand'
+      )?.[1];
+
+      await areaExpandHandler?.();
+
+      expect(mockAreaEl.componentOnReady).toHaveBeenCalled();
+      expect(mockAreaEl.start).toHaveBeenCalled();
+    });
+
+    it('should close dist expand and clear dist when area opens', async () => {
+      mockDistExpand.expanded = true;
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      const areaExpandHandler = mockAreaExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisExpand'
+      )?.[1];
+
+      await areaExpandHandler?.();
+
+      expect(mockDistExpand.expanded).toBe(false);
+      expect(mockDistEl.clear).toHaveBeenCalled();
+    });
+
+    it('should call areaEl.clear() when area collapses', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      const areaCollapseHandler = mockAreaExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisCollapse'
+      )?.[1];
+
+      areaCollapseHandler?.();
+
+      expect(mockAreaEl.clear).toHaveBeenCalled();
+    });
+  });
+
+  describe('arcgisExpand event on distance expand', () => {
+    it('should call distEl.start() when distance expand opens', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      const distExpandHandler = mockDistExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisExpand'
+      )?.[1];
+
+      await distExpandHandler?.();
+
+      expect(mockDistEl.componentOnReady).toHaveBeenCalled();
+      expect(mockDistEl.start).toHaveBeenCalled();
+    });
+
+    it('should close area expand and clear area when distance opens', async () => {
+      mockAreaExpand.expanded = true;
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      const distExpandHandler = mockDistExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisExpand'
+      )?.[1];
+
+      await distExpandHandler?.();
+
+      expect(mockAreaExpand.expanded).toBe(false);
+      expect(mockAreaEl.clear).toHaveBeenCalled();
+    });
+
+    it('should call distEl.clear() when distance collapses', async () => {
+      const el = createComponent('myMap');
+      await (el as any).componentDidLoad();
+
+      const distCollapseHandler = mockDistExpand.addEventListener.mock.calls.find(
+        (call: any) => call[0] === 'arcgisCollapse'
+      )?.[1];
+
+      distCollapseHandler?.();
+
+      expect(mockDistEl.clear).toHaveBeenCalled();
+    });
+  });
+
+  // ── componentDidUnload ───────────────────────────────────────────────────
+
+  describe('componentDidUnload()', () => {
+    it('should destroy area and distance elements', () => {
+      const el = createComponent('myMap');
+      (el as any).componentDidUnload();
+      expect(mockAreaEl.destroy).toHaveBeenCalled();
+      expect(mockDistEl.destroy).toHaveBeenCalled();
+    });
+  });
+
+  // ── render ───────────────────────────────────────────────────────────────
+
+  describe('render()', () => {
+    it('should render two arcgis-expand elements', async () => {
+      const el = await fixture<ArcMeasurement>(
+        html`<arc-measurement map-id="myMap"></arc-measurement>`
+      );
+      const expands = el.shadowRoot?.querySelectorAll('arcgis-expand');
+      expect(expands?.length).toBe(2);
+    });
+
+    it('should render arcgis-area-measurement-2d inside first expand', async () => {
+      const el = await fixture<ArcMeasurement>(
+        html`<arc-measurement map-id="myMap"></arc-measurement>`
+      );
+      const areaEl = el.shadowRoot?.querySelector('arcgis-area-measurement-2d');
+      expect(areaEl).not.toBeNull();
+    });
+
+    it('should render arcgis-distance-measurement-2d inside second expand', async () => {
+      const el = await fixture<ArcMeasurement>(
+        html`<arc-measurement map-id="myMap"></arc-measurement>`
+      );
+      const distEl = el.shadowRoot?.querySelector(
+        'arcgis-distance-measurement-2d'
+      );
+      expect(distEl).not.toBeNull();
+    });
+
+    it('should set measure-area icon on first expand', async () => {
+      const el = await fixture<ArcMeasurement>(
+        html`<arc-measurement map-id="myMap"></arc-measurement>`
+      );
+      const areaExpand = el.shadowRoot?.querySelector('#area-expand');
+      expect(areaExpand?.getAttribute('expand-icon')).toBe('measure-area');
+    });
+
+    it('should set measure-line icon on second expand', async () => {
+      const el = await fixture<ArcMeasurement>(
+        html`<arc-measurement map-id="myMap"></arc-measurement>`
+      );
+      const distExpand = el.shadowRoot?.querySelector('#dist-expand');
+      expect(distExpand?.getAttribute('expand-icon')).toBe('measure-line');
+    });
+  });
+
+  // ── disconnectedCallback ─────────────────────────────────────────────────
+
+  describe('disconnectedCallback()', () => {
+    it('should call componentDidUnload on disconnect', () => {
+      const el = createComponent('myMap');
+      const spy = jest.spyOn(el as any, 'componentDidUnload');
+      el.disconnectedCallback();
+      expect(spy).toHaveBeenCalled();
+    });
+  });
+});
