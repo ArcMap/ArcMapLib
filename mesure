@@ -5,54 +5,14 @@ import { customElement, property, state } from 'lit/decorators.js';
 export class ArcMeasurement extends LitElement {
 
   @property({ type: String, reflect: true }) mapId: string = '';
-
-  @state() private activeTool: 'area' | 'distance' | null = null;
   @state() private view: any = null;
 
   static styles = css`
     :host { display: block; }
-
-    .hidden { display: none; }
-
-    .toolbar {
+    .measurement-container {
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       gap: 4px;
-      background: white;
-      padding: 6px;
-      border-radius: 4px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      margin-bottom: 4px;
-    }
-
-    .tool-btn {
-      width: 32px;
-      height: 32px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      background: white;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-    }
-
-    .tool-btn:hover {
-      background: #e8f0fb;
-      border-color: #0079c1;
-    }
-
-    .tool-btn.active {
-      background: #0079c1;
-      color: white;
-      border-color: #0079c1;
-    }
-
-    .tool-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: currentColor;
     }
   `;
 
@@ -97,6 +57,7 @@ export class ArcMeasurement extends LitElement {
     this.view = view;
 
     await Promise.all([
+      customElements.whenDefined('arcgis-expand'),
       customElements.whenDefined('arcgis-area-measurement-2d'),
       customElements.whenDefined('arcgis-distance-measurement-2d'),
     ]);
@@ -108,6 +69,38 @@ export class ArcMeasurement extends LitElement {
 
     if (areaEl) areaEl.view = this.view;
     if (distEl) distEl.view = this.view;
+
+    // Auto-start when expand opens
+    const areaExpand = this.shadowRoot?.querySelector('#area-expand') as any;
+    const distExpand = this.shadowRoot?.querySelector('#dist-expand') as any;
+
+    areaExpand?.addEventListener('arcgisExpand', async () => {
+      // Close distance expand if open
+      if (distExpand?.expanded) {
+        distExpand.expanded = false;
+        distEl?.clear();
+      }
+      await areaEl?.componentOnReady();
+      areaEl?.start();
+    });
+
+    areaExpand?.addEventListener('arcgisCollapse', () => {
+      areaEl?.clear();
+    });
+
+    distExpand?.addEventListener('arcgisExpand', async () => {
+      // Close area expand if open
+      if (areaExpand?.expanded) {
+        areaExpand.expanded = false;
+        areaEl?.clear();
+      }
+      await distEl?.componentOnReady();
+      distEl?.start();
+    });
+
+    distExpand?.addEventListener('arcgisCollapse', () => {
+      distEl?.clear();
+    });
   }
 
   componentDidUnload() {
@@ -117,62 +110,26 @@ export class ArcMeasurement extends LitElement {
     distEl?.destroy();
   }
 
-  private async onToolClick(tool: 'area' | 'distance') {
-    const areaEl = this.shadowRoot?.querySelector('arcgis-area-measurement-2d') as any;
-    const distEl = this.shadowRoot?.querySelector('arcgis-distance-measurement-2d') as any;
-
-    if (this.activeTool === tool) {
-      // Clicking active tool → deactivate
-      areaEl?.clear();
-      distEl?.clear();
-      this.activeTool = null;
-    } else {
-      // Switch tool → clear previous
-      areaEl?.clear();
-      distEl?.clear();
-      this.activeTool = tool;
-      await this.updateComplete;
-      if (tool === 'area') areaEl?.start();
-      if (tool === 'distance') distEl?.start();
-    }
-  }
-
   render() {
     return html`
-      <div class="toolbar">
+      <div class="measurement-container">
 
-        <!-- Area icon -->
-        <button
-          class="tool-btn ${this.activeTool === 'area' ? 'active' : ''}"
-          title="Measure Area"
-          @click=${() => this.onToolClick('area')}>
-          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path d="M1 1v14h14V1H1zm13 13H2V2h12v12zM4 4h8v8H4V4z"/>
-          </svg>
-        </button>
+        <arcgis-expand
+          id="area-expand"
+          expand-icon="measure-area"
+          expanded-icon="measure-area"
+          expand-tooltip="Measure Area">
+          <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
+        </arcgis-expand>
 
-        <!-- Distance icon -->
-        <button
-          class="tool-btn ${this.activeTool === 'distance' ? 'active' : ''}"
-          title="Measure Distance"
-          @click=${() => this.onToolClick('distance')}>
-          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path d="M1 8h14M1 8l3-3M1 8l3 3M15 8l-3-3M15 8l-3 3"
-              stroke="currentColor" stroke-width="1.5"
-              fill="none" stroke-linecap="round"/>
-          </svg>
-        </button>
+        <arcgis-expand
+          id="dist-expand"
+          expand-icon="measure-line"
+          expanded-icon="measure-line"
+          expand-tooltip="Measure Distance">
+          <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
+        </arcgis-expand>
 
-      </div>
-
-      <!-- Area widget -->
-      <div class="${this.activeTool === 'area' ? '' : 'hidden'}">
-        <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
-      </div>
-
-      <!-- Distance widget -->
-      <div class="${this.activeTool === 'distance' ? '' : 'hidden'}">
-        <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
       </div>
     `;
   }
