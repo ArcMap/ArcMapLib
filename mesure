@@ -1,15 +1,19 @@
 // legend.spec.ts
 
+// ── Browser API polyfills for Node ─────────────────────────────────────────
+(global as any).requestAnimationFrame = (cb: Function) => { cb(0); return 0; };
+(global as any).cancelAnimationFrame = (_id: number) => {};
+
 // ── Mock ALL ESM modules BEFORE imports ────────────────────────────────────
 jest.mock('lit', () => ({
   LitElement: class LitElement {
     shadowRoot: any = null;
-    updateComplete = Promise.resolve(true);
-    requestUpdate() {}
-    disconnectedCallback() {}
+    updateComplete: Promise<boolean> = Promise.resolve(true);
+    requestUpdate(): void {}
+    disconnectedCallback(): void {}
   },
-  html: (strings: any, ...values: any[]) => ({ strings, values }),
-  css: (strings: any, ...values: any[]) => ({ strings, values }),
+  html: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
+  css: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
 }));
 
 jest.mock('lit/decorators.js', () => ({
@@ -42,54 +46,83 @@ jest.mock('@arcgis/core/layers/Layer', () => ({
   default: jest.fn().mockImplementation(() => ({})),
 }));
 
-jest.mock('../common/map-utils', () => ({
+jest.mock('../common/map.utils', () => ({
   __esModule: true,
   default: {
-    getLayerName: jest.fn(() => 'LayerName'),
+    getLayerName: jest.fn((_layer: any): string => 'LayerName'),
   },
 }));
 
 // ── Now safe to import ─────────────────────────────────────────────────────
 import { ArcLegend } from './legend';
 
-// ── Mocks ──────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
-const mockLayer1 = { visible: true, title: 'Layer 1' };
-const mockLayer2 = { visible: false, title: 'Layer 2' };
-const mockLayer3 = { visible: true, title: '' }; // no title — filtered out
+interface MockLegendEl {
+  view: any;
+  autoUpdate: boolean;
+  layerInfos: any[] | null;
+}
 
-const mockLegendEl = {
-  view: null as any,
-  autoUpdate: false,
-  layerInfos: null as any,
-};
-
-const mockMap = {
+interface MockMap {
   layers: {
-    toArray: jest.fn(() => [mockLayer1, mockLayer2, mockLayer3]),
-    on: jest.fn(() => ({ remove: jest.fn() })),
-  },
+    toArray: jest.Mock;
+    on: jest.Mock;
+  };
   allLayers: {
-    on: jest.fn(() => ({ remove: jest.fn() })),
-  },
-};
+    on: jest.Mock;
+  };
+}
 
-const mockView = {
-  when: jest.fn().mockResolvedValue(undefined),
-  map: mockMap,
-};
+interface MockView {
+  when: jest.Mock;
+  map: MockMap;
+}
 
-const mockArcMap = {
-  getViewInstance: jest.fn().mockResolvedValue(mockView),
-};
+interface MockArcMap {
+  getViewInstance: jest.Mock;
+}
+
+// ── Mock Data ──────────────────────────────────────────────────────────────
+
+const mockLayer1 = { visible: true,  title: 'Layer 1' };
+const mockLayer2 = { visible: false, title: 'Layer 2' };
+const mockLayer3 = { visible: true,  title: ''         };
+
+let mockLegendEl: MockLegendEl;
+let mockMap: MockMap;
+let mockView: MockView;
+let mockArcMap: MockArcMap;
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockLegendEl.view = null;
-  mockLegendEl.autoUpdate = false;
-  mockLegendEl.layerInfos = null;
+
+  mockLegendEl = {
+    view: null,
+    autoUpdate: false,
+    layerInfos: null,
+  };
+
+  mockMap = {
+    layers: {
+      toArray: jest.fn((): any[] => [mockLayer1, mockLayer2, mockLayer3]),
+      on: jest.fn((_event: string, _cb: Function) => ({ remove: jest.fn() })),
+    },
+    allLayers: {
+      on: jest.fn((_event: string, _cb: Function) => ({ remove: jest.fn() })),
+    },
+  };
+
+  mockView = {
+    when: jest.fn().mockResolvedValue(undefined),
+    map: mockMap,
+  };
+
+  mockArcMap = {
+    getViewInstance: jest.fn().mockResolvedValue(mockView),
+  };
 
   (global as any).customElements = {
     whenDefined: jest.fn().mockResolvedValue(undefined),
@@ -106,22 +139,37 @@ afterEach(() => {
 
 function createComponent(): ArcLegend {
   const el = new ArcLegend() as any;
+
   el.mapId = '';
   el.align = 'left';
   el.updateComplete = Promise.resolve(true);
 
-  // closest() simulates being inside arc-map
-  el.closest = jest.fn().mockReturnValue(mockArcMap);
+  // Simulates <arc-legend> inside <arc-map>
+  el.closest = jest.fn((_selector: string): any => mockArcMap);
 
-  // legendElement via @query
+  // @query('arcgis-legend')
   el.legendElement = mockLegendEl;
 
   // shadowRoot
   el.shadowRoot = {
-    querySelector: jest.fn().mockReturnValue(mockLegendEl),
+    querySelector: jest.fn((_selector: string): any => mockLegendEl),
+    querySelectorAll: jest.fn((_selector: string): any[] => []),
+    innerHTML: '',
   };
 
-  return el;
+  return el as ArcLegend;
+}
+
+// ── Helper: get event handler registered on a mock ─────────────────────────
+
+function getHandler(
+  mockFn: jest.Mock,
+  eventName: string
+): Function | undefined {
+  const call = mockFn.mock.calls.find(
+    (c: any[]) => c[0] === eventName
+  );
+  return call?.[1] as Function | undefined;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -130,26 +178,42 @@ function createComponent(): ArcLegend {
 
 describe('ArcLegend', () => {
 
-  // ── componentDidLoad ────────────────────────────────────────────────────
+  // ── componentDidLoad ─────────────────────────────────────────────────────
 
   describe('componentDidLoad()', () => {
-    it('should log error and return if no ancestor arc-map found', async () => {
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+    it('should log error if no ancestor arc-map found', async () => {
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
       const el = createComponent() as any;
       el.closest = jest.fn().mockReturnValue(null);
+
       await (el as any).componentDidLoad();
+
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('<arc-legend> must be inside <arc-map>')
       );
+    });
+
+    it('should not call getViewInstance if no ancestor found', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      const el = createComponent() as any;
+      el.closest = jest.fn().mockReturnValue(null);
+
+      await (el as any).componentDidLoad();
+
       expect(mockArcMap.getViewInstance).not.toHaveBeenCalled();
     });
 
-    it('should return if getViewInstance is not a function', async () => {
+    it('should return early if getViewInstance is not a function', async () => {
       const el = createComponent() as any;
       el.closest = jest.fn().mockReturnValue({
         getViewInstance: 'not-a-function',
       });
+
       await (el as any).componentDidLoad();
+
       expect(mockView.when).not.toHaveBeenCalled();
     });
 
@@ -159,14 +223,28 @@ describe('ArcLegend', () => {
       expect(mockArcMap.getViewInstance).toHaveBeenCalled();
     });
 
-    it('should log error and return if view is null', async () => {
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+    it('should log error if view is null', async () => {
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
       mockArcMap.getViewInstance.mockResolvedValueOnce(null);
       const el = createComponent();
+
       await (el as any).componentDidLoad();
+
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('Could not resolve MapView from <arc-map>')
       );
+    });
+
+    it('should not call view.when() if view is null', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      mockArcMap.getViewInstance.mockResolvedValueOnce(null);
+      const el = createComponent();
+
+      await (el as any).componentDidLoad();
+
+      expect(mockView.when).not.toHaveBeenCalled();
     });
 
     it('should call view.when()', async () => {
@@ -175,31 +253,31 @@ describe('ArcLegend', () => {
       expect(mockView.when).toHaveBeenCalled();
     });
 
-    it('should wait for arcgis-legend custom element', async () => {
+    it('should call customElements.whenDefined for arcgis-legend', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(customElements.whenDefined).toHaveBeenCalledWith('arcgis-legend');
     });
 
-    it('should set view on legend element', async () => {
+    it('should set view on legendElement', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(mockLegendEl.view).toBe(mockView);
     });
 
-    it('should set autoUpdate to true on legend element', async () => {
+    it('should set autoUpdate to true on legendElement', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(mockLegendEl.autoUpdate).toBe(true);
     });
 
-    it('should set layerInfos on legend element', async () => {
+    it('should set layerInfos on legendElement', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(mockLegendEl.layerInfos).not.toBeNull();
     });
 
-    it('should register map layers change listener', async () => {
+    it('should register change listener on map.layers', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(mockMap.layers.on).toHaveBeenCalledWith(
@@ -208,7 +286,7 @@ describe('ArcLegend', () => {
       );
     });
 
-    it('should register allLayers change listener', async () => {
+    it('should register change listener on map.allLayers', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
       expect(mockMap.allLayers.on).toHaveBeenCalledWith(
@@ -224,51 +302,54 @@ describe('ArcLegend', () => {
     });
   });
 
-  // ── getLayerInfos ────────────────────────────────────────────────────────
+  // ── getLayerInfos ─────────────────────────────────────────────────────────
 
   describe('getLayerInfos()', () => {
-    it('should return empty array if view has no map', () => {
-      const result = (ArcLegend as any).getLayerInfos({ map: null });
-      expect(result).toEqual([]);
-    });
 
     it('should return empty array if view is undefined', () => {
       const result = (ArcLegend as any).getLayerInfos(undefined);
       expect(result).toEqual([]);
     });
 
+    it('should return empty array if view is null', () => {
+      const result = (ArcLegend as any).getLayerInfos(null);
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array if view.map is null', () => {
+      const result = (ArcLegend as any).getLayerInfos({ map: null });
+      expect(result).toEqual([]);
+    });
+
     it('should filter out invisible layers', () => {
       const result = (ArcLegend as any).getLayerInfos(mockView);
-      const hasInvisible = result.some(
-        (info: any) => info.layer === mockLayer2
-      );
-      expect(hasInvisible).toBe(false);
+      const found = result.some((info: any) => info.layer === mockLayer2);
+      expect(found).toBe(false);
     });
 
-    it('should filter out layers with no title', () => {
+    it('should filter out layers with empty title', () => {
       const result = (ArcLegend as any).getLayerInfos(mockView);
-      const hasNoTitle = result.some(
-        (info: any) => info.layer === mockLayer3
-      );
-      expect(hasNoTitle).toBe(false);
+      const found = result.some((info: any) => info.layer === mockLayer3);
+      expect(found).toBe(false);
     });
 
-    it('should include only visible layers with title', () => {
+    it('should include visible layers with a title', () => {
       const result = (ArcLegend as any).getLayerInfos(mockView);
       expect(result.length).toBe(1);
       expect(result[0].layer).toBe(mockLayer1);
     });
 
-    it('should set title from MapUtils.getLayerName', () => {
+    it('should set title via MapUtils.getLayerName', () => {
       const result = (ArcLegend as any).getLayerInfos(mockView);
       expect(result[0].title).toBe('LayerName');
     });
   });
 
-  // ── componentDidUnload ───────────────────────────────────────────────────
+  // ── componentDidUnload ────────────────────────────────────────────────────
 
   describe('componentDidUnload()', () => {
-    it('should set legendElement view to undefined', async () => {
+
+    it('should set legendElement.view to undefined', async () => {
       const el = createComponent() as any;
       await (el as any).componentDidLoad();
       (el as any).componentDidUnload();
@@ -287,12 +368,19 @@ describe('ArcLegend', () => {
       el.legendElement = null;
       expect(() => (el as any).componentDidUnload()).not.toThrow();
     });
+
+    it('should not throw if eventHandles is null', () => {
+      const el = createComponent() as any;
+      el.eventHandles = null;
+      expect(() => (el as any).componentDidUnload()).not.toThrow();
+    });
   });
 
-  // ── disconnectedCallback ─────────────────────────────────────────────────
+  // ── disconnectedCallback ──────────────────────────────────────────────────
 
   describe('disconnectedCallback()', () => {
-    it('should call componentDidUnload on disconnect', () => {
+
+    it('should call componentDidUnload', () => {
       const el = createComponent() as any;
       const spy = jest.spyOn(el as any, 'componentDidUnload');
       el.disconnectedCallback();
@@ -300,40 +388,61 @@ describe('ArcLegend', () => {
     });
   });
 
-  // ── refreshLayers ────────────────────────────────────────────────────────
+  // ── refreshLayers ─────────────────────────────────────────────────────────
 
   describe('refreshLayers callback', () => {
-    it('should update layerInfos when layers change', async () => {
+
+    it('should update layerInfos on layers change', async () => {
       const el = createComponent();
       await (el as any).componentDidLoad();
-      const refreshCallback = mockMap.layers.on.mock.calls[0][1];
-      refreshCallback();
+
+      const cb = getHandler(mockMap.layers.on, 'change');
+      cb?.();
+
       expect(mockLegendEl.layerInfos).not.toBeNull();
     });
 
-    it('should not throw if legendElement is null when layers change', async () => {
+    it('should update layerInfos on allLayers change', async () => {
+      const el = createComponent();
+      await (el as any).componentDidLoad();
+
+      const cb = getHandler(mockMap.allLayers.on, 'change');
+      cb?.();
+
+      expect(mockLegendEl.layerInfos).not.toBeNull();
+    });
+
+    it('should not throw if legendElement is null during refresh', async () => {
       const el = createComponent() as any;
       await (el as any).componentDidLoad();
       el.legendElement = null;
-      const refreshCallback = mockMap.layers.on.mock.calls[0][1];
-      expect(() => refreshCallback()).not.toThrow();
+
+      const cb = getHandler(mockMap.layers.on, 'change');
+      expect(() => cb?.()).not.toThrow();
     });
 
-    it('should not throw if view is null when layers change', async () => {
+    it('should not throw if view is null during refresh', async () => {
       const el = createComponent() as any;
       await (el as any).componentDidLoad();
-      const refreshCallback = mockMap.layers.on.mock.calls[0][1];
-      expect(() => refreshCallback()).not.toThrow();
+
+      const cb = getHandler(mockMap.layers.on, 'change');
+      expect(() => cb?.()).not.toThrow();
     });
   });
 
-  // ── render ───────────────────────────────────────────────────────────────
+  // ── render ────────────────────────────────────────────────────────────────
 
   describe('render()', () => {
-    it('should return html template', () => {
+
+    it('should return a defined template', () => {
       const el = createComponent() as any;
       const result = el.render();
       expect(result).toBeDefined();
+    });
+
+    it('should not throw during render', () => {
+      const el = createComponent() as any;
+      expect(() => el.render()).not.toThrow();
     });
   });
 });
