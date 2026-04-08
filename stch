@@ -1,3 +1,48 @@
+private async filter(e: Event) {
+  const input = e.target as HTMLInputElement;
+
+  this.abortController?.abort();
+  this.abortController = new AbortController();
+
+  if (!input.checkValidity() ||
+      input.value.length < this.minLength) {
+    this.filteredItems = [];
+    return;
+  }
+
+  const searchField =
+    (this.source as MapSearchSource).searchField;
+  const searchValue = input.value.toUpperCase();
+  const url = (this.source as MapSearchSource).url;
+
+  // ← Use URLSearchParams to properly encode!
+  const params = new URLSearchParams({
+    f: 'json',
+    where: `upper(${searchField}) LIKE '%${searchValue}%'`,
+    outFields: '*',
+    returnGeometry: 'true'
+  });
+
+  try {
+    this.loading = true;
+    const response = await fetch(
+      `${url}/query?${params.toString()}`,
+      { signal: this.abortController.signal }
+    );
+    const data = await response.json();
+    this.filteredItems = data.features || [];
+  } catch (err: any) {
+    if (err.name !== 'AbortError') {
+      console.error('Query error', err);
+    }
+  } finally {
+    this.loading = false;
+  }
+}
+
+
+
+
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
