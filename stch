@@ -1,9 +1,8 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
-import QueryTask from '@arcgis/core/tasks/QueryTask';
-import Query from '@arcgis/core/tasks/support/Query';
-import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
+import * as webMercatorUtils from
+  '@arcgis/core/geometry/support/webMercatorUtils';
 import Graphic from '@arcgis/core/Graphic';
 
 export interface MapSearchSource {
@@ -14,33 +13,32 @@ export interface MapSearchSource {
 @customElement('arc-map-search')
 export class ArcMapSearch extends LitElement {
 
-  // ── Properties ──────────────────────────────────────────────────
+  // ── Properties ────────────────────────────────────────────
 
-  @property({ type: Object })
-  view?: Object;
+  @property({ type: String, attribute: 'map-id' })
+  mapId?: string;
 
   @property({ type: String })
   placeholder?: string;
 
-  @property({ type: Number })
+  @property({ type: Number, attribute: 'min-length' })
   minLength: number = 3;
 
   @property({ type: Object })
   source?: string | MapSearchSource;
 
-  // ── State ────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────
 
   @state() private filteredItems: Graphic[] = [];
   @state() private loading: boolean = false;
-  @state() private value: string = '';
 
-  // ── Private fields ───────────────────────────────────────────────
+  // ── Private ───────────────────────────────────────────────
 
-  private searchWidget?: QueryTask;
+  private featureLayer?: FeatureLayer;
   private template: string = '';
-  private mostRecentSearch?: AbortController;
+  private abortController?: AbortController;
 
-  // ── Styles ───────────────────────────────────────────────────────
+  // ── Styles ────────────────────────────────────────────────
 
   static styles = css`
     :host {
@@ -49,7 +47,7 @@ export class ArcMapSearch extends LitElement {
     }
   `;
 
-  // ── Lifecycle ────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────
 
   async connectedCallback() {
     super.connectedCallback();
@@ -58,9 +56,10 @@ export class ArcMapSearch extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.abortController?.abort();
   }
 
-  // ── Init ─────────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────
 
   private async initSource() {
     if (typeof this.source === 'string') {
@@ -68,22 +67,28 @@ export class ArcMapSearch extends LitElement {
     }
 
     if (!ArcMapSearch.isMapSearchSource(this.source)) {
-      console.error('A valid source property is required');
+      console.error(
+        'A valid source property is required'
+      );
       return;
     }
 
-    this.template = `<span>{{item.attributes.${
-      (this.source as MapSearchSource).searchField
-    }}}</span>`;
+    this.template = `<span>
+      {{item.attributes.${
+        (this.source as MapSearchSource).searchField
+      }}}
+    </span>`;
 
-    const featureLayer = new FeatureLayer({
+    // Create FeatureLayer
+    this.featureLayer = new FeatureLayer({
       url: (this.source as MapSearchSource).url,
       outFields: ['*']
     });
 
-    await featureLayer.load();
+    await this.featureLayer.load();
 
-    const allowedFieldNames = featureLayer.fields
+    // Validate searchField
+    const allowedFieldNames = this.featureLayer.fields
       .filter(field => ![
         'esriFieldTypeDate',
         'esriFieldTypeGeometry',
@@ -100,20 +105,16 @@ export class ArcMapSearch extends LitElement {
         + allowedFieldNames
       );
     }
-
-    this.searchWidget = new QueryTask({
-      url: (this.source as MapSearchSource).url
-    });
   }
 
-  // ── Search logic ─────────────────────────────────────────────────
+  // ── Filter / Search ───────────────────────────────────────
 
   private async filter(e: Event) {
     const input = e.target as HTMLInputElement;
 
-    if (this.mostRecentSearch) {
-      this.mostRecentSearch.abort();
-    }
+    // Cancel previous request
+    this.abortController?.abort();
+    this.abortController = new AbortController();
 
     if (!input.checkValidity() ||
         input.value.length < this.minLength) {
@@ -121,16 +122,21 @@ export class ArcMapSearch extends LitElement {
       return;
     }
 
-    const query = new Query();
+    if (!this.featureLayer) return;
+
+    const searchField =
+      (this.source as MapSearchSource).searchField;
+
+    const query = this.featureLayer.createQuery();
     query.outFields = ['*'];
     query.returnGeometry = true;
-    query.where = `upper(${
-      (this.source as MapSearchSource).searchField
-    }) LIKE '%${input.value.toUpperCase()}%'`;
+    query.where = `upper(${searchField}) 
+      LIKE '%${input.value.toUpperCase()}%'`;
 
     try {
       this.loading = true;
-      const featureSet = await this.searchWidget!.execute(query);
+      const featureSet = 
+        await this.featureLayer.queryFeatures(query);
       this.filteredItems = featureSet.features;
     } catch (err: any) {
       if (err.message !== 'Request canceled') {
@@ -141,14 +147,15 @@ export class ArcMapSearch extends LitElement {
     }
   }
 
-  // ── Item selected ────────────────────────────────────────────────
+  // ── Item Selected ─────────────────────────────────────────
 
   private async itemSelectedHandler(e: CustomEvent) {
     const outputDetail: Graphic = e.detail;
 
-    outputDetail.geometry = webMercatorUtils.webMercatorToGeographic(
-      outputDetail.geometry
-    ) as any;
+    outputDetail.geometry =
+      webMercatorUtils.webMercatorToGeographic(
+        outputDetail.geometry
+      ) as any;
 
     this.dispatchEvent(new CustomEvent('item-selected', {
       detail: outputDetail,
@@ -157,7 +164,7 @@ export class ArcMapSearch extends LitElement {
     }));
   }
 
-  // ── Format input ─────────────────────────────────────────────────
+  // ── Format Input ──────────────────────────────────────────
 
   private formatInput(searchResult: any) {
     return searchResult.attributes[
@@ -165,7 +172,7 @@ export class ArcMapSearch extends LitElement {
     ];
   }
 
-  // ── Type guard ───────────────────────────────────────────────────
+  // ── Type Guard ────────────────────────────────────────────
 
   private static isMapSearchSource(
     possibleSource: any
@@ -175,7 +182,7 @@ export class ArcMapSearch extends LitElement {
       && typeof possibleSource.searchField === 'string';
   }
 
-  // ── Render ───────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────
 
   render() {
     return html`
@@ -184,9 +191,9 @@ export class ArcMapSearch extends LitElement {
         .formatInput=${(x: any) => this.formatInput(x)}
         .template=${this.template}
         minlength=${this.minLength}
-        autocomplete="off"
-        @autocomplete-item-selected=${(e: CustomEvent) =>
-          this.itemSelectedHandler(e)}
+        @autocomplete-item-selected=${
+          (e: CustomEvent) => this.itemSelectedHandler(e)
+        }
       >
         <input
           type="search"
