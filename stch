@@ -1,0 +1,205 @@
+import { LitElement, html, css } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
+import QueryTask from '@arcgis/core/tasks/QueryTask';
+import Query from '@arcgis/core/tasks/support/Query';
+import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
+import Graphic from '@arcgis/core/Graphic';
+
+export interface MapSearchSource {
+  url: string;
+  searchField: string;
+}
+
+@customElement('arc-map-search')
+export class ArcMapSearch extends LitElement {
+
+  // ── Properties ──────────────────────────────────────────────────
+
+  @property({ type: Object })
+  view?: Object;
+
+  @property({ type: String })
+  placeholder?: string;
+
+  @property({ type: Number })
+  minLength: number = 3;
+
+  @property({ type: Object })
+  source?: string | MapSearchSource;
+
+  // ── State ────────────────────────────────────────────────────────
+
+  @state() private filteredItems: Graphic[] = [];
+  @state() private loading: boolean = false;
+  @state() private value: string = '';
+
+  // ── Private fields ───────────────────────────────────────────────
+
+  private searchWidget?: QueryTask;
+  private template: string = '';
+  private mostRecentSearch?: AbortController;
+
+  // ── Styles ───────────────────────────────────────────────────────
+
+  static styles = css`
+    :host {
+      display: block;
+      width: 100%;
+    }
+  `;
+
+  // ── Lifecycle ────────────────────────────────────────────────────
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this.initSource();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────
+
+  private async initSource() {
+    if (typeof this.source === 'string') {
+      this.source = JSON.parse(this.source);
+    }
+
+    if (!ArcMapSearch.isMapSearchSource(this.source)) {
+      console.error('A valid source property is required');
+      return;
+    }
+
+    this.template = `<span>{{item.attributes.${
+      (this.source as MapSearchSource).searchField
+    }}}</span>`;
+
+    const featureLayer = new FeatureLayer({
+      url: (this.source as MapSearchSource).url,
+      outFields: ['*']
+    });
+
+    await featureLayer.load();
+
+    const allowedFieldNames = featureLayer.fields
+      .filter(field => ![
+        'esriFieldTypeDate',
+        'esriFieldTypeGeometry',
+        'esriFieldTypeBlob',
+        'esriFieldTypeRaster'
+      ].includes(field.type))
+      .map(field => field.name);
+
+    if (!allowedFieldNames.includes(
+      (this.source as MapSearchSource).searchField
+    )) {
+      throw new Error(
+        'Unrecognized search field, select from: '
+        + allowedFieldNames
+      );
+    }
+
+    this.searchWidget = new QueryTask({
+      url: (this.source as MapSearchSource).url
+    });
+  }
+
+  // ── Search logic ─────────────────────────────────────────────────
+
+  private async filter(e: Event) {
+    const input = e.target as HTMLInputElement;
+
+    if (this.mostRecentSearch) {
+      this.mostRecentSearch.abort();
+    }
+
+    if (!input.checkValidity() ||
+        input.value.length < this.minLength) {
+      this.filteredItems = [];
+      return;
+    }
+
+    const query = new Query();
+    query.outFields = ['*'];
+    query.returnGeometry = true;
+    query.where = `upper(${
+      (this.source as MapSearchSource).searchField
+    }) LIKE '%${input.value.toUpperCase()}%'`;
+
+    try {
+      this.loading = true;
+      const featureSet = await this.searchWidget!.execute(query);
+      this.filteredItems = featureSet.features;
+    } catch (err: any) {
+      if (err.message !== 'Request canceled') {
+        console.error('Query error', err);
+      }
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  // ── Item selected ────────────────────────────────────────────────
+
+  private async itemSelectedHandler(e: CustomEvent) {
+    const outputDetail: Graphic = e.detail;
+
+    outputDetail.geometry = webMercatorUtils.webMercatorToGeographic(
+      outputDetail.geometry
+    ) as any;
+
+    this.dispatchEvent(new CustomEvent('item-selected', {
+      detail: outputDetail,
+      bubbles: true,
+      composed: true
+    }));
+  }
+
+  // ── Format input ─────────────────────────────────────────────────
+
+  private formatInput(searchResult: any) {
+    return searchResult.attributes[
+      (this.source as MapSearchSource).searchField
+    ];
+  }
+
+  // ── Type guard ───────────────────────────────────────────────────
+
+  private static isMapSearchSource(
+    possibleSource: any
+  ): possibleSource is MapSearchSource {
+    return possibleSource
+      && typeof possibleSource.url === 'string'
+      && typeof possibleSource.searchField === 'string';
+  }
+
+  // ── Render ───────────────────────────────────────────────────────
+
+  render() {
+    return html`
+      <arc-autocomplete
+        .items=${this.filteredItems}
+        .formatInput=${(x: any) => this.formatInput(x)}
+        .template=${this.template}
+        minlength=${this.minLength}
+        autocomplete="off"
+        @autocomplete-item-selected=${(e: CustomEvent) =>
+          this.itemSelectedHandler(e)}
+      >
+        <input
+          type="search"
+          minlength=${this.minLength}
+          autocomplete="off"
+          placeholder=${this.placeholder ?? 'Search...'}
+          @input=${(e: Event) => {
+            if ((e as InputEvent).isTrusted) {
+              this.filter(e);
+            }
+          }}
+        />
+      </arc-autocomplete>
+    `;
+  }
+}
