@@ -1,70 +1,3 @@
-
-private formatInput(searchResult: any) {
-  const searchField = 
-    (this.source as MapSearchSource).searchField;
-  
-  // Try different structures:
-  if (searchResult?.attributes?.[searchField]) {
-    return searchResult.attributes[searchField];
-  }
-  if (searchResult?.[searchField]) {
-    return searchResult[searchField];
-  }
-  
-  // Debug — log to see structure:
-  console.log('searchResult:', 
-    JSON.stringify(searchResult));
-  return String(searchResult);
-}
-
-
-
-
-private async filter(e: Event) {
-  const input = e.target as HTMLInputElement;
-
-  this.abortController?.abort();
-  this.abortController = new AbortController();
-
-  if (!input.checkValidity() ||
-      input.value.length < this.minLength) {
-    this.filteredItems = [];
-    return;
-  }
-
-  const searchField =
-    (this.source as MapSearchSource).searchField;
-  const searchValue = input.value.toUpperCase();
-  const url = (this.source as MapSearchSource).url;
-
-  // ← Use URLSearchParams to properly encode!
-  const params = new URLSearchParams({
-    f: 'json',
-    where: `upper(${searchField}) LIKE '%${searchValue}%'`,
-    outFields: '*',
-    returnGeometry: 'true'
-  });
-
-  try {
-    this.loading = true;
-    const response = await fetch(
-      `${url}/query?${params.toString()}`,
-      { signal: this.abortController.signal }
-    );
-    const data = await response.json();
-    this.filteredItems = data.features || [];
-  } catch (err: any) {
-    if (err.name !== 'AbortError') {
-      console.error('Query error', err);
-    }
-  } finally {
-    this.loading = false;
-  }
-}
-
-
-
-
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
@@ -96,14 +29,14 @@ export class ArcMapSearch extends LitElement {
 
   // ── State ─────────────────────────────────────────────────
 
-  @state() private filteredItems: Graphic[] = [];
+  @state() private filteredItems: any[] = [];
   @state() private loading: boolean = false;
 
   // ── Private ───────────────────────────────────────────────
 
   private featureLayer?: FeatureLayer;
-  private template: string = '';
   private abortController?: AbortController;
+  private parsedSource?: MapSearchSource;
 
   // ── Styles ────────────────────────────────────────────────
 
@@ -129,48 +62,51 @@ export class ArcMapSearch extends LitElement {
   // ── Init ──────────────────────────────────────────────────
 
   private async initSource() {
+    // Parse source if string
     if (typeof this.source === 'string') {
-      this.source = JSON.parse(this.source);
+      try {
+        this.parsedSource = JSON.parse(this.source);
+      } catch (e) {
+        console.error('Invalid source JSON', e);
+        return;
+      }
+    } else {
+      this.parsedSource = this.source;
     }
 
-    if (!ArcMapSearch.isMapSearchSource(this.source)) {
-      console.error(
-        'A valid source property is required'
-      );
+    if (!ArcMapSearch.isMapSearchSource(this.parsedSource)) {
+      console.error('A valid source property is required');
       return;
     }
 
-    this.template = `<span>
-      {{item.attributes.${
-        (this.source as MapSearchSource).searchField
-      }}}
-    </span>`;
-
-    // Create FeatureLayer
+    // Create FeatureLayer to validate field
     this.featureLayer = new FeatureLayer({
-      url: (this.source as MapSearchSource).url,
+      url: this.parsedSource.url,
       outFields: ['*']
     });
 
-    await this.featureLayer.load();
+    try {
+      await this.featureLayer.load();
 
-    // Validate searchField
-    const allowedFieldNames = this.featureLayer.fields
-      .filter(field => ![
-        'esriFieldTypeDate',
-        'esriFieldTypeGeometry',
-        'esriFieldTypeBlob',
-        'esriFieldTypeRaster'
-      ].includes(field.type))
-      .map(field => field.name);
+      const allowedFieldNames = this.featureLayer.fields
+        .filter(field => ![
+          'esriFieldTypeDate',
+          'esriFieldTypeGeometry',
+          'esriFieldTypeBlob',
+          'esriFieldTypeRaster'
+        ].includes(field.type))
+        .map(field => field.name);
 
-    if (!allowedFieldNames.includes(
-      (this.source as MapSearchSource).searchField
-    )) {
-      throw new Error(
-        'Unrecognized search field, select from: '
-        + allowedFieldNames
-      );
+      if (!allowedFieldNames.includes(
+        this.parsedSource.searchField
+      )) {
+        throw new Error(
+          'Unrecognized search field, select from: '
+          + allowedFieldNames.join(', ')
+        );
+      }
+    } catch (e) {
+      console.error('FeatureLayer load error', e);
     }
   }
 
@@ -183,30 +119,34 @@ export class ArcMapSearch extends LitElement {
     this.abortController?.abort();
     this.abortController = new AbortController();
 
-    if (!input.checkValidity() ||
-        input.value.length < this.minLength) {
+    if (!this.parsedSource) return;
+
+    if (input.value.length < this.minLength) {
       this.filteredItems = [];
       return;
     }
 
-    if (!this.featureLayer) return;
+    const { url, searchField } = this.parsedSource;
+    const searchValue = input.value.toUpperCase();
 
-    const searchField =
-      (this.source as MapSearchSource).searchField;
-
-    const query = this.featureLayer.createQuery();
-    query.outFields = ['*'];
-    query.returnGeometry = true;
-    query.where = `upper(${searchField}) 
-      LIKE '%${input.value.toUpperCase()}%'`;
+    const params = new URLSearchParams({
+      f: 'json',
+      where: `upper(${searchField}) LIKE '%${searchValue}%'`,
+      outFields: '*',
+      returnGeometry: 'true'
+    });
 
     try {
       this.loading = true;
-      const featureSet = 
-        await this.featureLayer.queryFeatures(query);
-      this.filteredItems = featureSet.features;
+      const response = await fetch(
+        `${url}/query?${params.toString()}`,
+        { signal: this.abortController.signal }
+      );
+      const data = await response.json();
+      console.log('features:', data.features?.[0]);
+      this.filteredItems = data.features ?? [];
     } catch (err: any) {
-      if (err.message !== 'Request canceled') {
+      if (err.name !== 'AbortError') {
         console.error('Query error', err);
       }
     } finally {
@@ -217,26 +157,20 @@ export class ArcMapSearch extends LitElement {
   // ── Item Selected ─────────────────────────────────────────
 
   private async itemSelectedHandler(e: CustomEvent) {
-    const outputDetail: Graphic = e.detail;
+    const outputDetail = e.detail;
 
-    outputDetail.geometry =
-      webMercatorUtils.webMercatorToGeographic(
-        outputDetail.geometry
-      ) as any;
+    if (outputDetail?.geometry) {
+      outputDetail.geometry =
+        webMercatorUtils.webMercatorToGeographic(
+          outputDetail.geometry
+        );
+    }
 
     this.dispatchEvent(new CustomEvent('item-selected', {
       detail: outputDetail,
       bubbles: true,
       composed: true
     }));
-  }
-
-  // ── Format Input ──────────────────────────────────────────
-
-  private formatInput(searchResult: any) {
-    return searchResult.attributes[
-      (this.source as MapSearchSource).searchField
-    ];
   }
 
   // ── Type Guard ────────────────────────────────────────────
@@ -252,11 +186,21 @@ export class ArcMapSearch extends LitElement {
   // ── Render ────────────────────────────────────────────────
 
   render() {
+    const searchField = this.parsedSource?.searchField ?? '';
+
+    // Template uses double curly — up-autocomplete syntax
+    const template =
+      `<span>{{item.attributes.${searchField}}}</span>`;
+
+    // formatInput extracts display text from each item
+    const formatInput = (item: any) =>
+      item?.attributes?.[searchField] ?? '';
+
     return html`
-      <arc-autocomplete
+      <up-autocomplete
         .items=${this.filteredItems}
-        .formatInput=${(x: any) => this.formatInput(x)}
-        .template=${this.template}
+        .formatInput=${formatInput}
+        .template=${template}
         minlength=${this.minLength}
         @autocomplete-item-selected=${
           (e: CustomEvent) => this.itemSelectedHandler(e)
@@ -273,7 +217,7 @@ export class ArcMapSearch extends LitElement {
             }
           }}
         />
-      </arc-autocomplete>
+      </up-autocomplete>
     `;
   }
 }
