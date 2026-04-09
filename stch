@@ -1,3 +1,25 @@
+
+private formatInput(searchResult: any) {
+  const searchField = 
+    (this.source as MapSearchSource).searchField;
+  
+  // Try different structures:
+  if (searchResult?.attributes?.[searchField]) {
+    return searchResult.attributes[searchField];
+  }
+  if (searchResult?.[searchField]) {
+    return searchResult[searchField];
+  }
+  
+  // Debug — log to see structure:
+  console.log('searchResult:', 
+    JSON.stringify(searchResult));
+  return String(searchResult);
+}
+
+
+
+
 private async filter(e: Event) {
   const input = e.target as HTMLInputElement;
 
