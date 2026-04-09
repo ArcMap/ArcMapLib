@@ -1,21 +1,15 @@
-const arcSearch = document.querySelector('arc-map-search');
-console.log('arc-map-search:', arcSearch);
-
-const upAuto = arcSearch
+const upAuto = document.querySelector('up-map-search')
   ?.shadowRoot
   ?.querySelector('up-autocomplete');
-console.log('up-autocomplete:', upAuto);
 
-// Get all properties
-if(upAuto) {
-  const props = [];
-  let obj = upAuto;
-  while(obj) {
-    Object.getOwnPropertyNames(obj)
-      .forEach(p => {
-        if(!props.includes(p)) props.push(p);
-      });
-    obj = Object.getPrototypeOf(obj);
-  }
-  console.log('PROPS:', props);
+// Check current values:
+console.log('items:', upAuto.items);
+console.log('template:', upAuto.template);
+console.log('formatInput:', upAuto.formatInput);
+
+// Check first item structure:
+if(upAuto.items?.length > 0) {
+  console.log('item[0]:', upAuto.items[0]);
+  console.log('item[0] keys:', 
+    Object.keys(upAuto.items[0]));
 }
