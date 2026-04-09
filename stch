@@ -1,13 +1,21 @@
-// Get ALL properties of up-autocomplete
-const el = document.querySelector('up-autocomplete');
-const allProps = [];
-let obj = el;
-while(obj) {
-  Object.getOwnPropertyNames(obj).forEach(p => {
-    if(!allProps.includes(p)) allProps.push(p);
-  });
-  obj = Object.getPrototypeOf(obj);
+const arcSearch = document.querySelector('arc-map-search');
+console.log('arc-map-search:', arcSearch);
+
+const upAuto = arcSearch
+  ?.shadowRoot
+  ?.querySelector('up-autocomplete');
+console.log('up-autocomplete:', upAuto);
+
+// Get all properties
+if(upAuto) {
+  const props = [];
+  let obj = upAuto;
+  while(obj) {
+    Object.getOwnPropertyNames(obj)
+      .forEach(p => {
+        if(!props.includes(p)) props.push(p);
+      });
+    obj = Object.getPrototypeOf(obj);
+  }
+  console.log('PROPS:', props);
 }
-console.log(allProps.filter(p => 
-  !['constructor','toString','valueOf'].includes(p)
-));
