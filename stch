@@ -1,15 +1,49 @@
+render() {
+  // ← capture value BEFORE passing to template
+  const searchField = 
+    this.parsedSource?.searchField ?? '';
+
+  console.log('searchField in render:', searchField);
+
+  return html`
+    <up-autocomplete
+      .items=${this.filteredItems}
+      .formatInput=${(item: any) => {
+        // Use captured searchField directly
+        const val = item?.attributes?.[searchField];
+        console.log('formatInput called:', val);
+        return val ?? '';
+      }}
+      .template=${
+        `<span>{{=item.attributes.${searchField}}}</span>`
+      }
+      minlength=${this.minLength}
+      @autocomplete-item-selected=${
+        (e: CustomEvent) => this.itemSelectedHandler(e)
+      }
+    >
+      <input
+        type="search"
+        minlength=${this.minLength}
+        autocomplete="off"
+        placeholder=${this.placeholder ?? 'Search...'}
+        @input=${(e: Event) => {
+          if ((e as InputEvent).isTrusted) {
+            this.filter(e);
+          }
+        }}
+      />
+    </up-autocomplete>
+  `;
+}
+
+
 const upAuto = document.querySelector('up-map-search')
   ?.shadowRoot
   ?.querySelector('up-autocomplete');
 
-// Check current values:
-console.log('items:', upAuto.items);
-console.log('template:', upAuto.template);
-console.log('formatInput:', upAuto.formatInput);
+// Manually call formatInput:
+const result = upAuto.formatInput(upAuto.items[0]);
+console.log('formatInput result:', result);
 
-// Check first item structure:
-if(upAuto.items?.length > 0) {
-  console.log('item[0]:', upAuto.items[0]);
-  console.log('item[0] keys:', 
-    Object.keys(upAuto.items[0]));
-}
+
