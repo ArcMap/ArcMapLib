@@ -1,494 +1,63 @@
-// src/map-search/arc-map-search.spec.ts
+private async initSource() {
+  // ── Step 1 — Parse source ──────────────────────────
 
-// @ts-nocheck
-/* eslint-disable */
+  let candidate: any;
 
-// ── Mock ALL modules BEFORE imports ───────────────────────────────
-
-jest.mock('lit', () => ({
-  LitElement: class LitElement {
-    shadowRoot = null;
-    updateComplete = Promise.resolve(true);
-    requestUpdate() {}
-    connectedCallback() {}
-    disconnectedCallback() {}
-  },
-  html: (strings, ...values) => ({ strings, values }),
-  css: (strings, ...values) => ({ strings, values }),
-}));
-
-jest.mock('lit/decorators.js', () => ({
-  customElement: () => () => {},
-  property: () => () => {},
-  state: () => () => {},
-}));
-
-jest.mock('@arcgis/core/layers/FeatureLayer', () => {
-  return {
-    __esModule: true,
-    default: class FeatureLayer {
-      fields = [
-        { name: 'FAC_DESC', type: 'esriFieldTypeString' },
-        { name: 'OBJECTID', type: 'esriFieldTypeOID' },
-        { name: 'SHAPE', type: 'esriFieldTypeGeometry' },
-      ];
-      load = () => Promise.resolve();
-      createQuery = () => ({
-        outFields: [],
-        returnGeometry: false,
-        where: ''
-      });
-      queryFeatures = () => Promise.resolve({
-        features: []
-      });
+  if (typeof this.source === 'string') {
+    try {
+      candidate = JSON.parse(this.source);
+    } catch (e) {
+      console.error('Invalid source JSON', e);
+      return;
     }
-  };
-});
-
-jest.mock(
-  '@arcgis/core/geometry/support/webMercatorUtils',
-  () => ({
-    __esModule: true,
-    webMercatorToGeographic:
-      (geom) => ({ ...geom, converted: true })
-  })
-);
-
-// ── Mock fetch ────────────────────────────────────────────────────
-
-const mockFeatures = [
-  {
-    attributes: { FAC_DESC: 'UPRR FACILITY 1' },
-    geometry: { x: -96, y: 41 }
-  },
-  {
-    attributes: { FAC_DESC: 'UPRR FACILITY 2' },
-    geometry: { x: -97, y: 42 }
-  },
-  {
-    attributes: { FAC_DESC: 'PRIVATE UPRR CAR FACILITY' },
-    geometry: { x: -98, y: 43 }
+  } else {
+    candidate = this.source;
   }
-];
 
-(globalThis as any).fetch = jest.fn().mockResolvedValue({
-  json: jest.fn().mockResolvedValue({
-    features: mockFeatures
-  })
-});
+  // ── Step 2 — Validate BEFORE assigning ─────────────
 
-// ── Now safe to import ────────────────────────────────────────────
+  if (!ArcMapSearch.isMapSearchSource(candidate)) {
+    console.error(
+      'A valid source property is required'
+    );
+    return;
+  }
 
-import {
-  ArcMapSearch,
-  MapSearchSource
-} from './arc-map-search';
+  // ── Step 3 — Assign only if valid ──────────────────
 
-import { describe, expect, it, jest, beforeEach }
-  from '@jest/globals';
+  this.parsedSource = candidate;
 
-// ── Helpers ───────────────────────────────────────────────────────
+  // ── Step 4 — Create FeatureLayer ───────────────────
 
-function createComponent(): ArcMapSearch {
-  const el = new ArcMapSearch();
-  (el as any).parsedSource = {
-    url: '/arcgis/rest/services/Public/TNM/MapServer/3',
-    searchField: 'FAC_DESC'
-  };
-  return el;
+  this.featureLayer = new FeatureLayer({
+    url: this.parsedSource.url,
+    outFields: ['*']
+  });
+
+  // ── Step 5 — Load and validate searchField ─────────
+
+  try {
+    await this.featureLayer.load();
+
+    const allowedFieldNames = this.featureLayer.fields
+      .filter(field => ![
+        'esriFieldTypeDate',
+        'esriFieldTypeGeometry',
+        'esriFieldTypeBlob',
+        'esriFieldTypeRaster'
+      ].includes(field.type))
+      .map(field => field.name);
+
+    if (!allowedFieldNames.includes(
+      this.parsedSource.searchField
+    )) {
+      throw new Error(
+        'Unrecognized search field, select from: '
+        + allowedFieldNames.join(', ')
+      );
+    }
+
+  } catch (e) {
+    console.error('FeatureLayer load error:', e);
+  }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────
-
-describe('ArcMapSearch', () => {
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (globalThis as any).fetch = jest.fn()
-      .mockResolvedValue({
-        json: jest.fn().mockResolvedValue({
-          features: mockFeatures
-        })
-      });
-  });
-
-  // ── Component Creation ────────────────────────────────────
-
-  describe('Component Creation', () => {
-
-    it('should create component instance', () => {
-      const el = new ArcMapSearch();
-      expect(el).toBeTruthy();
-    });
-
-    it('should have default minLength of 3', () => {
-      const el = new ArcMapSearch();
-      expect((el as any).minLength).toBe(3);
-    });
-
-    it('should have empty filteredItems', () => {
-      const el = new ArcMapSearch();
-      expect((el as any).filteredItems).toEqual([]);
-    });
-
-    it('should have empty rawFeatures', () => {
-      const el = new ArcMapSearch();
-      expect((el as any).rawFeatures).toEqual([]);
-    });
-
-    it('should have loading false', () => {
-      const el = new ArcMapSearch();
-      expect((el as any).loading).toBe(false);
-    });
-  });
-
-  // ── Source Parsing ────────────────────────────────────────
-
-  describe('Source Parsing', () => {
-
-    it('should parse source from JSON string',
-      async () => {
-        const el = new ArcMapSearch();
-        el.source = JSON.stringify({
-          url: '/arcgis/rest/services/test',
-          searchField: 'FAC_DESC'
-        });
-        await (el as any).initSource();
-        expect((el as any).parsedSource).toEqual({
-          url: '/arcgis/rest/services/test',
-          searchField: 'FAC_DESC'
-        });
-      });
-
-    it('should accept source as object', async () => {
-      const el = new ArcMapSearch();
-      el.source = {
-        url: '/arcgis/rest/services/test',
-        searchField: 'FAC_DESC'
-      };
-      await (el as any).initSource();
-      expect((el as any).parsedSource).toEqual({
-        url: '/arcgis/rest/services/test',
-        searchField: 'FAC_DESC'
-      });
-    });
-
-    it('should handle invalid JSON', async () => {
-      const el = new ArcMapSearch();
-      const spy = jest.spyOn(console, 'error')
-        .mockImplementation(() => {});
-      el.source = 'invalid{{{';
-      await (el as any).initSource();
-      expect((el as any).parsedSource)
-        .toBeUndefined();
-      spy.mockRestore();
-    });
-
-    it('should reject source without url', async () => {
-      const el = new ArcMapSearch();
-      const spy = jest.spyOn(console, 'error')
-        .mockImplementation(() => {});
-      el.source = { searchField: 'FAC_DESC' } as any;
-      await (el as any).initSource();
-      spy.mockRestore();
-      expect((el as any).parsedSource)
-        .toBeUndefined();
-    });
-
-    it('should reject source without searchField',
-      async () => {
-        const el = new ArcMapSearch();
-        const spy = jest.spyOn(console, 'error')
-          .mockImplementation(() => {});
-        el.source = {
-          url: '/arcgis/rest/services/test'
-        } as any;
-        await (el as any).initSource();
-        spy.mockRestore();
-        expect((el as any).parsedSource)
-          .toBeUndefined();
-      });
-  });
-
-  // ── isMapSearchSource ─────────────────────────────────────
-
-  describe('isMapSearchSource', () => {
-
-    it('should return true for valid source', () => {
-      expect(
-        (ArcMapSearch as any).isMapSearchSource({
-          url: '/test',
-          searchField: 'FAC_DESC'
-        })
-      ).toBe(true);
-    });
-
-    it('should return false for null', () => {
-      expect(
-        (ArcMapSearch as any).isMapSearchSource(null)
-      ).toBeFalsy();
-    });
-
-    it('should return false for missing url', () => {
-      expect(
-        (ArcMapSearch as any).isMapSearchSource({
-          searchField: 'FAC_DESC'
-        })
-      ).toBeFalsy();
-    });
-
-    it('should return false for missing searchField',
-      () => {
-        expect(
-          (ArcMapSearch as any).isMapSearchSource({
-            url: '/test'
-          })
-        ).toBeFalsy();
-      });
-  });
-
-  // ── Filter ────────────────────────────────────────────────
-
-  describe('filter()', () => {
-
-    it('should clear items when input < minLength',
-      async () => {
-        const el = createComponent();
-        (el as any).filteredItems = ['existing'];
-
-        await (el as any).filter({
-          target: { value: 'ab' }
-        });
-
-        expect((el as any).filteredItems).toEqual([]);
-      });
-
-    it('should populate filteredItems as strings',
-      async () => {
-        const el = createComponent();
-
-        await (el as any).filter({
-          target: { value: 'FACIL' }
-        });
-
-        expect((el as any).filteredItems).toEqual([
-          'UPRR FACILITY 1',
-          'UPRR FACILITY 2',
-          'PRIVATE UPRR CAR FACILITY'
-        ]);
-      });
-
-    it('should store rawFeatures with full objects',
-      async () => {
-        const el = createComponent();
-
-        await (el as any).filter({
-          target: { value: 'FACIL' }
-        });
-
-        expect((el as any).rawFeatures)
-          .toHaveLength(3);
-        expect((el as any).rawFeatures[0])
-          .toHaveProperty('attributes');
-        expect((el as any).rawFeatures[0])
-          .toHaveProperty('geometry');
-      });
-
-    it('should call fetch with correct params',
-      async () => {
-        const el = createComponent();
-
-        await (el as any).filter({
-          target: { value: 'FACIL' }
-        });
-
-        const url = (globalThis as any).fetch
-          .mock.calls[0][0] as string;
-
-        expect(url).toContain('/query');
-        expect(url).toContain('f=json');
-        expect(url).toContain('FACIL');
-        expect(url).toContain('returnGeometry=true');
-      });
-
-    it('should abort previous request', async () => {
-      const el = createComponent();
-      const abortSpy = jest.fn();
-      (el as any).abortController = {
-        abort: abortSpy
-      };
-
-      await (el as any).filter({
-        target: { value: 'FACIL' }
-      });
-
-      expect(abortSpy).toHaveBeenCalled();
-    });
-
-    it('should not fetch if no parsedSource',
-      async () => {
-        const el = new ArcMapSearch();
-
-        await (el as any).filter({
-          target: { value: 'FACIL' }
-        });
-
-        expect(
-          (globalThis as any).fetch
-        ).not.toHaveBeenCalled();
-      });
-  });
-
-  // ── itemSelectedHandler ───────────────────────────────────
-
-  describe('itemSelectedHandler()', () => {
-
-    it('should dispatch item-selected event',
-      async () => {
-        const el = createComponent();
-        (el as any).rawFeatures = [
-          {
-            attributes: {
-              FAC_DESC: 'UPRR FACILITY 1'
-            },
-            geometry: { x: -96, y: 41 }
-          }
-        ];
-
-        const dispatchSpy = jest.fn();
-        el.dispatchEvent = dispatchSpy;
-
-        await (el as any).itemSelectedHandler(
-          new CustomEvent(
-            'autocomplete-item-selected',
-            { detail: 'UPRR FACILITY 1' }
-          )
-        );
-
-        expect(dispatchSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            type: 'item-selected'
-          })
-        );
-      });
-
-    it('should not dispatch if feature not found',
-      async () => {
-        const el = createComponent();
-        (el as any).rawFeatures = [];
-        const dispatchSpy = jest.fn();
-        el.dispatchEvent = dispatchSpy;
-
-        await (el as any).itemSelectedHandler(
-          new CustomEvent(
-            'autocomplete-item-selected',
-            { detail: 'NOT FOUND' }
-          )
-        );
-
-        expect(dispatchSpy).not.toHaveBeenCalled();
-      });
-
-    it('should include full feature in detail',
-      async () => {
-        const el = createComponent();
-        (el as any).rawFeatures = [
-          {
-            attributes: {
-              FAC_DESC: 'UPRR FACILITY 1'
-            },
-            geometry: { x: -96, y: 41 }
-          }
-        ];
-
-        let dispatched: any;
-        el.dispatchEvent = jest.fn((e) => {
-          dispatched = e;
-        });
-
-        await (el as any).itemSelectedHandler(
-          new CustomEvent(
-            'autocomplete-item-selected',
-            { detail: 'UPRR FACILITY 1' }
-          )
-        );
-
-        expect(dispatched.detail.attributes.FAC_DESC)
-          .toBe('UPRR FACILITY 1');
-      });
-
-    it('should convert geometry', async () => {
-      const el = createComponent();
-      (el as any).rawFeatures = [
-        {
-          attributes: {
-            FAC_DESC: 'UPRR FACILITY 1'
-          },
-          geometry: { x: -96, y: 41 }
-        }
-      ];
-
-      el.dispatchEvent = jest.fn();
-
-      await (el as any).itemSelectedHandler(
-        new CustomEvent(
-          'autocomplete-item-selected',
-          { detail: 'UPRR FACILITY 1' }
-        )
-      );
-
-      const webMercatorUtils = require(
-        '@arcgis/core/geometry/support/webMercatorUtils'
-      );
-
-      expect(
-        webMercatorUtils.webMercatorToGeographic
-      ).toBeDefined();
-    });
-  });
-
-  // ── Lifecycle ─────────────────────────────────────────────
-
-  describe('Lifecycle', () => {
-
-    it('should abort on disconnectedCallback', () => {
-      const el = new ArcMapSearch();
-      const abortSpy = jest.fn();
-      (el as any).abortController = {
-        abort: abortSpy
-      };
-      el.disconnectedCallback();
-      expect(abortSpy).toHaveBeenCalled();
-    });
-
-    it('should call initSource on connectedCallback',
-      async () => {
-        const el = new ArcMapSearch();
-        const spy = jest.spyOn(
-          el as any,
-          'initSource'
-        ).mockResolvedValue(undefined);
-        await el.connectedCallback();
-        expect(spy).toHaveBeenCalled();
-      });
-  });
-
-  // ── Render ────────────────────────────────────────────────
-
-  describe('render()', () => {
-
-    it('should render without errors', () => {
-      const el = createComponent();
-      expect(
-        () => (el as any).render()
-      ).not.toThrow();
-    });
-
-    it('should use {{=item}} as template', () => {
-      const el = createComponent();
-      const rendered = (el as any).render();
-      expect(JSON.stringify(rendered))
-        .toContain('{{=item}}');
-    });
-  });
-});
