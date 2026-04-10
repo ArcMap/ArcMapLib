@@ -1,63 +1,15 @@
-private async initSource() {
-  // ── Step 1 — Parse source ──────────────────────────
-
-  let candidate: any;
-
-  if (typeof this.source === 'string') {
-    try {
-      candidate = JSON.parse(this.source);
-    } catch (e) {
-      console.error('Invalid source JSON', e);
-      return;
-    }
-  } else {
-    candidate = this.source;
-  }
-
-  // ── Step 2 — Validate BEFORE assigning ─────────────
-
-  if (!ArcMapSearch.isMapSearchSource(candidate)) {
-    console.error(
-      'A valid source property is required'
-    );
-    return;
-  }
-
-  // ── Step 3 — Assign only if valid ──────────────────
-
-  this.parsedSource = candidate;
-
-  // ── Step 4 — Create FeatureLayer ───────────────────
-
-  this.featureLayer = new FeatureLayer({
-    url: this.parsedSource.url,
-    outFields: ['*']
-  });
-
-  // ── Step 5 — Load and validate searchField ─────────
-
-  try {
-    await this.featureLayer.load();
-
-    const allowedFieldNames = this.featureLayer.fields
-      .filter(field => ![
-        'esriFieldTypeDate',
-        'esriFieldTypeGeometry',
-        'esriFieldTypeBlob',
-        'esriFieldTypeRaster'
-      ].includes(field.type))
-      .map(field => field.name);
-
-    if (!allowedFieldNames.includes(
-      this.parsedSource.searchField
-    )) {
-      throw new Error(
-        'Unrecognized search field, select from: '
-        + allowedFieldNames.join(', ')
-      );
-    }
-
-  } catch (e) {
-    console.error('FeatureLayer load error:', e);
-  }
-}
+jest.mock('lit', () => ({
+  LitElement: class LitElement {
+    shadowRoot: any = null;
+    updateComplete = Promise.resolve(true);
+    requestUpdate() {}
+    connectedCallback() {}
+    disconnectedCallback() {}  // ← add this!
+    firstUpdated() {}
+    updated() {}
+  },
+  html: (strings: any, ...values: any[]) =>
+    ({ strings, values }),
+  css: (strings: any, ...values: any[]) =>
+    ({ strings, values }),
+}));
