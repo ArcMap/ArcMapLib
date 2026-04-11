@@ -1,15 +1,49 @@
-jest.mock('lit', () => ({
-  LitElement: class LitElement {
-    shadowRoot: any = null;
-    updateComplete = Promise.resolve(true);
-    requestUpdate() {}
-    connectedCallback() {}
-    disconnectedCallback() {}  // ← add this!
-    firstUpdated() {}
-    updated() {}
-  },
-  html: (strings: any, ...values: any[]) =>
-    ({ strings, values }),
-  css: (strings: any, ...values: any[]) =>
-    ({ strings, values }),
-}));
+updateLabelJson(newLabelJsonArg: string | object | object[]) {
+  if (!this.featureLayer) return;
+  if (!this.labelLayer) return;
+
+  // Clear existing labels
+  this.labelLayer.removeAll();
+
+  if (!newLabelJsonArg) return;
+
+  const result = JsonUtils.getJsonFor(newLabelJsonArg);
+  if (result.error || !result.parsedJson) return;
+
+  // Re-add labels for all current features
+  this.featureLayer.graphics.forEach((graphic) => {
+    const labelText = graphic.attributes?.[this.labelField ?? 'LABEL'];
+    if (!labelText) return;
+
+    const point = graphic.geometry?.type === 'point'
+      ? graphic.geometry
+      : (graphic.geometry as any)?.centroid ?? (graphic.geometry as any)?.extent?.center;
+
+    if (!point) return;
+
+    const labelGraphic = new Graphic({
+      geometry: point,
+      symbol: new TextSymbol({
+        text: String(labelText),
+        color: this.labelColor ?? [0, 0, 0, 1],
+        font: { size: this.labelSize ?? 12 },
+        haloColor: [255, 255, 255, 1],
+        haloSize: 1,
+      }),
+    });
+    this.labelLayer.add(labelGraphic);
+  });
+}
+
+
+// ✅ Create separate GraphicsLayer for labels
+if (!this.labelLayer) {
+  this.labelLayer = new GraphicsLayer({ listMode: 'hide' });
+  (view as any).map.add(this.labelLayer);
+  this.labelLayer.pickingEnabled = false; // ← critical, don't block clicks
+}
+
+this.updateLabelJson(this.labelJson);
+
+
+private labelLayer: GraphicsLayer;
