@@ -2,48 +2,64 @@ updateLabelJson(newLabelJsonArg: string | object | object[]) {
   if (!this.featureLayer) return;
   if (!this.labelLayer) return;
 
-  // Clear existing labels
   this.labelLayer.removeAll();
-
   if (!newLabelJsonArg) return;
 
   const result = JsonUtils.getJsonFor(newLabelJsonArg);
   if (result.error || !result.parsedJson) return;
 
-  // Re-add labels for all current features
-  this.featureLayer.graphics.forEach((graphic) => {
-    const labelText = graphic.attributes?.[this.labelField ?? 'LABEL'];
-    if (!labelText) return;
+  // Parse label classes array
+  const parsedArray = Array.isArray(result.parsedJson)
+    ? result.parsedJson
+    : [result.parsedJson];
 
-    const point = graphic.geometry?.type === 'point'
-      ? graphic.geometry
-      : (graphic.geometry as any)?.centroid ?? (graphic.geometry as any)?.extent?.center;
+  (this.featureLayer.source as any).forEach((graphic: Graphic) => {
+    for (const labelClass of parsedArray) {
+      // Check 'where' clause matches
+      const where = labelClass.where;
+      if (where) {
+        // Simple where evaluation e.g. "numProp = 5"
+        const match = where.match(/^(\w+)\s*=\s*(.+)$/);
+        if (match) {
+          const field = match[1];
+          const val = isNaN(match[2]) ? match[2] : Number(match[2]);
+          if (graphic.attributes?.[field] !== val) continue;
+        }
+      }
 
-    if (!point) return;
+      // Extract field name from expression e.g. "$feature.sampleProp" → "sampleProp"
+      const expression: string =
+        labelClass.labelExpressionInfo?.expression ?? '';
+      const fieldMatch = expression.match(/\$feature\.(\w+)/);
+      if (!fieldMatch) continue;
+      const fieldName = fieldMatch[1];
 
-    const labelGraphic = new Graphic({
-      geometry: point,
-      symbol: new TextSymbol({
-        text: String(labelText),
-        color: this.labelColor ?? [0, 0, 0, 1],
-        font: { size: this.labelSize ?? 12 },
-        haloColor: [255, 255, 255, 1],
-        haloSize: 1,
-      }),
-    });
-    this.labelLayer.add(labelGraphic);
+      const labelText = graphic.attributes?.[fieldName];
+      if (!labelText) continue;
+
+      const point = graphic.geometry?.type === 'point'
+        ? graphic.geometry
+        : (graphic.geometry as any)?.centroid
+          ?? (graphic.geometry as any)?.extent?.center;
+      if (!point) continue;
+
+      const sym = labelClass.symbol ?? {};
+      const labelGraphic = new Graphic({
+        geometry: point,
+        symbol: new TextSymbol({
+          text: String(labelText),
+          color: sym.color ?? [0, 0, 0, 1],
+          font: {
+            size: sym.font?.size ?? 12,
+            family: sym.font?.family ?? 'sans-serif',
+            weight: sym.font?.weight ?? 'normal',
+          },
+          haloColor: sym.haloColor ?? [255, 255, 255, 1],
+          haloSize: sym.haloSize ?? 1,
+        }),
+      });
+      this.labelLayer.add(labelGraphic);
+      break; // first matching label class wins
+    }
   });
 }
-
-
-// ✅ Create separate GraphicsLayer for labels
-if (!this.labelLayer) {
-  this.labelLayer = new GraphicsLayer({ listMode: 'hide' });
-  (view as any).map.add(this.labelLayer);
-  this.labelLayer.pickingEnabled = false; // ← critical, don't block clicks
-}
-
-this.updateLabelJson(this.labelJson);
-
-
-private labelLayer: GraphicsLayer;
