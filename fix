@@ -1,60 +1,55 @@
-static getLabelJson(label: any): any[] {
-  if (!label) {
-    return [];
-  }
+private createLayer(geojson: string | FeatureCollection): void {
+  const parsedGeojson = geojson ?? {
+    type: 'FeatureCollection',
+    features: []
+  };
 
-  let parsed: any;
-
-  try {
-    // If already object → use directly
-    if (typeof label === 'object') {
-      parsed = label;
-    }
-    // If string → try parse
-    else if (typeof label === 'string' && label.trim() !== '') {
-      parsed = JSON.parse(label);
-    } else {
-      console.warn('Empty label input');
-      return [];
-    }
-  } catch (e) {
-    console.warn('Invalid label JSON, skipping:', label);
-    return [];
-  }
-
-  // Ensure array
-  const labels = Array.isArray(parsed) ? parsed : [parsed];
-
-  return labels.map((l) => {
-    const symbol = l.symbol || {};
-
-    return {
-      labelExpressionInfo: {
-        expression: l.expression || `$feature.${l.field || 'OBJECTID'}`
-      },
-
-      symbol: {
-        type: "text",  // ✅ REQUIRED for ArcGIS
-        color: symbol.color || "black",
-        haloColor: symbol.haloColor || "white",
-        haloSize: symbol.haloSize || 1,
-        font: {
-          size: symbol.font?.size || 12,
-          family: symbol.font?.family || "Arial",
-          weight: symbol.font?.weight || "normal"
-        }
-      }
-    };
-  });
-}
-
-private refreshLabels(): void {
-  if (!this.labelLayer || !this.featureLayer) {
+  const fsInfo = this.getArcGISJson(parsedGeojson);
+  if (!fsInfo) {
+    console.error('Unable to create GeoJSON layer: invalid data');
     return;
   }
 
-  const labelJson = JsonUtils.getLabelJson(this.label);
+  const fields = [
+    new Field({
+      name: 'OBJECTID',
+      alias: 'OBJECTID',
+      type: 'oid'
+    }),
+    new Field({
+      name: this.uniqueIdPropertyName,
+      alias: this.uniqueIdPropertyName,
+      type: 'string'
+    }),
+    new Field({
+      name: 'LABEL',
+      alias: 'LABEL',
+      type: 'string'
+    })
+  ];
 
-  // 🔴 FIX: Apply labelingInfo to FEATURE layer, not GraphicsLayer
-  this.featureLayer.labelingInfo = labelJson;
+  this.featureLayer = new FeatureLayer({
+    id: this.id || 'arc-geojson-layer',
+    title: this.name || this.id || 'Arc GeoJSON Layer',
+    source: fsInfo.graphics,
+    objectIdField: 'OBJECTID',
+    fields,
+    geometryType: fsInfo.geometryType,
+    spatialReference: { wkid: 4326 },
+    popupEnabled: true
+  });
+
+  if (this.view?.map) {
+    this.view.map.add(this.featureLayer);
+  }
+
+  this.updateRenderer(this.renderer);
+  this.refreshLabels();
+  this.updateInfoTemplate(this.infoTemplate);
+  this.updateLayerClass(this.layerclass);
+  this.createEditor();
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
 }
