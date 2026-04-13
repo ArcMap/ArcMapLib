@@ -1,46 +1,9 @@
-private getArcGISJson(
-  geojson: string | FeatureCollection
-): {
-  graphics: Graphic[];
-  geometryType: 'point' | 'multipoint' | 'polyline' | 'polygon';
-} | null {
-  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
-
-  if (geojsonParseResult.error) {
-    console.error('Unable to parse geojson string', geojsonParseResult.error);
-    return null;
+private determineExistingGeometryType(): string | undefined {
+  const source = this.featureLayer?.source;
+  if (!source || source.length === 0) {
+    return undefined;
   }
 
-  const parsedGeojson = geojsonParseResult.parsedJson as FeatureCollection;
-
-  if (!parsedGeojson || parsedGeojson.type !== 'FeatureCollection') {
-    console.error('GeoJSON must be a FeatureCollection.');
-    return null;
-  }
-
-  const graphics: Graphic[] = [];
-  let geometryType: 'point' | 'multipoint' | 'polyline' | 'polygon' | undefined;
-
-  parsedGeojson.features.forEach((feature: Feature, index: number) => {
-    const graphic = this.geojsonFeatureToGraphic(feature, index);
-
-    if (!graphic || !graphic.geometry) {
-      return;
-    }
-
-    if (geometryType === undefined) {
-      geometryType = graphic.geometry.type as
-        | 'point'
-        | 'multipoint'
-        | 'polyline'
-        | 'polygon';
-    }
-
-    graphics.push(graphic);
-  });
-
-  return {
-    graphics,
-    geometryType: geometryType ?? 'polygon'
-  };
+  const firstGraphic = source.toArray()[0];
+  return firstGraphic?.geometry?.type;
 }
