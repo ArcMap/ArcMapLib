@@ -1,53 +1,15 @@
-const clickHandle = (view as any).on('click', (evt: any) => {
-  if (this.enableUserEdit || this.inDrawingMode) return;
-  if (!this.infoTemplate) return;
-
-  view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-    const hit = hitResult.results[0] as any;
-    if (!hit?.graphic) return;
-
-    const graphic: Graphic = hit.graphic;
-
-    console.log('graphic attributes:', graphic.attributes);
-    console.log('graphic geometry:', graphic.geometry);
-
-    // Force everything on the view directly — bypass arc-map entirely
-    (view as any).popupEnabled = true;
-    (view as any).popup.autoCloseEnabled = false;
-    (view as any).popup.dockEnabled = false;
-
-    // Build popup content manually from attributes — no popupTemplate dependency
-    const attrs = graphic.attributes ?? {};
-    const rows = Object.keys(attrs)
-      .filter(k => k !== 'OBJECTID' && k !== 'LABEL')
-      .map(k => `<tr><td><b>${k}</b></td><td>${attrs[k]}</td></tr>`)
-      .join('');
-
-    const htmlContent = `<table style="border-collapse:collapse;width:100%">${rows}</table>`;
-
-    (view as any).popup.open({
-      title: this.name || 'Feature Info',
-      content: htmlContent,
-      location: ArcGeoJsonLayer.getPopupPoint(graphic.geometry) ?? evt.mapPoint,
-    });
-
-    console.log('popup opened, visible:', (view as any).popup.visible);
-
-    // Dispatch layerClick
-    try {
-      if (this._webMercatorToGeographic) {
-        const coords = this._webMercatorToGeographic(
-          evt.mapPoint ?? graphic.geometry
-        ) as any;
-        this.dispatchEvent(new CustomEvent('layerClick', {
-          detail: {
-            coordinates: { latitude: coords?.y, longitude: coords?.x },
-            attributes: graphic?.attributes,
-          },
-          bubbles: true, composed: true,
-        }));
-      }
-    } catch (_) { /**/ }
-  });
-});
-this.eventHandles.push(clickHandle);
+info-template='{
+  "title": "Feature Info",
+  "content": [
+    {
+      "type": "fields",
+      "fieldInfos": [
+        { "fieldName": "type",       "label": "Type",        "visible": true },
+        { "fieldName": "colorValue", "label": "Color Value", "visible": true },
+        { "fieldName": "rotation",   "label": "Rotation",    "visible": true },
+        { "fieldName": "label",      "label": "Label",       "visible": true },
+        { "fieldName": "id",         "label": "ID",          "visible": true }
+      ]
+    }
+  ]
+}'
