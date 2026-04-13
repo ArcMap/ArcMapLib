@@ -1,0 +1,523 @@
+import Graphic from '@arcgis/core/Graphic';
+import LabelClass from '@arcgis/core/layers/support/LabelClass';
+import type GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
+
+export default class JsonUtils {
+  private static readonly DEFAULT_LABEL_COLOR = JsonUtils.getRandomColor();
+  static readonly DEFAULT_LABEL_SIZE = 10;
+
+  static getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+    if (typeof jsonObj === 'string') {
+      try {
+        return { parsedJson: JSON.parse(jsonObj) };
+      } catch (e: any) {
+        return { error: e };
+      }
+    }
+
+    return { parsedJson: jsonObj };
+  }
+
+  static getRandomColor(): number[] {
+    const r = Math.floor(Math.random() * 256);
+    const g = Math.floor(Math.random() * 256);
+    const b = Math.floor(Math.random() * 256);
+    return [r, g, b, 255];
+  }
+
+  static getEsriGeomTypeFor(jsonEsriGeom: any): string {
+    if (jsonEsriGeom?.paths) {
+      return 'esriGeometryPolyline';
+    }
+
+    if (jsonEsriGeom?.rings) {
+      return 'esriGeometryPolygon';
+    }
+
+    if (jsonEsriGeom?.points) {
+      return 'esriGeometryMultipoint';
+    }
+
+    return 'esriGeometryPoint';
+  }
+
+  static getJsonSymbolFor(
+    geomType: string,
+    color: number[],
+    markerSize: number
+  ): object {
+    const safeColor = Array.isArray(color) && color.length >= 4
+      ? [...color]
+      : [0, 0, 0, 255];
+
+    switch (geomType) {
+      case 'esriGeometryPoint':
+      case 'esriGeometryMultipoint':
+      case 'point':
+      case 'multipoint':
+        return {
+          type: 'simple-marker',
+          color: safeColor,
+          size: markerSize,
+          angle: 0,
+          xoffset: 0,
+          yoffset: 0,
+          style: 'circle',
+          outline: {
+            type: 'simple-line',
+            color: [0, 0, 0, 200],
+            width: 1,
+            style: 'solid'
+          }
+        };
+
+      case 'esriGeometryLine':
+      case 'esriGeometryPolyline':
+      case 'polyline':
+        return {
+          type: 'simple-line',
+          color: safeColor,
+          width: markerSize,
+          style: 'solid'
+        };
+
+      case 'esriGeometryPolygon':
+      case 'polygon':
+      default:
+        return {
+          type: 'simple-fill',
+          style: 'solid',
+          color: [safeColor[0], safeColor[1], safeColor[2], 100],
+          outline: {
+            type: 'simple-line',
+            style: 'solid',
+            color: [110, 110, 110, 255],
+            width: markerSize
+          }
+        };
+    }
+  }
+
+  static getJsonLabelFor(color: number[], fontsize: number): object[] {
+    return [
+      {
+        labelExpressionInfo: {
+          expression: '$feature.LABEL'
+        },
+        symbol: {
+          type: 'text',
+          color,
+          haloColor: [0, 0, 0, 255],
+          haloSize: 1,
+          xoffset: 3,
+          yoffset: 3,
+          font: {
+            size: fontsize,
+            family: 'sans-serif',
+            weight: 'bold'
+          }
+        }
+      }
+    ];
+  }
+
+  static getLabelJson(userLabel: any, userColor: any, userSize: any): any {
+    const labelJson = this.getJsonFor(userLabel);
+
+    if (labelJson.error) {
+      console.warn(
+        'Could not parse label json, falling back to color and size properties',
+        labelJson.error
+      );
+    } else if (labelJson.parsedJson) {
+      const parsed = Array.isArray(labelJson.parsedJson)
+        ? labelJson.parsedJson.map((item: any) => this.normalizeLegacyLabelJson(item))
+        : this.normalizeLegacyLabelJson(labelJson.parsedJson);
+
+      return parsed;
+    }
+
+    let labelColor = this.DEFAULT_LABEL_COLOR;
+    const colorJson = this.getJsonFor(userColor);
+    if (colorJson.error) {
+      console.error('Could not parse label color', colorJson.error);
+    } else if (Array.isArray(colorJson.parsedJson)) {
+      labelColor = colorJson.parsedJson;
+    }
+
+    let labelSize = this.DEFAULT_LABEL_SIZE;
+    if (!Number.isNaN(userSize) && Number(userSize) > 0) {
+      labelSize = Number(userSize);
+    } else if (typeof userSize !== 'undefined') {
+      console.warn(`Bad label size: ${userSize}, using default: ${labelSize}`);
+      console.warn('Label size must be a positive number');
+    }
+
+    return this.getJsonLabelFor(labelColor, labelSize);
+  }
+
+  static updateLabelJson(
+    newLabelJsonArg: string | object | object[],
+    featureLayer: any
+  ): void {
+    const jsonParseResult = JsonUtils.getJsonFor(newLabelJsonArg);
+
+    if (jsonParseResult.error) {
+      console.warn(
+        'Could not parse new value for label json, staying on previous value',
+        jsonParseResult.error
+      );
+      return;
+    }
+
+    const parsedJson = jsonParseResult.parsedJson;
+    const parsedArray = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
+
+    const labelClasses = parsedArray.map((labelJson: any) => {
+      const normalizedLabelJson = JsonUtils.normalizeLegacyLabelJson(labelJson);
+      return new LabelClass(normalizedLabelJson);
+    });
+
+    featureLayer.labelingInfo = labelClasses;
+    featureLayer.labelsVisible = true;
+  }
+
+  static updateRenderer(
+    newRenderer: any,
+    featureLayer: any,
+    rendererTypeToModule: any,
+    symbolJson: any
+  ): void {
+    if (newRenderer) {
+      const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+
+      if (rendererParseResult.error) {
+        console.warn(
+          'Could not parse new value for renderer, staying on previous value',
+          rendererParseResult.error
+        );
+        return;
+      }
+
+      const parsedRendererConfig = JsonUtils.normalizeLegacyRendererJson(
+        rendererParseResult.parsedJson
+      );
+
+      const rendererModuleName = rendererTypeToModule[parsedRendererConfig.type];
+      if (rendererModuleName === undefined) {
+        console.error(
+          'Unrecognized renderer type',
+          parsedRendererConfig.type,
+          'Must be one of',
+          Object.keys(rendererTypeToModule)
+        );
+        return;
+      }
+
+      import(rendererModuleName).then((rendererModule: any) => {
+        const RendererCtor = rendererModule.default ?? rendererModule;
+        const renderer = new RendererCtor(parsedRendererConfig);
+        featureLayer.renderer = renderer;
+      });
+    } else {
+      import('@arcgis/core/renderers/SimpleRenderer').then((rendererModule: any) => {
+        const SimpleRenderer = rendererModule.default ?? rendererModule;
+        const renderer = new SimpleRenderer(
+          JsonUtils.normalizeLegacyRendererJson({
+            type: 'simple',
+            symbol: symbolJson
+          })
+        );
+        featureLayer.renderer = renderer;
+      });
+    }
+  }
+
+  static refreshGraphicsLayerLabels(
+    featureLayer: GraphicsLayer,
+    labelLayer: GraphicsLayer,
+    getLabelPoint: (graphic: Graphic) => __esri.Point | null | undefined,
+    labelJsonArg: any,
+    labelColorArg: any,
+    labelSizeArg: any
+  ): void {
+    if (!featureLayer || !labelLayer) {
+      return;
+    }
+
+    labelLayer.removeAll();
+
+    const resolvedLabelJson = JsonUtils.getLabelJson(
+      labelJsonArg,
+      labelColorArg,
+      labelSizeArg
+    );
+
+    const labelClassJson = Array.isArray(resolvedLabelJson)
+      ? resolvedLabelJson[0]
+      : resolvedLabelJson;
+
+    const normalizedLabelClassJson = JsonUtils.normalizeLegacyLabelJson(labelClassJson);
+    const normalizedSymbol = normalizedLabelClassJson?.symbol;
+
+    featureLayer.graphics.forEach((graphic: Graphic) => {
+      const labelText = graphic.attributes?.LABEL;
+      if (!labelText || !graphic.geometry) {
+        return;
+      }
+
+      const labelPoint = getLabelPoint(graphic);
+      if (!labelPoint) {
+        return;
+      }
+
+      const symbolConfig = JsonUtils.cloneDeep(normalizedSymbol) ?? {
+        type: 'text',
+        color: [0, 0, 0, 255],
+        haloColor: [255, 255, 255, 255],
+        haloSize: 1,
+        font: {
+          size: 12,
+          family: 'sans-serif',
+          weight: 'bold'
+        }
+      };
+
+      symbolConfig.text = String(labelText);
+
+      const labelGraphic = new Graphic({
+        geometry: labelPoint,
+        symbol: symbolConfig
+      });
+
+      labelLayer.add(labelGraphic);
+    });
+  }
+
+  static normalizeLegacyRendererJson(renderer: any): any {
+    if (!renderer || typeof renderer !== 'object') {
+      return renderer;
+    }
+
+    const normalized = JsonUtils.cloneDeep(renderer);
+
+    if (normalized.symbol) {
+      normalized.symbol = JsonUtils.normalizeLegacySymbolJson(normalized.symbol);
+    }
+
+    if (Array.isArray(normalized.uniqueValueInfos)) {
+      normalized.uniqueValueInfos = normalized.uniqueValueInfos.map((info: any) => ({
+        ...info,
+        symbol: JsonUtils.normalizeLegacySymbolJson(info.symbol)
+      }));
+    }
+
+    if (Array.isArray(normalized.classBreakInfos)) {
+      normalized.classBreakInfos = normalized.classBreakInfos.map((info: any) => ({
+        ...info,
+        symbol: JsonUtils.normalizeLegacySymbolJson(info.symbol)
+      }));
+    }
+
+    if (Array.isArray(normalized.visualVariables)) {
+      normalized.visualVariables = normalized.visualVariables.map((item: any) =>
+        JsonUtils.cloneDeep(item)
+      );
+    }
+
+    return normalized;
+  }
+
+  static normalizeLegacyLabelJson(labelJson: any): any {
+    if (!labelJson || typeof labelJson !== 'object') {
+      return labelJson;
+    }
+
+    const normalized = JsonUtils.cloneDeep(labelJson);
+
+    if (normalized.symbol) {
+      normalized.symbol = JsonUtils.normalizeLegacySymbolJson(normalized.symbol);
+    }
+
+    if (!normalized.symbol) {
+      normalized.symbol = {
+        type: 'text',
+        color: JsonUtils.DEFAULT_LABEL_COLOR,
+        haloColor: [0, 0, 0, 255],
+        haloSize: 1,
+        xoffset: 3,
+        yoffset: 3,
+        font: {
+          size: JsonUtils.DEFAULT_LABEL_SIZE,
+          family: 'sans-serif',
+          weight: 'bold'
+        }
+      };
+    }
+
+    if (normalized.symbol.type === 'text' && !normalized.symbol.text) {
+      normalized.symbol.text = '';
+    }
+
+    return normalized;
+  }
+
+  static normalizeLegacySymbolJson(symbol: any): any {
+    if (!symbol || typeof symbol !== 'object') {
+      return symbol;
+    }
+
+    const normalized = JsonUtils.cloneDeep(symbol);
+
+    switch (normalized.type) {
+      case 'esriSMS':
+        normalized.type = 'simple-marker';
+        normalized.style = JsonUtils.normalizeLegacyMarkerStyle(normalized.style);
+        if (normalized.outline) {
+          normalized.outline = JsonUtils.normalizeLegacySymbolJson(normalized.outline);
+        }
+        return normalized;
+
+      case 'esriPMS':
+        normalized.type = 'picture-marker';
+        return normalized;
+
+      case 'esriSLS':
+        normalized.type = 'simple-line';
+        normalized.style = JsonUtils.normalizeLegacyLineStyle(normalized.style);
+        return normalized;
+
+      case 'esriSFS':
+        normalized.type = 'simple-fill';
+        normalized.style = JsonUtils.normalizeLegacyFillStyle(normalized.style);
+        if (normalized.outline) {
+          normalized.outline = JsonUtils.normalizeLegacySymbolJson(normalized.outline);
+        }
+        return normalized;
+
+      case 'esriPFS':
+        normalized.type = 'picture-fill';
+        if (normalized.outline) {
+          normalized.outline = JsonUtils.normalizeLegacySymbolJson(normalized.outline);
+        }
+        return normalized;
+
+      case 'esriTS':
+        normalized.type = 'text';
+        normalized.haloColor = normalized.haloColor ?? normalized.backgroundColor;
+        normalized.haloSize = normalized.haloSize ?? 1;
+        if (normalized.font) {
+          normalized.font = JsonUtils.normalizeLegacyFontJson(normalized.font);
+        }
+        return normalized;
+
+      default:
+        if (normalized.type === 'text' && normalized.font) {
+          normalized.font = JsonUtils.normalizeLegacyFontJson(normalized.font);
+        }
+
+        if (normalized.symbol) {
+          normalized.symbol = JsonUtils.normalizeLegacySymbolJson(normalized.symbol);
+        }
+
+        if (normalized.outline) {
+          normalized.outline = JsonUtils.normalizeLegacySymbolJson(normalized.outline);
+        }
+
+        return normalized;
+    }
+  }
+
+  static normalizeLegacyFontJson(font: any): any {
+    if (!font || typeof font !== 'object') {
+      return font;
+    }
+
+    const normalized = { ...font };
+
+    if (normalized.family == null && normalized.fontFamily != null) {
+      normalized.family = normalized.fontFamily;
+    }
+
+    if (normalized.size == null && normalized.fontSize != null) {
+      normalized.size = normalized.fontSize;
+    }
+
+    return normalized;
+  }
+
+  static normalizeLegacyMarkerStyle(style: string | undefined): string | undefined {
+    switch (style) {
+      case 'esriSMSCircle':
+        return 'circle';
+      case 'esriSMSSquare':
+        return 'square';
+      case 'esriSMSCross':
+        return 'cross';
+      case 'esriSMSX':
+        return 'x';
+      case 'esriSMSDiamond':
+        return 'diamond';
+      case 'esriSMSTriangle':
+        return 'triangle';
+      case 'esriSMSPath':
+        return 'path';
+      default:
+        return style;
+    }
+  }
+
+  static normalizeLegacyLineStyle(style: string | undefined): string | undefined {
+    switch (style) {
+      case 'esriSLSSolid':
+        return 'solid';
+      case 'esriSLSDash':
+        return 'dash';
+      case 'esriSLSDot':
+        return 'dot';
+      case 'esriSLSDashDot':
+        return 'dash-dot';
+      case 'esriSLSDashDotDot':
+        return 'dash-dot-dot';
+      case 'esriSLSNull':
+        return 'none';
+      default:
+        return style;
+    }
+  }
+
+  static normalizeLegacyFillStyle(style: string | undefined): string | undefined {
+    switch (style) {
+      case 'esriSFSSolid':
+        return 'solid';
+      case 'esriSFSNull':
+        return 'none';
+      case 'esriSFSBackwardDiagonal':
+        return 'backward-diagonal';
+      case 'esriSFSForwardDiagonal':
+        return 'forward-diagonal';
+      case 'esriSFSCross':
+        return 'cross';
+      case 'esriSFSDiagonalCross':
+        return 'diagonal-cross';
+      case 'esriSFSHorizontal':
+        return 'horizontal';
+      case 'esriSFSVertical':
+        return 'vertical';
+      default:
+        return style;
+    }
+  }
+
+  static cloneDeep<T>(value: T): T {
+    if (value == null) {
+      return value;
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  }
+}
