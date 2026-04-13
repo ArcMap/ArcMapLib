@@ -1,47 +1,8 @@
-const clickHandle = (view as any).on('click', (evt: any) => {
-  if (this.enableUserEdit || this.inDrawingMode) return;
-  if (!this.infoTemplate) return;
-
-  const popup = (view as any).popup;
-  if (!popup) return;
-
-  // Force enable popup on the view — arc-map may have disabled it
-  (view as any).popupEnabled = true;
-  popup.autoCloseEnabled = false;
-
-  // INSTANT open
-  popup.location = evt.mapPoint;
-  popup.visible = true;
-
-  view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-    const hit = hitResult.results[0] as any;
-
-    if (!hit?.graphic) {
-      popup.visible = false;
-      return;
-    }
-
-    const graphic: Graphic = hit.graphic;
-
-    popup.features = [graphic];
-    popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
-    popup.visible = true;
-
-    // Dispatch layerClick
-    try {
-      if (this._webMercatorToGeographic) {
-        const coords = this._webMercatorToGeographic(
-          evt.mapPoint ?? graphic.geometry
-        ) as any;
-        this.dispatchEvent(new CustomEvent('layerClick', {
-          detail: {
-            coordinates: { latitude: coords?.y, longitude: coords?.x },
-            attributes: graphic?.attributes,
-          },
-          bubbles: true, composed: true,
-        }));
-      }
-    } catch (_) { /**/ }
-  });
-});
-this.eventHandles.push(clickHandle);
+private enableInfoPopupWindow(enable: boolean) {
+  const enablePopup = enable && !this.enableUserEdit && !this.inDrawingMode;
+  this.ancestorMap?.enableInfoWindow(enablePopup);
+  // Also set directly on view as backup
+  if (this._cachedView) {
+    (this._cachedView as any).popupEnabled = enablePopup;
+  }
+}
