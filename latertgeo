@@ -1,120 +1,74 @@
-private _wireEvents(view: MapView) {
-  let isHovered = false;
-  const viewContainer = (view as any).container as HTMLElement;
+const clickHandle = (view as any).on('click', (evt: any) => {
+  if (this.enableUserEdit || this.inDrawingMode) return;
+  if (!this.infoTemplate) return;
 
-  // ── Use view.on('pointer-move') with layerView hit detection ──────────
-  // Get the layerView once — this is MUCH faster than hitTest
-  let featureLayerView: any = null;
-  view.whenLayerView(this.featureLayer).then((lv: any) => {
-    featureLayerView = lv;
-  });
+  const popup = (view as any).popup;
+  if (!popup) return;
 
-  // ── POINTER-MOVE — use layerView.highlight for instant cursor ─────────
-  const pointerMoveHandle = (view as any).on('pointer-move', (evt: any) => {
-    if (!featureLayerView) return;
+  // INSTANT open at click point
+  popup.location = evt.mapPoint;
+  popup.visible = true;
 
-    // hitTest only on featureLayerView — much faster than full hitTest
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results[0] as any;
+  view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
+    const hit = hitResult.results[0] as any;
 
-      if (hit?.graphic && !isHovered) {
-        isHovered = true;
-        if (viewContainer) viewContainer.style.cursor = 'pointer';
-        try {
-          if (this._webMercatorToGeographic) {
-            const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
-            this.dispatchEvent(new CustomEvent('layerMouseOver', {
-              detail: {
-                coordinates: { latitude: coords?.y, longitude: coords?.x },
-                attributes: hit.graphic?.attributes,
-              },
-              bubbles: true, composed: true,
-            }));
-          }
-        } catch (_) { /**/ }
+    if (!hit?.graphic) {
+      popup.visible = false;
+      return;
+    }
 
-      } else if (!hit?.graphic && isHovered) {
-        isHovered = false;
-        if (viewContainer) viewContainer.style.cursor = 'default';
-        this.dispatchEvent(new CustomEvent('layerMouseOut', {
-          detail: {}, bubbles: true, composed: true,
-        }));
-      }
-    });
-  });
-  this.eventHandles.push(pointerMoveHandle);
+    const graphic: Graphic = hit.graphic;
 
-  // ── CLICK — popup opens BEFORE hitTest using layerView ────────────────
-  const clickHandle = (view as any).on('click', (evt: any) => {
-    if (this.enableUserEdit || this.inDrawingMode) return;
-    if (!this.infoTemplate) return;
+    console.log('hit graphic:', graphic);
+    console.log('featureLayer popupTemplate:', this.featureLayer.popupTemplate);
+    console.log('popup object:', popup);
 
-    const popup = (view as any).popup;
-    if (!popup) return;
-
-    // INSTANT — open popup at click point immediately, zero delay
-    popup.location = evt.mapPoint;
-    popup.title = this.name || 'Feature Info';
-    popup.content = '';
-    popup.visible = true;
-
-    // hitTest in background — just to fill in feature attributes
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results[0] as any;
-
-      if (!hit?.graphic) {
-        popup.visible = false;
-        return;
-      }
-
-      const graphic: Graphic = hit.graphic;
-
-      // featureLayer.popupTemplate already set at createLayer time
-      // just assign features — renders instantly, no extra await
+    // Try all three ways to open popup — one of them will work
+    try {
+      // Method 1: direct assignment
       popup.features = [graphic];
       popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
       popup.visible = true;
-
-      // Dispatch layerClick
+      console.log('Method 1 done, popup.visible:', popup.visible);
+    } catch (e1) {
+      console.error('Method 1 failed:', e1);
       try {
-        if (this._webMercatorToGeographic) {
-          const coords = this._webMercatorToGeographic(
-            evt.mapPoint ?? graphic.geometry
-          ) as any;
-          this.dispatchEvent(new CustomEvent('layerClick', {
-            detail: {
-              coordinates: { latitude: coords?.y, longitude: coords?.x },
-              attributes: graphic?.attributes,
-            },
-            bubbles: true, composed: true,
-          }));
+        // Method 2: open with object
+        popup.open({
+          features: [graphic],
+          location: ArcGeoJsonLayer.getPopupPoint(graphic.geometry),
+        });
+        console.log('Method 2 done');
+      } catch (e2) {
+        console.error('Method 2 failed:', e2);
+        try {
+          // Method 3: fetchFeatures approach
+          popup.open({
+            location: evt.mapPoint,
+            fetchFeatures: true,
+          });
+          console.log('Method 3 done');
+        } catch (e3) {
+          console.error('Method 3 failed:', e3);
         }
-      } catch (_) { /**/ }
-    });
-  });
-  this.eventHandles.push(clickHandle);
+      }
+    }
 
-  // ── DOUBLE-CLICK ───────────────────────────────────────────────────────
-  const dblClickHandle = (view as any).on('double-click', (evt: any) => {
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results.find(
-        (r: any) => r.graphic?.layer === this.featureLayer
-      );
-      if (!hit) return;
-      const graphic = (hit as any).graphic;
-      try {
-        if (this._webMercatorToGeographic) {
-          const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
-          this.dispatchEvent(new CustomEvent('doubleClick', {
-            detail: {
-              coordinates: { latitude: coords?.y, longitude: coords?.x },
-              attributes: graphic?.attributes,
-            },
-            bubbles: true, composed: true,
-          }));
-        }
-      } catch (_) { /**/ }
-    });
+    // Dispatch layerClick
+    try {
+      if (this._webMercatorToGeographic) {
+        const coords = this._webMercatorToGeographic(
+          evt.mapPoint ?? graphic.geometry
+        ) as any;
+        this.dispatchEvent(new CustomEvent('layerClick', {
+          detail: {
+            coordinates: { latitude: coords?.y, longitude: coords?.x },
+            attributes: graphic?.attributes,
+          },
+          bubbles: true, composed: true,
+        }));
+      }
+    } catch (_) { /**/ }
   });
-  this.eventHandles.push(dblClickHandle);
-}
+});
+this.eventHandles.push(clickHandle);
