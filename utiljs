@@ -1,0 +1,364 @@
+import Graphic from '@arcgis/core/Graphic';
+import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
+import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
+
+import SimpleRenderer from '@arcgis/core/renderers/SimpleRenderer';
+import UniqueValueRenderer from '@arcgis/core/renderers/UniqueValueRenderer';
+import ClassBreaksRenderer from '@arcgis/core/renderers/ClassBreaksRenderer';
+
+import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
+import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
+import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
+import TextSymbol from '@arcgis/core/symbols/TextSymbol';
+import PopupTemplate from '@arcgis/core/PopupTemplate';
+import Point from '@arcgis/core/geometry/Point';
+
+export default class JsonUtils {
+  static readonly DEFAULT_LABEL_SIZE = 10;
+  private static readonly DEFAULT_LABEL_COLOR = JsonUtils.getRandomColor();
+
+  static getJsonFor(jsonObject: any): { error?: Error; parsedJson?: any } {
+    if (jsonObject === null || jsonObject === undefined) {
+      return { parsedJson: undefined };
+    }
+
+    if (typeof jsonObject === 'string') {
+      const trimmed = jsonObject.trim();
+
+      if (!trimmed) {
+        return { parsedJson: undefined };
+      }
+
+      try {
+        return { parsedJson: JSON.parse(trimmed) };
+      } catch (e: any) {
+        return { error: e };
+      }
+    }
+
+    return { parsedJson: jsonObject };
+  }
+
+  static getRandomColor(): number[] {
+    const r = Math.floor(Math.random() * 256);
+    const g = Math.floor(Math.random() * 256);
+    const b = Math.floor(Math.random() * 256);
+    return [r, g, b, 255];
+  }
+
+  static getSymbolJson(
+    geomType: string,
+    defaultColor: number[],
+    defaultSymbolMarkerSize: number,
+    widthGeomLine: number,
+    widthGeomPolygon: number
+  ): object {
+    const symbolColor = [...defaultColor];
+    let symbolSize = defaultSymbolMarkerSize;
+
+    switch (geomType) {
+      case 'polyline':
+      case 'esriGeometryPolyline':
+        symbolSize = widthGeomLine;
+        return {
+          type: 'simple-line',
+          color: symbolColor,
+          width: symbolSize,
+          style: 'solid'
+        };
+
+      case 'polygon':
+      case 'esriGeometryPolygon':
+        symbolSize = widthGeomPolygon;
+        symbolColor[3] = 100;
+        return {
+          type: 'simple-fill',
+          color: symbolColor,
+          outline: {
+            color: [110, 110, 110, 255],
+            width: symbolSize,
+            style: 'solid'
+          },
+          style: 'solid'
+        };
+
+      case 'point':
+      case 'multipoint':
+      case 'esriGeometryPoint':
+      case 'esriGeometryMultipoint':
+      default:
+        return {
+          type: 'simple-marker',
+          color: symbolColor,
+          size: symbolSize,
+          style: 'circle',
+          outline: {
+            color: [0, 0, 0, 200],
+            width: 1,
+            style: 'solid'
+          }
+        };
+    }
+  }
+
+  /**
+   * Converts old stencil symbol json to ArcGIS Core symbol json
+   */
+  static normalizeLegacySymbol(symbol: any): any {
+    if (!symbol || typeof symbol !== 'object') {
+      return symbol;
+    }
+
+    const clone = JSON.parse(JSON.stringify(symbol));
+
+    const normalizeType = (type: string | undefined): string | undefined => {
+      if (!type) return type;
+
+      switch (type) {
+        case 'esriSMS':
+          return 'simple-marker';
+        case 'esriSLS':
+          return 'simple-line';
+        case 'esriSFS':
+          return 'simple-fill';
+        case 'text':
+          return 'text';
+        default:
+          return type;
+      }
+    };
+
+    const normalizeStyle = (style: string | undefined): string | undefined => {
+      if (!style) return style;
+
+      switch (style) {
+        case 'esriSMSCircle':
+          return 'circle';
+        case 'esriSLSSolid':
+          return 'solid';
+        case 'esriSFSSolid':
+          return 'solid';
+        default:
+          return style;
+      }
+    };
+
+    clone.type = normalizeType(clone.type);
+    clone.style = normalizeStyle(clone.style);
+
+    if (clone.outline) {
+      clone.outline.type = normalizeType(clone.outline.type);
+      clone.outline.style = normalizeStyle(clone.outline.style);
+    }
+
+    return clone;
+  }
+
+  static getJsonLabelFor(color: number[], fontsize: number): object {
+    return {
+      type: 'text',
+      text: '',
+      color,
+      haloColor: 'black',
+      haloSize: 1,
+      xoffset: 3,
+      yoffset: 3,
+      font: {
+        size: fontsize,
+        family: 'sans-serif',
+        weight: 'bold'
+      }
+    };
+  }
+
+  static getLabelJson(userLabel: any, userColor: any, userSize: any): any {
+    const labelJson = this.getJsonFor(userLabel);
+
+    if (labelJson.error) {
+      console.warn(
+        'Could not parse label json, falling back to color and size properties',
+        labelJson.error
+      );
+    } else if (labelJson.parsedJson !== undefined) {
+      return labelJson.parsedJson;
+    }
+
+    let labelColor = this.DEFAULT_LABEL_COLOR;
+    const colorJson = this.getJsonFor(userColor);
+
+    if (!colorJson.error && Array.isArray(colorJson.parsedJson)) {
+      labelColor = colorJson.parsedJson;
+    }
+
+    let labelSize = this.DEFAULT_LABEL_SIZE;
+    if (!Number.isNaN(userSize) && Number(userSize) > 0) {
+      labelSize = Number(userSize);
+    }
+
+    return this.getJsonLabelFor(labelColor, labelSize);
+  }
+
+  static refreshGraphicsLayerLabels(
+    featureLayer: FeatureLayer | null,
+    labelLayer: GraphicsLayer | null,
+    getPopupPoint: (graphic: Graphic) => Point,
+    labelJsonArg: any,
+    labelColorArg: any,
+    labelSizeArg: any
+  ): void {
+    if (!featureLayer || !labelLayer) {
+      return;
+    }
+
+    labelLayer.removeAll();
+
+    const rawLabelJson = this.getLabelJson(labelJsonArg, labelColorArg, labelSizeArg);
+    const normalizedLabelSymbol = this.normalizeLegacySymbol(rawLabelJson);
+
+    featureLayer.source.forEach((graphic: Graphic): void => {
+      const labelText = graphic.attributes?.LABEL;
+      if (labelText === undefined || labelText === null || labelText === '') {
+        return;
+      }
+
+      const point = getPopupPoint(graphic);
+
+      const symbolConfig = {
+        ...normalizedLabelSymbol,
+        text: String(labelText)
+      };
+
+      const labelGraphic = new Graphic({
+        geometry: point,
+        attributes: { ...(graphic.attributes ?? {}) },
+        symbol: new TextSymbol(symbolConfig as any)
+      });
+
+      labelLayer.add(labelGraphic);
+    });
+  }
+
+  static updateRenderer(
+    newRenderer: any,
+    layers: FeatureLayer[],
+    getSymbolJson: (
+      geomType: string,
+      defaultColor: number[],
+      defaultSymbolMarkerSize: number,
+      widthGeomLine: number,
+      widthGeomPolygon: number
+    ) => object
+  ): void {
+    layers.forEach((layer: FeatureLayer): void => {
+      if (!layer) {
+        return;
+      }
+
+      if (newRenderer) {
+        const rendererParseResult = this.getJsonFor(newRenderer);
+        if (rendererParseResult.error || !rendererParseResult.parsedJson) {
+          console.warn('Could not parse new value for renderer, staying on previous value');
+          return;
+        }
+
+        const parsedRendererConfig = rendererParseResult.parsedJson;
+        const normalized = this.normalizeLegacyRenderer(parsedRendererConfig);
+
+        let renderer: any;
+
+        switch (normalized.type) {
+          case 'simple':
+            renderer = new SimpleRenderer(normalized);
+            break;
+          case 'unique-value':
+            renderer = new UniqueValueRenderer(normalized);
+            break;
+          case 'class-breaks':
+            renderer = new ClassBreaksRenderer(normalized);
+            break;
+          default:
+            console.warn('Unrecognized renderer type', normalized.type);
+            return;
+        }
+
+        layer.renderer = renderer;
+      } else {
+        const symbolJson = getSymbolJson(
+          layer.geometryType,
+          [0, 153, 255, 255],
+          12,
+          2,
+          2
+        );
+
+        const normalizedSymbol = this.normalizeLegacySymbol(symbolJson);
+        layer.renderer = new SimpleRenderer({
+          symbol: this.createSymbolFromJson(normalizedSymbol)
+        });
+      }
+    });
+  }
+
+  static normalizeLegacyRenderer(renderer: any): any {
+    if (!renderer || typeof renderer !== 'object') {
+      return renderer;
+    }
+
+    const clone = JSON.parse(JSON.stringify(renderer));
+
+    if (clone.symbol) {
+      clone.symbol = this.normalizeLegacySymbol(clone.symbol);
+    }
+
+    if (Array.isArray(clone.uniqueValueInfos)) {
+      clone.uniqueValueInfos = clone.uniqueValueInfos.map((info: any) => ({
+        ...info,
+        symbol: this.normalizeLegacySymbol(info.symbol)
+      }));
+    }
+
+    if (Array.isArray(clone.classBreakInfos)) {
+      clone.classBreakInfos = clone.classBreakInfos.map((info: any) => ({
+        ...info,
+        symbol: this.normalizeLegacySymbol(info.symbol)
+      }));
+    }
+
+    if (clone.type === 'simple') {
+      return clone;
+    }
+
+    if (clone.type === 'uniqueValue') {
+      clone.type = 'unique-value';
+      return clone;
+    }
+
+    if (clone.type === 'classBreaks') {
+      clone.type = 'class-breaks';
+      return clone;
+    }
+
+    return clone;
+  }
+
+  static createSymbolFromJson(symbolJson: any): any {
+    const normalized = this.normalizeLegacySymbol(symbolJson);
+
+    switch (normalized?.type) {
+      case 'simple-marker':
+        return new SimpleMarkerSymbol(normalized);
+
+      case 'simple-line':
+        return new SimpleLineSymbol(normalized);
+
+      case 'simple-fill':
+        return new SimpleFillSymbol(normalized);
+
+      case 'text':
+        return new TextSymbol(normalized);
+
+      default:
+        return normalized;
+    }
+  }
+}
