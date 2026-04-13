@@ -101,10 +101,10 @@ export class ArcGeoJsonLayer extends LitElement {
   private static readonly DEFAULT_SYMBOL_LINE_WIDTH = 1;
   private static readonly DEFAULT_SYMBOL_MARKER_SIZE = 10;
   private featureLayer!: FeatureLayer;
-  // Two separate handle arrays — view events and editor events
   private eventHandles: IHandle[] = [];
   private editorHandles: IHandle[] = [];
   private _editorCreated = false;
+  private _wireEventsRegistered = false;
   private inDrawingMode = false;
   private removingItem = false;
   private blockGeoJsonUpdate = false;
@@ -112,6 +112,7 @@ export class ArcGeoJsonLayer extends LitElement {
   private labelLayer!: GraphicsLayer;
   private _cachedView: MapView | null = null;
   private _webMercatorToGeographic: ((geom: any) => any) | null = null;
+  private _sourceCache: Graphic[] = [];
   private objectIdField = { name: 'OBJECTID', type: 'oid' as const, alias: 'OBJECTID' };
 
   @property({ type: Boolean }) enableUserEdit = false;
@@ -194,7 +195,7 @@ export class ArcGeoJsonLayer extends LitElement {
     const result = JsonUtils.getJsonFor(newLabelJsonArg);
     if (result.error || !result.parsedJson) return;
     const parsedArray = Array.isArray(result.parsedJson) ? result.parsedJson : [result.parsedJson];
-    (this.featureLayer.source as any).forEach((graphic: Graphic) => {
+    this._sourceCache.forEach((graphic: Graphic) => {
       for (const labelClass of parsedArray) {
         const where = labelClass.where;
         if (where) {
@@ -246,6 +247,8 @@ export class ArcGeoJsonLayer extends LitElement {
 
   private async _cleanup() {
     this._editorCreated = false;
+    this._wireEventsRegistered = false;
+    this._sourceCache = [];
     if (this._cachedView) {
       const container = (this._cachedView as any).container as HTMLElement;
       if (container) container.style.cursor = 'default';
@@ -289,6 +292,7 @@ export class ArcGeoJsonLayer extends LitElement {
 
     const featuresToAdd: Graphic[] = [];
     const featuresToUpdate: Graphic[] = [];
+
     for (let i = 0; i < parsed.features.length; i++) {
       const feature = parsed.features[i];
       const uid = (feature.properties as any)?.[this.uniqueIdPropertyName];
@@ -302,14 +306,25 @@ export class ArcGeoJsonLayer extends LitElement {
       }
     }
 
-    const newUniqueIds = parsed.features.map((f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName]);
-    const existingResult = await this.featureLayer.queryFeatures({ where: '1=1', outFields: ['*'], returnGeometry: true });
+    const newUniqueIds = parsed.features.map(
+      (f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName]
+    );
+    const existingResult = await this.featureLayer.queryFeatures({
+      where: '1=1', outFields: ['*'], returnGeometry: true,
+    });
     const featuresToRemove = existingResult.features.filter((g: any) => {
       const uid = g.attributes[this.uniqueIdPropertyName];
       return uid === undefined || !newUniqueIds.includes(uid);
     });
 
-    await this.featureLayer.applyEdits({ addFeatures: featuresToAdd, updateFeatures: featuresToUpdate, deleteFeatures: featuresToRemove });
+    await this.featureLayer.applyEdits({
+      addFeatures: featuresToAdd,
+      updateFeatures: featuresToUpdate,
+      deleteFeatures: featuresToRemove,
+    });
+
+    // Rebuild cache after edits
+    this._rebuildSourceCache();
     this.updateLabelJson(this.labelJson);
 
     const view = await this._getView();
@@ -318,21 +333,59 @@ export class ArcGeoJsonLayer extends LitElement {
     if (popup.features.length === 1) {
       const df = popup.features[0];
       if (df.getLayer?.() !== this.featureLayer) return;
-      const removed = featuresToRemove.some((f: any) => f.attributes[this.uniqueIdPropertyName] === df.attributes[this.uniqueIdPropertyName]);
+      const removed = featuresToRemove.some(
+        (f: any) => f.attributes[this.uniqueIdPropertyName] === df.attributes[this.uniqueIdPropertyName]
+      );
       if (removed) { popup.visible = false; }
       else { popup.features = [df]; popup.location = ArcGeoJsonLayer.getPopupPoint(df.geometry); popup.visible = true; }
     } else {
-      const keep = popup.features.filter((f: any) => !featuresToRemove.some((r: any) => r.attributes[this.uniqueIdPropertyName] === f.attributes[this.uniqueIdPropertyName]));
+      const keep = popup.features.filter((f: any) =>
+        !featuresToRemove.some((r: any) => r.attributes[this.uniqueIdPropertyName] === f.attributes[this.uniqueIdPropertyName])
+      );
       popup.features = keep;
       if (keep.length === 0) popup.visible = false;
     }
   }
 
+  // Rebuild plain JS array cache from featureLayer source
+  private _rebuildSourceCache() {
+    try {
+      const src = (this.featureLayer as any).source;
+      this._sourceCache = src?.toArray ? src.toArray() : Array.from(src ?? []);
+    } catch (_) {
+      this._sourceCache = [];
+    }
+  }
+
+  // Find nearest graphic from cache — pure JS math, zero ArcGIS overhead
+  private _findNearest(mapPoint: any): { graphic: Graphic; dist: number } | null {
+    if (!this._sourceCache.length) return null;
+    let nearestGraphic: Graphic | null = null;
+    let minDist = Infinity;
+    for (const g of this._sourceCache) {
+      const geom = g.geometry as any;
+      if (!geom) continue;
+      const px = geom.x ?? geom.centroid?.x ?? geom.extent?.center?.x;
+      const py = geom.y ?? geom.centroid?.y ?? geom.extent?.center?.y;
+      if (px === undefined || py === undefined) continue;
+      const dx = px - mapPoint.x;
+      const dy = py - mapPoint.y;
+      const dist = dx * dx + dy * dy;
+      if (dist < minDist) { minDist = dist; nearestGraphic = g; }
+    }
+    return nearestGraphic ? { graphic: nearestGraphic, dist: minDist } : null;
+  }
+
   private async createLayer(geojson: string | FeatureCollection): Promise<void> {
     if (!geojson) geojson = { type: 'FeatureCollection', features: [] };
     const parsed = this._parseGeojson(geojson) ?? ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
-    const geomType = parsed.features.length > 0 ? getGeometryType(parsed.features[0].geometry?.type ?? '') : 'point';
-    const graphics: Graphic[] = parsed.features.map((feature: Feature, index: number) => new Graphic(geojsonFeatureToArcGIS(feature, index)));
+    const geomType = parsed.features.length > 0
+      ? getGeometryType(parsed.features[0].geometry?.type ?? '')
+      : 'point';
+
+    const graphics: Graphic[] = parsed.features.map((feature: Feature, index: number) =>
+      new Graphic(geojsonFeatureToArcGIS(feature, index))
+    );
 
     const featureLayer = new FeatureLayer({
       id: (this as any).id || undefined,
@@ -348,9 +401,14 @@ export class ArcGeoJsonLayer extends LitElement {
 
     this.featureLayer = featureLayer;
     this.featureLayer.title = this.name;
+
     const view = await this._getView();
     (view as any).map.add(this.featureLayer);
     await this.featureLayer.when();
+
+    // Build source cache as plain JS array — instant lookup on every click
+    this._rebuildSourceCache();
+    console.log('source cache built:', this._sourceCache.length, 'features');
 
     (view as any).popupEnabled = true;
     (view as any).popup.autoCloseEnabled = false;
@@ -362,7 +420,10 @@ export class ArcGeoJsonLayer extends LitElement {
     }
 
     this.updateLabelJson(this.labelJson);
-    if (this.layerClass) { try { (this.featureLayer as any).set?.('className', this.layerClass); } catch (_) { /**/ } }
+
+    if (this.layerClass) {
+      try { (this.featureLayer as any).set?.('className', this.layerClass); } catch (_) { /**/ }
+    }
 
     if (this.renderer && graphics.length > 0) {
       this._updateRenderer(this.renderer);
@@ -406,7 +467,7 @@ export class ArcGeoJsonLayer extends LitElement {
         outFields: ['*'],
       } as any;
     } else if (parsed.listItem !== undefined || parsed.details !== undefined) {
-      // Legacy ${fieldName} → {fieldName}
+      // Legacy ${fieldName} → {fieldName} for ArcGIS expression syntax
       const titleExpression = parsed.listItem
         ? String(parsed.listItem).replace(/\$\{(\w+)\}/g, '{$1}')
         : this.name ?? 'Feature Info';
@@ -431,22 +492,23 @@ export class ArcGeoJsonLayer extends LitElement {
   private _buildDefaultFieldInfos(): any[] {
     const parsed = this._parseGeojson(this.geojson);
     const props = parsed?.features?.[0]?.properties ?? {};
-    return [{ type: 'fields', fieldInfos: Object.keys(props).map(key => ({ fieldName: key, label: key, visible: true })) }];
+    return [{
+      type: 'fields',
+      fieldInfos: Object.keys(props).map(key => ({ fieldName: key, label: key, visible: true })),
+    }];
   }
 
-  // ── _wireEvents — registered ONCE, never re-registered ───────────────────
-  private _wireEventsRegistered = false;
-
+  // ── _wireEvents — registered ONCE per layer lifecycle ────────────────────
   private _wireEvents(view: MapView) {
-    // GUARD: only register once per layer lifecycle
     if (this._wireEventsRegistered) return;
     this._wireEventsRegistered = true;
 
     let isHovered = false;
     const viewContainer = (view as any).container as HTMLElement;
 
-    // ── CLICK — fully synchronous, zero hitTest ───────────────────────────
+    // ── CLICK — fully synchronous, zero hitTest, zero delay ───────────────
     const clickHandle = (view as any).on('click', (evt: any) => {
+      // Edit mode — popup must NOT appear
       if (this.enableUserEdit || this.inDrawingMode) return;
       if (!this.infoTemplate) return;
 
@@ -456,42 +518,27 @@ export class ArcGeoJsonLayer extends LitElement {
       (view as any).popupEnabled = true;
       popup.autoCloseEnabled = false;
 
-      // Find nearest graphic from source SYNCHRONOUSLY — zero delay
-      const source = (this.featureLayer as any).source;
-      if (!source || source.length === 0) return;
-
-      let nearestGraphic: Graphic | null = null;
-      let minDist = Infinity;
-      source.forEach((g: Graphic) => {
-        const geom = g.geometry as any;
-        if (!geom) return;
-        const px = geom.x ?? geom.centroid?.x ?? geom.extent?.center?.x;
-        const py = geom.y ?? geom.centroid?.y ?? geom.extent?.center?.y;
-        if (px === undefined || py === undefined) return;
-        const dx = px - evt.mapPoint.x;
-        const dy = py - evt.mapPoint.y;
-        const dist = dx * dx + dy * dy;
-        if (dist < minDist) { minDist = dist; nearestGraphic = g; }
-      });
-
-      if (!nearestGraphic) return;
+      const nearest = this._findNearest(evt.mapPoint);
+      if (!nearest) return;
 
       // Distance threshold ~20px in map units
       const resolution = (view as any).resolution ?? 1;
       const threshold = (20 * resolution) ** 2;
-      if (minDist > threshold) return;
+      if (nearest.dist > threshold) return;
 
-      // INSTANT popup — synchronous, no await, no hitTest
-      popup.features = [nearestGraphic];
-      popup.location = ArcGeoJsonLayer.getPopupPoint((nearestGraphic as Graphic).geometry) ?? evt.mapPoint;
+      // INSTANT popup — pure JS, zero async
+      popup.features = [nearest.graphic];
+      popup.location = ArcGeoJsonLayer.getPopupPoint(nearest.graphic.geometry) ?? evt.mapPoint;
       popup.visible = true;
 
-      // Dispatch layerClick
       try {
         if (this._webMercatorToGeographic) {
-          const coords = this._webMercatorToGeographic(evt.mapPoint ?? (nearestGraphic as Graphic).geometry) as any;
+          const coords = this._webMercatorToGeographic(evt.mapPoint ?? nearest.graphic.geometry) as any;
           this.dispatchEvent(new CustomEvent('layerClick', {
-            detail: { coordinates: { latitude: coords?.y, longitude: coords?.x }, attributes: (nearestGraphic as Graphic)?.attributes },
+            detail: {
+              coordinates: { latitude: coords?.y, longitude: coords?.x },
+              attributes: nearest.graphic?.attributes,
+            },
             bubbles: true, composed: true,
           }));
         }
@@ -501,53 +548,44 @@ export class ArcGeoJsonLayer extends LitElement {
 
     // ── DOUBLE-CLICK ───────────────────────────────────────────────────────
     const dblClickHandle = (view as any).on('double-click', (evt: any) => {
-      view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-        const hit = hitResult.results.find((r: any) => r.graphic?.layer === this.featureLayer);
-        if (!hit) return;
-        const graphic = (hit as any).graphic;
-        try {
-          if (this._webMercatorToGeographic) {
-            const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
-            this.dispatchEvent(new CustomEvent('doubleClick', {
-              detail: { coordinates: { latitude: coords?.y, longitude: coords?.x }, attributes: graphic?.attributes },
-              bubbles: true, composed: true,
-            }));
-          }
-        } catch (_) { /**/ }
-      });
+      const nearest = this._findNearest(evt.mapPoint);
+      if (!nearest) return;
+      const resolution = (view as any).resolution ?? 1;
+      const threshold = (20 * resolution) ** 2;
+      if (nearest.dist > threshold) return;
+      try {
+        if (this._webMercatorToGeographic) {
+          const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
+          this.dispatchEvent(new CustomEvent('doubleClick', {
+            detail: {
+              coordinates: { latitude: coords?.y, longitude: coords?.x },
+              attributes: nearest.graphic?.attributes,
+            },
+            bubbles: true, composed: true,
+          }));
+        }
+      } catch (_) { /**/ }
     });
     this.eventHandles.push(dblClickHandle);
 
-    // ── POINTER-MOVE — synchronous cursor, no hitTest ─────────────────────
+    // ── POINTER-MOVE — synchronous cursor, zero hitTest ───────────────────
     const pointerMoveHandle = (view as any).on('pointer-move', (evt: any) => {
-      const source = (this.featureLayer as any).source;
-      if (!source || source.length === 0) return;
       const resolution = (view as any).resolution ?? 1;
       const threshold = (20 * resolution) ** 2;
-      let minDist = Infinity;
-      let nearestGraphic: Graphic | null = null;
-      source.forEach((g: Graphic) => {
-        const geom = g.geometry as any;
-        if (!geom) return;
-        const px = geom.x ?? geom.centroid?.x ?? geom.extent?.center?.x;
-        const py = geom.y ?? geom.centroid?.y ?? geom.extent?.center?.y;
-        if (px === undefined || py === undefined) return;
-        const dx = px - evt.mapPoint.x;
-        const dy = py - evt.mapPoint.y;
-        const dist = dx * dx + dy * dy;
-        if (dist < minDist) { minDist = dist; nearestGraphic = g; }
-      });
-
-      const isNear = minDist < threshold;
+      const nearest = this._findNearest(evt.mapPoint);
+      const isNear = nearest !== null && nearest.dist < threshold;
 
       if (isNear && !isHovered) {
         isHovered = true;
         if (viewContainer) viewContainer.style.cursor = 'pointer';
         try {
-          if (this._webMercatorToGeographic && nearestGraphic) {
+          if (this._webMercatorToGeographic && nearest) {
             const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
             this.dispatchEvent(new CustomEvent('layerMouseOver', {
-              detail: { coordinates: { latitude: coords?.y, longitude: coords?.x }, attributes: (nearestGraphic as Graphic)?.attributes },
+              detail: {
+                coordinates: { latitude: coords?.y, longitude: coords?.x },
+                attributes: nearest.graphic?.attributes,
+              },
               bubbles: true, composed: true,
             }));
           }
@@ -555,7 +593,9 @@ export class ArcGeoJsonLayer extends LitElement {
       } else if (!isNear && isHovered) {
         isHovered = false;
         if (viewContainer) viewContainer.style.cursor = 'default';
-        this.dispatchEvent(new CustomEvent('layerMouseOut', { detail: {}, bubbles: true, composed: true }));
+        this.dispatchEvent(new CustomEvent('layerMouseOut', {
+          detail: {}, bubbles: true, composed: true,
+        }));
       }
     });
     this.eventHandles.push(pointerMoveHandle);
@@ -565,8 +605,6 @@ export class ArcGeoJsonLayer extends LitElement {
   private async createEditor(): Promise<void> {
     console.log('createEditor called');
     if (!this.featureLayer) return;
-
-    // GUARD: only create once
     if (this._editorCreated) {
       console.log('createEditor skipped — already created');
       return;
@@ -602,17 +640,26 @@ export class ArcGeoJsonLayer extends LitElement {
     });
     this.editorHandles.push(updateHandle);
 
-    // Edit click — only fires when enableUserEdit is true
-    const editClickHandle = (view as any).on('click', async (evt: any) => {
+    // ── EDIT CLICK — synchronous nearest lookup, activates editor instantly
+    const editClickHandle = (view as any).on('click', (evt: any) => {
       if (!this.enableUserEdit) return;
       if (this.inDrawingMode) return;
 
-      this.blockGeoJsonUpdate = true;
-      const hitResult = await view.hitTest(evt, { include: this.featureLayer });
-      const hit = hitResult.results.find((r: any) => r.graphic?.layer === this.featureLayer);
-      if (!hit) { this.blockGeoJsonUpdate = false; return; }
+      // Find nearest graphic synchronously — zero hitTest delay
+      const nearest = this._findNearest(evt.mapPoint);
+      if (!nearest) return;
 
-      const graphic = (hit as any).graphic;
+      const resolution = (view as any).resolution ?? 1;
+      const threshold = (20 * resolution) ** 2;
+      if (nearest.dist > threshold) return;
+
+      const graphic = nearest.graphic;
+
+      // Close popup when edit mode is on
+      const popup = (view as any).popup;
+      if (popup) popup.visible = false;
+
+      // Ctrl+click = delete
       if (evt.native?.ctrlKey && this.enableUserEditRemove) {
         this.removingItem = true;
         this.removeFromGeoJson(graphic);
@@ -620,6 +667,8 @@ export class ArcGeoJsonLayer extends LitElement {
         this.removingItem = false;
         return;
       }
+
+      // Activate editor INSTANTLY — synchronous
       this.activateGraphicsEditor(graphic);
     });
     this.editorHandles.push(editClickHandle);
@@ -641,7 +690,6 @@ export class ArcGeoJsonLayer extends LitElement {
     const view = await this._getView();
     await view.when();
     this.graphicsEditor.create(this._getSketchGeometryType(drawGeometryType) as any);
-
     const createHandle = this.graphicsEditor.on('create', async (evt: any) => {
       if (evt.state !== 'complete') return;
       createHandle.remove();
@@ -675,7 +723,10 @@ export class ArcGeoJsonLayer extends LitElement {
 
   async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
     if (!this.featureLayer) return undefined;
-    for (const where of [`${this.uniqueIdPropertyName} = '${uniqueId}'`, `${this.uniqueIdPropertyName} = ${uniqueId}`]) {
+    for (const where of [
+      `${this.uniqueIdPropertyName} = '${uniqueId}'`,
+      `${this.uniqueIdPropertyName} = ${uniqueId}`,
+    ]) {
       try {
         const result = await this.featureLayer.queryFeatures({ where, outFields: ['*'], returnGeometry: true });
         if (result.features.length > 0) return result.features[0];
@@ -711,6 +762,11 @@ export class ArcGeoJsonLayer extends LitElement {
   private updateEditing(enableEdit: boolean) {
     this.enableInfoPopupWindow(!enableEdit);
     if (!enableEdit) this.graphicsEditor?.cancel();
+    // Close popup when edit mode turns on
+    if (enableEdit && this._cachedView) {
+      const popup = (this._cachedView as any).popup;
+      if (popup) popup.visible = false;
+    }
   }
 
   private enableInfoPopupWindow(enable: boolean) {
@@ -721,21 +777,30 @@ export class ArcGeoJsonLayer extends LitElement {
 
   private activateGraphicsEditor(graphic: Graphic) {
     if (!this.graphicsEditor) return;
-    const hasAnyTool = this.enableUserEditMove || this.enableUserEditVertices || this.enableUserEditScaling || this.enableUserEditRotating;
+    const hasAnyTool =
+      this.enableUserEditMove || this.enableUserEditVertices ||
+      this.enableUserEditScaling || this.enableUserEditRotating;
     if (!hasAnyTool) { console.error('Cannot edit. All editing features have been turned off.'); return; }
-    this.graphicsEditor.update([graphic], { tool: this.enableUserEditVertices ? 'reshape' : 'transform' } as any);
+    this.graphicsEditor.update([graphic], {
+      tool: this.enableUserEditVertices ? 'reshape' : 'transform',
+    } as any);
   }
 
   private addToGeoJson(newGraphic: Graphic) {
     this.featureLayer.applyEdits({ addFeatures: [newGraphic] });
     const feature = graphicToGeoJSONFeature(newGraphic, this.uniqueIdPropertyName);
-    const current = this._parseGeojson(this.geojson) ?? ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
+    const current = this._parseGeojson(this.geojson) ??
+      ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
     current.features.push(feature);
     this.blockGeoJsonUpdate = true;
     this.geojson = { ...current };
     this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userDrawItemAdded', { detail: feature, bubbles: true, composed: true }));
-    // DO NOT call createEditor() — just cancel current sketch
+    // Rebuild cache after adding
+    this._rebuildSourceCache();
+    this.dispatchEvent(new CustomEvent('userDrawItemAdded', {
+      detail: feature, bubbles: true, composed: true,
+    }));
+    // DO NOT call createEditor — just cancel current sketch
     this.graphicsEditor?.cancel();
   }
 
@@ -743,40 +808,61 @@ export class ArcGeoJsonLayer extends LitElement {
     this.featureLayer.applyEdits({ deleteFeatures: [graphicToRemove] });
     const feature = graphicToGeoJSONFeature(graphicToRemove, this.uniqueIdPropertyName);
     const uid = (graphicToRemove.attributes ?? {})[this.uniqueIdPropertyName];
-    const current = this._parseGeojson(this.geojson) ?? ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
-    const idx = current.features.findIndex((f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid);
+    const current = this._parseGeojson(this.geojson) ??
+      ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
+    const idx = current.features.findIndex(
+      (f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid
+    );
     if (idx !== -1) current.features.splice(idx, 1);
     this.blockGeoJsonUpdate = true;
     this.geojson = { ...current };
     this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userEditItemRemoved', { detail: feature, bubbles: true, composed: true }));
+    // Rebuild cache after removing
+    this._rebuildSourceCache();
+    this.dispatchEvent(new CustomEvent('userEditItemRemoved', {
+      detail: feature, bubbles: true, composed: true,
+    }));
   }
 
   private updateGeoJsonWithChanges(graphicToUpdate: Graphic) {
     this.featureLayer.applyEdits({ updateFeatures: [graphicToUpdate] });
     const feature = graphicToGeoJSONFeature(graphicToUpdate, this.uniqueIdPropertyName);
     const uid = (graphicToUpdate.attributes ?? {})[this.uniqueIdPropertyName];
-    const current = this._parseGeojson(this.geojson) ?? ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
-    const idx = current.features.findIndex((f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid);
+    const current = this._parseGeojson(this.geojson) ??
+      ({ type: 'FeatureCollection', features: [] } as FeatureCollection);
+    const idx = current.features.findIndex(
+      (f: Feature) => (f.properties as any)?.[this.uniqueIdPropertyName] === uid
+    );
     if (idx !== -1) current.features[idx] = feature;
     this.blockGeoJsonUpdate = true;
     this.geojson = { ...current };
     this.blockGeoJsonUpdate = false;
-    this.dispatchEvent(new CustomEvent('userEditItemUpdated', { detail: feature, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('userEditItemUpdated', {
+      detail: feature, bubbles: true, composed: true,
+    }));
   }
 
   private _parseGeojson(geojson: string | FeatureCollection): FeatureCollection | null {
     if (!geojson) return null;
-    if (typeof geojson === 'string') { try { return JSON.parse(geojson) as FeatureCollection; } catch { return null; } }
+    if (typeof geojson === 'string') {
+      try { return JSON.parse(geojson) as FeatureCollection; } catch { return null; }
+    }
     return geojson;
   }
 
   private _updateRenderer(newRenderer: any) {
     if (!this.featureLayer) return;
-    if (!newRenderer) { this.featureLayer.renderer = { type: 'simple', symbol: this._getDefaultSymbol(this.featureLayer.geometryType) } as any; return; }
+    if (!newRenderer) {
+      this.featureLayer.renderer = { type: 'simple', symbol: this._getDefaultSymbol(this.featureLayer.geometryType) } as any;
+      return;
+    }
     try {
       const rendererJson = typeof newRenderer === 'string' ? JSON.parse(newRenderer) : newRenderer;
-      this.featureLayer.renderer = { type: rendererJson.type ?? 'simple', symbol: rendererJson.symbol ?? this._getDefaultSymbol(this.featureLayer.geometryType), ...rendererJson } as any;
+      this.featureLayer.renderer = {
+        type: rendererJson.type ?? 'simple',
+        symbol: rendererJson.symbol ?? this._getDefaultSymbol(this.featureLayer.geometryType),
+        ...rendererJson,
+      } as any;
     } catch {
       this.featureLayer.renderer = { type: 'simple', symbol: this._getDefaultSymbol(this.featureLayer.geometryType) } as any;
     }
