@@ -1,145 +1,108 @@
-private _wireEvents(view: MapView) {
-  let isHovered = false;
-  const viewContainer = (view as any).container as HTMLElement;
-
-  // ── CLICK ──────────────────────────────────────────────────────────────
-  const clickHandle = (view as any).on('click', (evt: any) => {
-    if (this.enableUserEdit || this.inDrawingMode) return;
-    if (!this.infoTemplate) return;
-
-    const popup = (view as any).popup;
-    if (!popup) return;
-
-    (view as any).popupEnabled = true;
-    popup.autoCloseEnabled = false;
-
-    // STEP 1: Open popup INSTANTLY with real template — no hitTest needed yet
-    // Build content directly from featureLayer source at click point
-    // Find nearest feature synchronously from cached source
-    const source = (this.featureLayer as any).source;
-    let nearestGraphic: Graphic | null = null;
-
-    if (source && source.length > 0) {
-      // Find closest feature to click point synchronously
-      let minDist = Infinity;
-      source.forEach((g: Graphic) => {
-        const geom = g.geometry as any;
-        if (!geom) return;
-        const px = geom.x ?? geom.centroid?.x ?? geom.extent?.center?.x;
-        const py = geom.y ?? geom.centroid?.y ?? geom.extent?.center?.y;
-        if (px === undefined || py === undefined) return;
-        const dx = px - evt.mapPoint.x;
-        const dy = py - evt.mapPoint.y;
-        const dist = dx * dx + dy * dy;
-        if (dist < minDist) {
-          minDist = dist;
-          nearestGraphic = g;
-        }
-      });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>arc-geojson-layer test</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
     }
-
-    if (nearestGraphic) {
-      // Show popup INSTANTLY with nearest feature — zero delay
-      popup.features = [nearestGraphic];
-      popup.location = ArcGeoJsonLayer.getPopupPoint(
-        (nearestGraphic as Graphic).geometry
-      ) ?? evt.mapPoint;
-      popup.visible = true;
-    } else {
-      // No features in source yet — show at click point
-      popup.location = evt.mapPoint;
-      popup.visible = true;
+    arc-map {
+      display: block;
+      width: 100%;
+      height: 100vh;
     }
+  </style>
+</head>
+<body>
+  <arc-map
+    id="map"
+    center='{"longitude": -80.87, "latitude": 35.215}'
+    basemap="dark-gray-vector"
+    zoom="4"
+  >
 
-    // STEP 2: hitTest in background to confirm exact hit
-    // If user clicked on empty area, close popup
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results[0] as any;
-
-      if (!hit?.graphic) {
-        // User clicked empty area — close popup
-        popup.visible = false;
-        return;
-      }
-
-      const graphic: Graphic = hit.graphic;
-
-      // Update with exact hit graphic — may differ from nearest
-      popup.features = [graphic];
-      popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
-      popup.visible = true;
-
-      // Dispatch layerClick
-      try {
-        if (this._webMercatorToGeographic) {
-          const coords = this._webMercatorToGeographic(
-            evt.mapPoint ?? graphic.geometry
-          ) as any;
-          this.dispatchEvent(new CustomEvent('layerClick', {
-            detail: {
-              coordinates: { latitude: coords?.y, longitude: coords?.x },
-              attributes: graphic?.attributes,
+    <arc-geojson-layer
+      id="testLayer"
+      name="Test Layer"
+      unique-id-property-name="id"
+      geojson='{
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-80.87, 35.215]
             },
-            bubbles: true, composed: true,
-          }));
-        }
-      } catch (_) { /**/ }
-    });
-  });
-  this.eventHandles.push(clickHandle);
-
-  // ── DOUBLE-CLICK ───────────────────────────────────────────────────────
-  const dblClickHandle = (view as any).on('double-click', (evt: any) => {
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results.find(
-        (r: any) => r.graphic?.layer === this.featureLayer
-      );
-      if (!hit) return;
-      const graphic = (hit as any).graphic;
-      try {
-        if (this._webMercatorToGeographic) {
-          const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
-          this.dispatchEvent(new CustomEvent('doubleClick', {
-            detail: {
-              coordinates: { latitude: coords?.y, longitude: coords?.x },
-              attributes: graphic?.attributes,
+            "properties": {
+              "id": "1",
+              "TestField": "Value A",
+              "OtherField": "Other A",
+              "listDescription": "Description A"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-90.0, 38.5]
             },
-            bubbles: true, composed: true,
-          }));
-        }
-      } catch (_) { /**/ }
-    });
-  });
-  this.eventHandles.push(dblClickHandle);
-
-  // ── POINTER-MOVE ───────────────────────────────────────────────────────
-  const pointerMoveHandle = (view as any).on('pointer-move', (evt: any) => {
-    view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
-      const hit = hitResult.results[0] as any;
-
-      if (hit?.graphic && !isHovered) {
-        isHovered = true;
-        if (viewContainer) viewContainer.style.cursor = 'pointer';
-        try {
-          if (this._webMercatorToGeographic) {
-            const coords = this._webMercatorToGeographic(evt.mapPoint) as any;
-            this.dispatchEvent(new CustomEvent('layerMouseOver', {
-              detail: {
-                coordinates: { latitude: coords?.y, longitude: coords?.x },
-                attributes: hit.graphic?.attributes,
-              },
-              bubbles: true, composed: true,
-            }));
+            "properties": {
+              "id": "2",
+              "TestField": "Value B",
+              "OtherField": "Other B",
+              "listDescription": "Description B"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-73.5, 40.7]
+            },
+            "properties": {
+              "id": "3",
+              "TestField": "Value C",
+              "OtherField": "Other C",
+              "listDescription": "Description C"
+            }
           }
-        } catch (_) { /**/ }
-      } else if (!hit?.graphic && isHovered) {
-        isHovered = false;
-        if (viewContainer) viewContainer.style.cursor = 'default';
-        this.dispatchEvent(new CustomEvent('layerMouseOut', {
-          detail: {}, bubbles: true, composed: true,
-        }));
-      }
+        ]
+      }'
+      info-template='{
+        "listItem": "${listDescription}",
+        "details": "<p><b>Test Field:</b> ${TestField}</p><p><b>Other Field:</b> ${OtherField}</p>"
+      }'
+    ></arc-geojson-layer>
+
+  </arc-map>
+
+  <script type="module" src="./index.ts"></script>
+
+  <script>
+    // Test event listeners
+    const layer = document.getElementById('testLayer');
+
+    layer.addEventListener('layerClick', (e) => {
+      console.log('layerClick fired:', e.detail);
     });
-  });
-  this.eventHandles.push(pointerMoveHandle);
-}
+
+    layer.addEventListener('layerMouseOver', (e) => {
+      console.log('layerMouseOver fired:', e.detail);
+    });
+
+    layer.addEventListener('layerMouseOut', (e) => {
+      console.log('layerMouseOut fired');
+    });
+
+    layer.addEventListener('doubleClick', (e) => {
+      console.log('doubleClick fired:', e.detail);
+    });
+  </script>
+</body>
+</html>
