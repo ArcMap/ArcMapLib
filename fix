@@ -1,62 +1,16 @@
-private getUpdateTool(): 'move' | 'transform' | 'reshape' | null {
-  if (
-    this.enableUserEditScaling ||
-    this.enableUserEditRotating ||
-    this.enableUserEditUniformScaling
-  ) {
-    return 'transform';
+private normalizeFeatureLayerGeometryType(
+  geometryType: string
+): 'point' | 'multipoint' | 'polyline' | 'polygon' {
+  switch (geometryType) {
+    case 'esriGeometryPoint':
+      return 'point';
+    case 'esriGeometryMultipoint':
+      return 'multipoint';
+    case 'esriGeometryPolyline':
+      return 'polyline';
+    case 'esriGeometryPolygon':
+      return 'polygon';
+    default:
+      return geometryType as 'point' | 'multipoint' | 'polyline' | 'polygon';
   }
-
-  if (
-    this.enableUserEditVertices ||
-    this.enableUserEditAddVertices ||
-    this.enableUserEditDeleteVertices
-  ) {
-    return 'reshape';
-  }
-
-  if (this.enableUserEditMove) {
-    return 'move';
-  }
-
-  return null;
-}
-
-private wireEditorEvents(): void {
-  if (!this.graphicsEditor) {
-    return;
-  }
-
-  this.graphicsEditor.on('update', async (event) => {
-    if (event.state !== 'complete' || !event.graphics?.length) {
-      return;
-    }
-
-    const editedGraphic = event.graphics[0];
-    const uniqueId = editedGraphic.attributes?.[this.uniqueIdPropertyName];
-
-    const originalGraphic = await this.findFeatureByUniqueId(uniqueId);
-    if (!originalGraphic) {
-      return;
-    }
-
-    const updatedGraphic = originalGraphic.clone();
-    updatedGraphic.geometry = editedGraphic.geometry;
-    updatedGraphic.attributes = {
-      ...originalGraphic.attributes,
-      ...editedGraphic.attributes
-    };
-
-    await this.featureLayer.applyEdits({
-      updateFeatures: [updatedGraphic]
-    });
-
-    this.editLayer.removeAll();
-    this.refreshLabels();
-    this.enableInfoPopupWindow(true);
-  });
-}
-
-if (this.view?.map && this.editLayer) {
-  this.view.map.remove(this.editLayer);
 }
