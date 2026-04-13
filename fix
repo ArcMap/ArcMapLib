@@ -1,9 +1,51 @@
-private determineExistingGeometryType(): string | undefined {
-  const source = this.featureLayer?.source;
-  if (!source || source.length === 0) {
-    return undefined;
+static getLabelJson(labelJson: any): any[] {
+  if (!labelJson) {
+    return [];
   }
 
-  const firstGraphic = source.toArray()[0];
-  return firstGraphic?.geometry?.type;
+  // If already object → return
+  if (typeof labelJson === 'object') {
+    return Array.isArray(labelJson) ? labelJson : [labelJson];
+  }
+
+  // If string → parse safely
+  if (typeof labelJson === 'string') {
+    const trimmed = labelJson.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch (e) {
+      console.warn('Invalid label JSON, fallback to default', labelJson);
+      return [];
+    }
+  }
+
+  return [];
+}
+
+const labelJson = JsonUtils.getLabelJson(this.labelJson);
+
+if (!labelJson.length) {
+  this.featureLayer.labelingInfo = [];
+  this.featureLayer.labelsVisible = false;
+  return;
+}
+
+this.featureLayer.labelingInfo = labelJson;
+this.featureLayer.labelsVisible = true;
+
+
+
+
+if (typeof labelJson === 'string' && !labelJson.trim().startsWith('{')) {
+  return [{
+    labelExpressionInfo: {
+      expression: `$feature.${labelJson}`
+    }
+  }];
 }
