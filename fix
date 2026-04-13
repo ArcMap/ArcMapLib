@@ -1,55 +1,14 @@
-private createLayer(geojson: string | FeatureCollection): void {
-  const parsedGeojson = geojson ?? {
-    type: 'FeatureCollection',
-    features: []
-  };
-
-  const fsInfo = this.getArcGISJson(parsedGeojson);
-  if (!fsInfo) {
-    console.error('Unable to create GeoJSON layer: invalid data');
-    return;
-  }
-
-  const fields = [
-    new Field({
-      name: 'OBJECTID',
-      alias: 'OBJECTID',
-      type: 'oid'
-    }),
-    new Field({
-      name: this.uniqueIdPropertyName,
-      alias: this.uniqueIdPropertyName,
-      type: 'string'
-    }),
-    new Field({
-      name: 'LABEL',
-      alias: 'LABEL',
-      type: 'string'
-    })
-  ];
-
-  this.featureLayer = new FeatureLayer({
-    id: this.id || 'arc-geojson-layer',
-    title: this.name || this.id || 'Arc GeoJSON Layer',
-    source: fsInfo.graphics,
-    objectIdField: 'OBJECTID',
-    fields,
-    geometryType: fsInfo.geometryType,
-    spatialReference: { wkid: 4326 },
-    popupEnabled: true
+private async createEditor(): Promise<void> {
+  this.graphicsEditor = new SketchViewModel({
+    view: this.view,
+    layer: this.editLayer,
+    defaultUpdateOptions: {
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      multipleSelectionEnabled: false,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      toggleToolOnClick: false
+    },
+    updateOnGraphicClick: false
   });
-
-  if (this.view?.map) {
-    this.view.map.add(this.featureLayer);
-  }
-
-  this.updateRenderer(this.renderer);
-  this.refreshLabels();
-  this.updateInfoTemplate(this.infoTemplate);
-  this.updateLayerClass(this.layerclass);
-  this.createEditor();
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
 }
