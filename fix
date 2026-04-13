@@ -1,53 +1,38 @@
-private isExtentObject(value: unknown): value is UpMapExtent {
-  return !!value &&
-    typeof value === 'object' &&
-    'leftLongitude' in value &&
-    'rightLongitude' in value &&
-    'topLatitude' in value &&
-    'bottomLatitude' in value;
-}
+static updateRenderer(newRenderer: any, featureLayer: any): void {
+  if (!newRenderer) {
+    return;
+  }
 
+  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
 
-render() {
-  const centerValue = this.center;
-  const parsedCenter =
-    centerValue &&
-    typeof centerValue === 'object' &&
-    'longitude' in centerValue &&
-    'latitude' in centerValue &&
-    typeof centerValue.longitude === 'number' &&
-    typeof centerValue.latitude === 'number'
-      ? [centerValue.longitude, centerValue.latitude]
-      : undefined;
+  if (rendererParseResult.error) {
+    console.warn('Invalid renderer JSON', rendererParseResult.error);
+    return;
+  }
 
-  const extentValue = this.extent;
-  const parsedExtent =
-    this.isExtentObject(extentValue) &&
-    typeof extentValue.leftLongitude === 'number' &&
-    typeof extentValue.rightLongitude === 'number' &&
-    typeof extentValue.topLatitude === 'number' &&
-    typeof extentValue.bottomLatitude === 'number'
-      ? {
-          xmin: extentValue.leftLongitude,
-          ymin: extentValue.bottomLatitude,
-          xmax: extentValue.rightLongitude,
-          ymax: extentValue.topLatitude,
-          spatialReference: { wkid: 4326 }
-        }
-      : undefined;
+  const parsed = JsonUtils.normalizeLegacyRendererJson(
+    rendererParseResult.parsedJson
+  );
 
-  return html`
-    <div class="map-wrapper">
-      <arcgis-map
-        class="map"
-        .basemap=${this.basemap ?? 'gray'}
-        .extent=${parsedExtent}
-        .center=${!parsedExtent ? parsedCenter : undefined}
-        .zoom=${!parsedExtent ? this.zoom : undefined}
-        .maxZoom=${this.maxZoom}
-        .minZoom=${this.minZoom}
-      >
-      </arcgis-map>
-    </div>
-  `;
+  let renderer: any;
+
+  switch (parsed.type) {
+    case 'simple':
+      renderer = new SimpleRenderer(parsed);
+      break;
+
+    case 'unique-value':
+      renderer = new UniqueValueRenderer(parsed);
+      break;
+
+    case 'class-breaks':
+      renderer = new ClassBreaksRenderer(parsed);
+      break;
+
+    default:
+      console.error('Unsupported renderer type:', parsed.type);
+      return;
+  }
+
+  featureLayer.renderer = renderer;
 }
