@@ -1,0 +1,82 @@
+const clickHandle = (view as any).on('click', async (evt: any) => {
+
+  // Step 1: Use hitTest but don't await it for popup
+  // Instead fire hitTest and show popup as soon as we get first result
+  view.hitTest(evt, { include: [this.featureLayer] }).then((hitResult: any) => {
+    const hit = hitResult.results[0] as any;
+    if (!hit?.graphic) return;
+
+    const graphic: Graphic = hit.graphic;
+
+    // Open popup immediately when hitTest resolves
+    if (this.infoTemplate && !this.enableUserEdit && !this.inDrawingMode) {
+      const popup = (view as any).popup;
+      if (popup) {
+        popup.features = [graphic];
+        popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
+        popup.visible = true;
+      }
+    }
+
+    // Dispatch event
+    try {
+      if (webMercatorToGeographic) {
+        const coords = webMercatorToGeographic(evt.mapPoint ?? graphic.geometry) as any;
+        this.dispatchEvent(new CustomEvent('layerClick', {
+          detail: {
+            coordinates: { latitude: coords?.y, longitude: coords?.x },
+            attributes: graphic?.attributes,
+          },
+          bubbles: true, composed: true,
+        }));
+      }
+    } catch (_) { /**/ }
+  });
+});
+
+
+// Add this right after view is ready in createLayer
+await this.featureLayer.when();
+// Tell the view to use a smaller tolerance for hit testing
+(view as any).hitTestOptions = {
+  includeByGeoViewport: false
+};
+
+
+view.hitTest(evt, {
+  include: [this.featureLayer],
+  mapViewHitTestOptions: { maxSearchDistance: 6 } // default is 13px — smaller = faster
+} as any).then((hitResult: any) => {
+
+
+let pointerMoveThrottle: any = null;
+
+const pointerMoveHandle = (view as any).on('pointer-move', (evt: any) => {
+  if (pointerMoveThrottle) return; // skip if already waiting
+  pointerMoveThrottle = setTimeout(async () => {
+    pointerMoveThrottle = null;
+    const hitResult = await view.hitTest(evt, { include: [this.featureLayer] });
+    const hit = hitResult.results.find((r: any) => r.graphic?.layer === this.featureLayer);
+    if (hit && !isHovered) {
+      isHovered = true;
+      const graphic = (hit as any).graphic;
+      try {
+        if (webMercatorToGeographic) {
+          const coords = webMercatorToGeographic(evt.mapPoint) as any;
+          this.dispatchEvent(new CustomEvent('layerMouseOver', {
+            detail: {
+              coordinates: { latitude: coords?.y, longitude: coords?.x },
+              attributes: graphic?.attributes,
+            },
+            bubbles: true, composed: true,
+          }));
+        }
+      } catch (_) { /**/ }
+    } else if (!hit && isHovered) {
+      isHovered = false;
+      this.dispatchEvent(new CustomEvent('layerMouseOut', {
+        detail: {}, bubbles: true, composed: true,
+      }));
+    }
+  }, 80); // 80ms throttle — smooth enough, won't compete with click
+});
