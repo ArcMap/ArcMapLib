@@ -1,16 +1,46 @@
-private normalizeFeatureLayerGeometryType(
-  geometryType: string
-): 'point' | 'multipoint' | 'polyline' | 'polygon' {
-  switch (geometryType) {
-    case 'esriGeometryPoint':
-      return 'point';
-    case 'esriGeometryMultipoint':
-      return 'multipoint';
-    case 'esriGeometryPolyline':
-      return 'polyline';
-    case 'esriGeometryPolygon':
-      return 'polygon';
-    default:
-      return geometryType as 'point' | 'multipoint' | 'polyline' | 'polygon';
+private getArcGISJson(
+  geojson: string | FeatureCollection
+): {
+  graphics: Graphic[];
+  geometryType: 'point' | 'multipoint' | 'polyline' | 'polygon';
+} | null {
+  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
+
+  if (geojsonParseResult.error) {
+    console.error('Unable to parse geojson string', geojsonParseResult.error);
+    return null;
   }
+
+  const parsedGeojson = geojsonParseResult.parsedJson as FeatureCollection;
+
+  if (!parsedGeojson || parsedGeojson.type !== 'FeatureCollection') {
+    console.error('GeoJSON must be a FeatureCollection.');
+    return null;
+  }
+
+  const graphics: Graphic[] = [];
+  let geometryType: 'point' | 'multipoint' | 'polyline' | 'polygon' | undefined;
+
+  parsedGeojson.features.forEach((feature: Feature, index: number) => {
+    const graphic = this.geojsonFeatureToGraphic(feature, index);
+
+    if (!graphic || !graphic.geometry) {
+      return;
+    }
+
+    if (geometryType === undefined) {
+      geometryType = graphic.geometry.type as
+        | 'point'
+        | 'multipoint'
+        | 'polyline'
+        | 'polygon';
+    }
+
+    graphics.push(graphic);
+  });
+
+  return {
+    graphics,
+    geometryType: geometryType ?? 'polygon'
+  };
 }
