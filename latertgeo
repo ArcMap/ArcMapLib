@@ -5,7 +5,11 @@ const clickHandle = (view as any).on('click', (evt: any) => {
   const popup = (view as any).popup;
   if (!popup) return;
 
-  // INSTANT open at click point
+  // Force enable popup on the view — arc-map may have disabled it
+  (view as any).popupEnabled = true;
+  popup.autoCloseEnabled = false;
+
+  // INSTANT open
   popup.location = evt.mapPoint;
   popup.visible = true;
 
@@ -19,40 +23,9 @@ const clickHandle = (view as any).on('click', (evt: any) => {
 
     const graphic: Graphic = hit.graphic;
 
-    console.log('hit graphic:', graphic);
-    console.log('featureLayer popupTemplate:', this.featureLayer.popupTemplate);
-    console.log('popup object:', popup);
-
-    // Try all three ways to open popup — one of them will work
-    try {
-      // Method 1: direct assignment
-      popup.features = [graphic];
-      popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
-      popup.visible = true;
-      console.log('Method 1 done, popup.visible:', popup.visible);
-    } catch (e1) {
-      console.error('Method 1 failed:', e1);
-      try {
-        // Method 2: open with object
-        popup.open({
-          features: [graphic],
-          location: ArcGeoJsonLayer.getPopupPoint(graphic.geometry),
-        });
-        console.log('Method 2 done');
-      } catch (e2) {
-        console.error('Method 2 failed:', e2);
-        try {
-          // Method 3: fetchFeatures approach
-          popup.open({
-            location: evt.mapPoint,
-            fetchFeatures: true,
-          });
-          console.log('Method 3 done');
-        } catch (e3) {
-          console.error('Method 3 failed:', e3);
-        }
-      }
-    }
+    popup.features = [graphic];
+    popup.location = ArcGeoJsonLayer.getPopupPoint(graphic.geometry);
+    popup.visible = true;
 
     // Dispatch layerClick
     try {
