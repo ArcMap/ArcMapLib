@@ -1,38 +1,60 @@
-static updateRenderer(newRenderer: any, featureLayer: any): void {
-  if (!newRenderer) {
+static getLabelJson(label: any): any[] {
+  if (!label) {
+    return [];
+  }
+
+  let parsed: any;
+
+  try {
+    // If already object → use directly
+    if (typeof label === 'object') {
+      parsed = label;
+    }
+    // If string → try parse
+    else if (typeof label === 'string' && label.trim() !== '') {
+      parsed = JSON.parse(label);
+    } else {
+      console.warn('Empty label input');
+      return [];
+    }
+  } catch (e) {
+    console.warn('Invalid label JSON, skipping:', label);
+    return [];
+  }
+
+  // Ensure array
+  const labels = Array.isArray(parsed) ? parsed : [parsed];
+
+  return labels.map((l) => {
+    const symbol = l.symbol || {};
+
+    return {
+      labelExpressionInfo: {
+        expression: l.expression || `$feature.${l.field || 'OBJECTID'}`
+      },
+
+      symbol: {
+        type: "text",  // ✅ REQUIRED for ArcGIS
+        color: symbol.color || "black",
+        haloColor: symbol.haloColor || "white",
+        haloSize: symbol.haloSize || 1,
+        font: {
+          size: symbol.font?.size || 12,
+          family: symbol.font?.family || "Arial",
+          weight: symbol.font?.weight || "normal"
+        }
+      }
+    };
+  });
+}
+
+private refreshLabels(): void {
+  if (!this.labelLayer || !this.featureLayer) {
     return;
   }
 
-  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+  const labelJson = JsonUtils.getLabelJson(this.label);
 
-  if (rendererParseResult.error) {
-    console.warn('Invalid renderer JSON', rendererParseResult.error);
-    return;
-  }
-
-  const parsed = JsonUtils.normalizeLegacyRendererJson(
-    rendererParseResult.parsedJson
-  );
-
-  let renderer: any;
-
-  switch (parsed.type) {
-    case 'simple':
-      renderer = new SimpleRenderer(parsed);
-      break;
-
-    case 'unique-value':
-      renderer = new UniqueValueRenderer(parsed);
-      break;
-
-    case 'class-breaks':
-      renderer = new ClassBreaksRenderer(parsed);
-      break;
-
-    default:
-      console.error('Unsupported renderer type:', parsed.type);
-      return;
-  }
-
-  featureLayer.renderer = renderer;
+  // 🔴 FIX: Apply labelingInfo to FEATURE layer, not GraphicsLayer
+  this.featureLayer.labelingInfo = labelJson;
 }
