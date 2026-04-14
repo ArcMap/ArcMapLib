@@ -1,42 +1,15 @@
-const map = this.view?.map;
-
-if (!map) {
-  console.error('createLayer blocked: map not ready');
-  return;
-}
-
-if (!(this.featureLayer instanceof GraphicsLayer)) {
-  console.error('createLayer blocked: featureLayer is not an instance of GraphicsLayer');
-  return;
-}
-
-if (!(this.labelLayer instanceof GraphicsLayer)) {
-  console.error('createLayer blocked: labelLayer is not an instance of GraphicsLayer');
-  return;
-}
-
-try {
-  if (!this.featureLayer.parent) {
-    console.log('adding featureLayer to map', this.featureLayer);
-    map.add(this.featureLayer);
-    console.log('featureLayer added successfully');
-  } else {
-    console.log('featureLayer already has parent', this.featureLayer.parent);
-  }
-} catch (error) {
-  console.error('featureLayer add failed', error, this.featureLayer);
-  return;
-}
-
-try {
-  if (!this.labelLayer.parent) {
-    console.log('adding labelLayer to map', this.labelLayer);
-    map.add(this.labelLayer);
-    console.log('labelLayer added successfully');
-  } else {
-    console.log('labelLayer already has parent', this.labelLayer.parent);
-  }
-} catch (error) {
-  console.error('labelLayer add failed', error, this.labelLayer);
-  return;
+// Mock HTMLElement for Node environment
+if (typeof HTMLElement === 'undefined') {
+  (global as any).HTMLElement = class HTMLElement {
+    closest() { return null; }
+    querySelector() { return null; }
+    querySelectorAll() { return []; }
+    addEventListener() {}
+    removeEventListener() {}
+    dispatchEvent() { return true; }
+    setAttribute() {}
+    getAttribute() { return null; }
+    hasAttribute() { return false; }
+    removeAttribute() {}
+  };
 }
