@@ -1,505 +1,190 @@
-/**
- * @jest-environment node
- */
+private bindEditorEvents(): void {
+  if (!this.graphicsEditor) {
+    return;
+  }
 
-// ─── Mock LitElement BEFORE imports ──────────────────────────────
-jest.mock('lit', () => ({
-  LitElement: class MockLitElement {
-    updateComplete = Promise.resolve();
-    requestUpdate = jest.fn();
-    connectedCallback() {}
-    disconnectedCallback() {}
-    static get properties() { return {}; }
-    static get styles() { return ''; }
-  },
-  html: (s: TemplateStringsArray, ...v: any[]) => ({ s, v }),
-  css:  (s: TemplateStringsArray, ...v: any[]) => ''
-}));
-
-jest.mock('lit/decorators.js', () => ({
-  customElement: () => () => {},
-  property:      () => () => {},
-  query:         () => () => {}
-}));
-
-// ─── Mock ArcGIS ─────────────────────────────────────────────────
-jest.mock('@arcgis/core/views/MapView', () => ({}));
-
-const mockWatchHandle = { remove: jest.fn() };
-
-jest.mock('@arcgis/core/core/reactiveUtils', () => ({
-  watch: jest.fn().mockReturnValue({ remove: jest.fn() })
-}));
-
-// ─── Mock arc-map (replaces up-map) ──────────────────────────────
-jest.mock('../map', () => ({
-  UpMap: class MockArcMap {}
-}));
-
-// ─── Node globals ────────────────────────────────────────────────
-(global as any).customElements = {
-  whenDefined: jest.fn().mockResolvedValue(undefined),
-  define:      jest.fn(),
-  get:         jest.fn()
-};
-
-// ─── Import after mocks ───────────────────────────────────────────
-import { UpLayerList } from './layer-list';
-
-// ─── Layer factories (matching your exact console output) ─────────
-
-// type: "graphics", title: null  ← the SDK internal one we saw
-const makeInternalGraphicsLayer = () => ({
-  type: 'graphics',
-  title: null,
-  listMode: 'show'
-});
-
-// type: "feature", title: "Point" ← your point layer
-const makeFeatureLayer = (title = 'Point') => ({
-  type: 'feature',
-  title,
-  listMode: 'show'
-});
-
-// type: "graphics", title set ← user added graphics layer
-const makeUserGraphicsLayer = (title = 'My Graphics') => ({
-  type: 'graphics',
-  title,
-  listMode: 'show'
-});
-
-const makeVectorTileLayer = () => ({
-  type: 'vector-tile',
-  title: 'World Basemap',
-  listMode: 'show'
-});
-
-// ─── View factory ────────────────────────────────────────────────
-const makeMockView = (layers: any[] = []) => ({
-  when: jest.fn().mockResolvedValue(undefined),
-  map: {
-    allLayers: {
-      forEach: (cb: (l: any) => void) => layers.forEach(cb),
-      get length() { return layers.length; }
-    },
-    basemap: {
-      baseLayers:      { includes: jest.fn().mockReturnValue(false) },
-      referenceLayers: { includes: jest.fn().mockReturnValue(false) }
+  this.graphicsEditor.on('create', (event: any): void => {
+    if (event.state === 'start') {
+      this.inDrawingMode = true;
+      this.editorActive = true;
+      this.closePopup();
+      return;
     }
+
+    if (event.state === 'complete') {
+      if (event.graphic) {
+        this.addToGeojson(event.graphic as Graphic);
+      }
+
+      this.inDrawingMode = false;
+      this.editorActive = false;
+
+      this.graphicsEditor?.cancel();
+
+      this.ignoreNextMapClick = true;
+      setTimeout(() => {
+        this.ignoreNextMapClick = false;
+      }, 150);
+
+      return;
+    }
+
+    if (event.state === 'cancel') {
+      this.inDrawingMode = false;
+      this.editorActive = false;
+    }
+  });
+
+  this.graphicsEditor.on('update', (event: any): void => {
+    if (event.state === 'start') {
+      this.editorActive = true;
+      this.closePopup();
+      return;
+    }
+
+    if (event.state === 'complete') {
+      if (Array.isArray(event.graphics)) {
+        event.graphics.forEach((graphic: Graphic): void => {
+          this.updateGeojsonWithChanges(graphic);
+        });
+      }
+
+      this.editorActive = false;
+      this.graphicsEditor?.cancel();
+
+      this.ignoreNextMapClick = true;
+      setTimeout(() => {
+        this.ignoreNextMapClick = false;
+      }, 150);
+
+      return;
+    }
+
+    if (event.state === 'cancel') {
+      this.editorActive = false;
+    }
+  });
+
+  this.graphicsEditor.on('delete', (event: any): void => {
+    if (Array.isArray(event.graphics)) {
+      event.graphics.forEach((graphic: Graphic): void => {
+        this.removeFromGeojson(graphic);
+      });
+    }
+
+    this.editorActive = false;
+    this.inDrawingMode = false;
+    this.graphicsEditor?.cancel();
+
+    this.ignoreNextMapClick = true;
+    setTimeout(() => {
+      this.ignoreNextMapClick = false;
+    }, 150);
+  });
+}
+
+
+
+this.clickHandle = this.view.on('click', async (evt: any): Promise<void> => {
+  if (this.ignoreNextMapClick) {
+    return;
+  }
+
+  const graphic = await this.getGraphicFromViewEvent(evt);
+  if (!graphic) {
+    return;
+  }
+
+  this.emitLayerEvent('layerClick', this.buildLayerMouseEvent(graphic, evt));
+
+  const ctrlKey = Boolean(evt?.native?.ctrlKey || evt?.native?.metaKey);
+
+  if (this.enableUserEdit) {
+    this.closePopup();
+
+    if (ctrlKey && this.enableUserEditRemove) {
+      this.removeFromGeojson(graphic);
+      return;
+    }
+
+    await this.activateGraphicsEditor(graphic);
+    return;
+  }
+
+  if (!this.editorActive && !this.inDrawingMode) {
+    const popupPoint =
+      evt?.mapPoint ??
+      JsonUtils.getPopupPoint(
+        graphic.geometry as ArcLayerGeometry | null | undefined
+      );
+
+    this.showGraphicPopup(graphic, popupPoint);
   }
 });
 
-// ─── Instance factory ─────────────────────────────────────────────
-const makeInstance = (opts: {
-  mapId?: string;
-  layers?: any[];
-  viewInstance?: any;
-  closestEl?: any;
-  querySelectorEl?: any;
-} = {}) => {
-  const layers   = opts.layers ?? [];
-  const mockView = makeMockView(layers);
+this.doubleClickHandle = this.view.on('double-click', async (evt: any): Promise<void> => {
+  evt.stopPropagation();
 
-  const mockArcMap = {
-    getViewInstance: jest.fn().mockResolvedValue(
-      opts.viewInstance !== undefined ? opts.viewInstance : mockView
-    )
-  };
+  if (this.ignoreNextMapClick) {
+    return;
+  }
 
-  const arcgisLayerListEl = { view: undefined as any };
+  const graphic = await this.getGraphicFromViewEvent(evt);
+  if (!graphic) {
+    return;
+  }
 
-  const inst = new UpLayerList() as any;
-  inst.mapId             = opts.mapId;
-  inst.stopHandles       = [];
-  inst.view              = undefined;
-  inst.updateComplete    = Promise.resolve();
-  inst.arcgisLayerList   = arcgisLayerListEl;
+  this.emitLayerEvent('doubleClick', this.buildLayerMouseEvent(graphic, evt));
 
-  // Mirrors line 51: this.closest("up-map")
-  inst.closest = jest.fn().mockReturnValue(
-    opts.closestEl !== undefined ? opts.closestEl : mockArcMap
+  if (this.enableUserEdit) {
+    this.closePopup();
+    await this.activateGraphicsEditor(graphic);
+    return;
+  }
+
+  if (!this.editorActive && !this.inDrawingMode) {
+    const popupPoint =
+      evt?.mapPoint ??
+      JsonUtils.getPopupPoint(
+        graphic.geometry as ArcLayerGeometry | null | undefined
+      );
+
+    this.showGraphicPopup(graphic, popupPoint);
+  }
+});
+
+
+
+
+private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
+  if (!this.view || this.enableUserEdit || this.editorActive || this.inDrawingMode) {
+    return;
+  }
+
+  const popupTemplate = JsonUtils.buildPopupTemplateFromCurrent(
+    graphic,
+    this.infoTemplate,
+    this.uniqueIdPropertyName,
+    this.name || 'Details'
   );
 
-  // Mirrors line 43: this.getRootNode()
-  const rootNode = {
-    querySelector: jest.fn().mockReturnValue(
-      opts.querySelectorEl !== undefined
-        ? opts.querySelectorEl
-        : mockArcMap
-    )
-  };
-  inst.getRootNode = jest.fn().mockReturnValue(rootNode);
+  const location =
+    mapPoint ??
+    JsonUtils.getPopupPoint(graphic.geometry as ArcLayerGeometry | null | undefined);
 
-  return { inst, mockView, mockArcMap, arcgisLayerListEl, rootNode };
-};
+  graphic.popupTemplate = popupTemplate;
 
-// ─── Tests ────────────────────────────────────────────────────────
-describe('arc-layer-list (UpLayerList)', () => {
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (global as any).customElements.whenDefined
-      .mockResolvedValue(undefined);
+  this.view.openPopup({
+    location,
+    features: [graphic]
   });
 
-  // ─── resolveMapElement (lines 42–56) ──────────────────────────
-
-  describe('resolveMapElement', () => {
-
-    it('calls closest("up-map") when no mapId — line 51', () => {
-      const { inst, mockArcMap } = makeInstance();
-      inst.mapId = undefined;
-
-      const result = inst.resolveMapElement();
-
-      expect(inst.closest).toHaveBeenCalledWith('up-map');
-      expect(result).toBe(mockArcMap);
-    });
-
-    it('calls root.querySelector with mapId — line 45', () => {
-      const { inst, mockArcMap, rootNode } =
-        makeInstance({ mapId: 'map1' });
-
-      const result = inst.resolveMapElement();
-
-      expect(rootNode.querySelector)
-        .toHaveBeenCalledWith('up-map[id="map1"]');
-      expect(result).toBe(mockArcMap);
-    });
-
-    it('logs error when mapId target not found — line 47', () => {
-      const spy = jest.spyOn(console, 'error')
-        .mockImplementation(() => {});
-
-      const { inst, rootNode } = makeInstance({ mapId: 'missing' });
-      rootNode.querySelector.mockReturnValue(null);
-
-      inst.resolveMapElement();
-
-      expect(spy).toHaveBeenCalledWith(
-        expect.stringContaining('missing')
-      );
-      spy.mockRestore();
-    });
-
-    it('logs error when no ancestor arc-map found — line 52', () => {
-      const spy = jest.spyOn(console, 'error')
-        .mockImplementation(() => {});
-
-      const { inst } = makeInstance({ closestEl: null });
-      inst.mapId = undefined;
-
-      inst.resolveMapElement();
-
-      expect(spy).toHaveBeenCalledWith(
-        expect.stringContaining('No ancestor <up-map> found')
-      );
-      spy.mockRestore();
-    });
+  this.emitLayerEvent('popupChangeEvent', {
+    features: [graphic],
+    selectedIndex: 0
   });
-
-  // ─── resolveAndAttach (lines 59–80) ───────────────────────────
-
-  describe('resolveAndAttach', () => {
-
-    it('calls getViewInstance() on arc-map — line 62', async () => {
-      const { inst, mockArcMap } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect(mockArcMap.getViewInstance).toHaveBeenCalled();
-    });
-
-    it('calls view.when() — line 67', async () => {
-      const { inst, mockView } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect(mockView.when).toHaveBeenCalled();
-    });
-
-    it('awaits customElements.whenDefined("arcgis-layer-list") — line 77', async () => {
-      const { inst } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect((global as any).customElements.whenDefined)
-        .toHaveBeenCalledWith('arcgis-layer-list');
-    });
-
-    it('sets view on arcgisLayerList — line 78', async () => {
-      const { inst, mockView, arcgisLayerListEl } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect(arcgisLayerListEl.view).toBe(mockView);
-    });
-
-    it('stores view on this.view — line 75', async () => {
-      const { inst, mockView } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect(inst.view).toBe(mockView);
-    });
-
-    it('returns early if no arc-map found — line 61', async () => {
-      const { inst } = makeInstance({ closestEl: null });
-      inst.mapId = undefined;
-
-      await expect(
-        inst.resolveAndAttach()
-      ).resolves.toBeUndefined();
-
-      expect(inst.arcgisLayerList.view).toBeUndefined();
-    });
-
-    it('logs error and returns if getViewInstance null — line 64', async () => {
-      const spy = jest.spyOn(console, 'error')
-        .mockImplementation(() => {});
-
-      const { inst } = makeInstance({ viewInstance: null });
-
-      await inst.resolveAndAttach();
-
-      expect(spy).toHaveBeenCalledWith(
-        expect.stringContaining('Could not get MapView from <up-map>')
-      );
-      expect(inst.arcgisLayerList.view).toBeUndefined();
-      spy.mockRestore();
-    });
-  });
-
-  // ─── Layer filter (lines 68–73) ───────────────────────────────
-  // Exact condition from your code:
-  // if (layer.title === null && layer.type === "graphics")
-  //   layer.listMode = "hide"
-
-  describe('layer filtering — line 70', () => {
-
-    it('hides GraphicsLayer where title===null (SDK internal)', async () => {
-      const layer = makeInternalGraphicsLayer();
-      // confirm our factory matches the console output exactly
-      expect(layer.title).toBeNull();
-      expect(layer.type).toBe('graphics');
-
-      const { inst } = makeInstance({ layers: [layer] });
-      await inst.resolveAndAttach();
-
-      expect(layer.listMode).toBe('hide');
-    });
-
-    it('does NOT hide FeatureLayer even with no title', async () => {
-      const layer = makeFeatureLayer('');
-      const { inst } = makeInstance({ layers: [layer] });
-
-      await inst.resolveAndAttach();
-
-      // type is "feature" not "graphics" → not hidden
-      expect(layer.listMode).toBe('show');
-    });
-
-    it('does NOT hide FeatureLayer with title "Point"', async () => {
-      const layer = makeFeatureLayer('Point');
-      const { inst } = makeInstance({ layers: [layer] });
-
-      await inst.resolveAndAttach();
-
-      expect(layer.listMode).toBe('show');
-    });
-
-    it('does NOT hide user GraphicsLayer that has a title', async () => {
-      const layer = makeUserGraphicsLayer('Railroad Lines');
-      const { inst } = makeInstance({ layers: [layer] });
-
-      await inst.resolveAndAttach();
-
-      // title is set → condition fails → listMode stays show
-      expect(layer.listMode).toBe('show');
-    });
-
-    it('does NOT hide VectorTileLayer (basemap)', async () => {
-      const layer = makeVectorTileLayer();
-      const { inst } = makeInstance({ layers: [layer] });
-
-      await inst.resolveAndAttach();
-
-      // type is "vector-tile" not "graphics" → not hidden by this rule
-      expect(layer.listMode).toBe('show');
-    });
-
-    it('handles mixed layers — only nulltitle graphics hidden', async () => {
-      const internal    = makeInternalGraphicsLayer();
-      const pointLayer  = makeFeatureLayer('Point');
-      const userGraphic = makeUserGraphicsLayer('Track');
-
-      const { inst } = makeInstance({
-        layers: [internal, pointLayer, userGraphic]
-      });
-
-      await inst.resolveAndAttach();
-
-      expect(internal.listMode).toBe('hide');     // ✅ hidden
-      expect(pointLayer.listMode).toBe('show');   // ✅ visible
-      expect(userGraphic.listMode).toBe('show');  // ✅ visible
-    });
-  });
-
-  // ─── attachToMapEvents (lines 106–130) ────────────────────────
-
-  describe('attachToMapEvents', () => {
-    it('registers exactly 3 reactiveUtils.watch calls', async () => {
-      const reactiveUtils =
-        require('@arcgis/core/core/reactiveUtils');
-
-      const { inst } = makeInstance();
-      await inst.resolveAndAttach();
-
-      // allLayers, baseLayers, referenceLayers
-      expect(reactiveUtils.watch).toHaveBeenCalledTimes(3);
-    });
-
-    it('pushes 3 handles into stopHandles', async () => {
-      const { inst } = makeInstance();
-
-      await inst.resolveAndAttach();
-
-      expect(inst.stopHandles.length).toBe(3);
-    });
-
-    it('re-sets arcgisLayerList.view when allLayers changes', async () => {
-      const reactiveUtils =
-        require('@arcgis/core/core/reactiveUtils');
-
-      const { inst, mockView, arcgisLayerListEl } = makeInstance();
-      await inst.resolveAndAttach();
-
-      // Get the handler passed to the first watch (allLayers)
-      const handler = reactiveUtils.watch.mock.calls[0][1];
-      handler();
-
-      expect(arcgisLayerListEl.view).toBe(mockView);
-    });
-  });
-
-  // ─── detachFromCurrentMap (lines 82–89) ───────────────────────
-
-  describe('detachFromCurrentMap', () => {
-
-    it('clears arcgisLayerList.view — line 85', async () => {
-      const { inst, arcgisLayerListEl } = makeInstance();
-      await inst.resolveAndAttach();
-      expect(arcgisLayerListEl.view).toBeDefined();
-
-      await inst.detachFromCurrentMap();
-
-      expect(arcgisLayerListEl.view).toBeUndefined();
-    });
-
-    it('clears this.view — line 87', async () => {
-      const { inst } = makeInstance();
-      await inst.resolveAndAttach();
-
-      await inst.detachFromCurrentMap();
-
-      expect(inst.view).toBeUndefined();
-    });
-
-    it('calls remove() on all stopHandles — line 100–102', async () => {
-      const reactiveUtils =
-        require('@arcgis/core/core/reactiveUtils');
-      const mockRemove = jest.fn();
-      reactiveUtils.watch.mockReturnValue({ remove: mockRemove });
-
-      const { inst } = makeInstance();
-      await inst.resolveAndAttach();
-      await inst.detachFromCurrentMap();
-
-      expect(mockRemove).toHaveBeenCalled();
-      expect(inst.stopHandles.length).toBe(0);
-    });
-  });
-
-  // ─── cleanup (lines 91–97) ────────────────────────────────────
-
-  describe('cleanup', () => {
-
-    it('clears arcgisLayerList.view — line 94', async () => {
-      const { inst, arcgisLayerListEl } = makeInstance();
-      await inst.resolveAndAttach();
-
-      inst.cleanup();
-
-      expect(arcgisLayerListEl.view).toBeUndefined();
-    });
-
-    it('clears this.view — line 96', async () => {
-      const { inst } = makeInstance();
-      await inst.resolveAndAttach();
-
-      inst.cleanup();
-
-      expect(inst.view).toBeUndefined();
-    });
-
-    it('calls remove() on all stop handles — line 100–102', async () => {
-      const reactiveUtils =
-        require('@arcgis/core/core/reactiveUtils');
-      const mockRemove = jest.fn();
-      reactiveUtils.watch.mockReturnValue({ remove: mockRemove });
-
-      const { inst } = makeInstance();
-      await inst.resolveAndAttach();
-
-      inst.cleanup();
-
-      expect(mockRemove).toHaveBeenCalled();
-    });
-  });
-
-  // ─── updated (lines 26–34) ────────────────────────────────────
-
-  describe('updated — mapId change', () => {
-
-    it('skips if oldMapId is undefined (first render) — line 31', async () => {
-      const { inst } = makeInstance();
-      const detachSpy = jest.spyOn(inst, 'detachFromCurrentMap');
-
-      const changedProps = new Map([['mapId', undefined]]);
-      await inst.updated(changedProps);
-
-      expect(detachSpy).not.toHaveBeenCalled();
-    });
-
-    it('detaches and re-attaches when mapId changes — lines 32–33', async () => {
-      const { inst } = makeInstance();
-      const detachSpy = jest
-        .spyOn(inst, 'detachFromCurrentMap')
-        .mockResolvedValue(undefined);
-      const attachSpy = jest
-        .spyOn(inst, 'resolveAndAttach')
-        .mockResolvedValue(undefined);
-
-      const changedProps = new Map([['mapId', 'oldMap']]);
-      await inst.updated(changedProps);
-
-      expect(detachSpy).toHaveBeenCalled();
-      expect(attachSpy).toHaveBeenCalled();
-    });
-  });
-
-  // ─── disconnectedCallback (lines 37–40) ───────────────────────
-
-  describe('disconnectedCallback', () => {
-
-    it('calls cleanup on disconnect — line 39', () => {
-      const { inst } = makeInstance();
-      const cleanupSpy = jest.spyOn(inst, 'cleanup');
-
-      inst.disconnectedCallback();
-
-      expect(cleanupSpy).toHaveBeenCalled();
-    });
-  });
-});
+}
+
+private closePopup(): void {
+  this.view?.closePopup();
+}
