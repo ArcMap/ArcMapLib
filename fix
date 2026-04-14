@@ -1,317 +1,49 @@
-private createLayer(geojson: string | FeatureCollection): void {
-  if (!this.view || !this.view.map) {
-    console.error('createLayer blocked: view/map not ready');
-    return;
-  }
+private getArcGISJson(
+  geojson: string | FeatureCollection
+): { graphics: Graphic[]; geometryType: string | undefined } | null {
+  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
 
-  console.log('raw geojson in createLayer', geojson);
-
-  const fsInfo = this.getArcGISJson(geojson);
-  console.log('fsInfo in createLayer', fsInfo);
-
-  if (!fsInfo) {
-    console.error('createLayer blocked: fsInfo is null');
-    return;
-  }
-
-  if (!Array.isArray(fsInfo.graphics)) {
-    console.error('createLayer blocked: fsInfo.graphics is not an array', fsInfo.graphics);
-    return;
-  }
-
-  if (!this.featureLayer) {
-    this.featureLayer = new GraphicsLayer({
-      id: this.id || 'arc-geojson-layer',
-      title: this.name || this.id || 'Arc GeoJSON Layer',
-      listMode: 'show'
-    });
-  }
-
-  if (!this.labelLayer) {
-    this.labelLayer = new GraphicsLayer({
-      id: `${this.id || 'arc-geojson-layer'}-labels`,
-      title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
-      listMode: 'hide'
-    });
-  }
-
-  const map = this.view.map;
-
-  if (!(this.featureLayer instanceof GraphicsLayer)) {
-    console.error('createLayer blocked: featureLayer is not GraphicsLayer');
-    return;
-  }
-
-  if (!(this.labelLayer instanceof GraphicsLayer)) {
-    console.error('createLayer blocked: labelLayer is not GraphicsLayer');
-    return;
-  }
-
-  const existingLayers = map.layers?.toArray?.() ?? [];
-
-  if (!existingLayers.includes(this.featureLayer)) {
-    map.add(this.featureLayer);
-  }
-
-  if (!existingLayers.includes(this.labelLayer)) {
-    map.add(this.labelLayer);
-  }
-
-  this.featureLayer.removeAll();
-  this.labelLayer.removeAll();
-
-  for (const graphic of fsInfo.graphics) {
-    if (!graphic || !graphic.geometry) {
-      console.warn('Skipping invalid graphic', graphic);
-      continue;
-    }
-
-    this.featureLayer.add(graphic);
-  }
-
-  console.log('graphics count after add', this.featureLayer.graphics.length);
-
-  this.currentGeometryType = fsInfo.geometryType;
-
-  this.updateInfoTemplate(this.infoTemplate);
-  this.refreshLabels();
-  this.updateLayerClass(this.layerClass);
-  this.updateLayerName(this.name);
-
-  void this.createEditor();
-  this.bindViewEvents();
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-}
-
-private createLayer(geojson: string | FeatureCollection): void {
-  if (!this.view || !this.view.map) {
-    console.error('createLayer blocked: view/map not ready');
-    return;
-  }
-
-  console.log('raw geojson in createLayer', geojson);
-
-  const fsInfo = this.getArcGISJson(geojson);
-  console.log('fsInfo in createLayer', fsInfo);
-
-  if (!fsInfo) {
-    console.error('createLayer blocked: fsInfo is null');
-    return;
-  }
-
-  if (!Array.isArray(fsInfo.graphics)) {
-    console.error('createLayer blocked: fsInfo.graphics is not an array', fsInfo.graphics);
-    return;
-  }
-
-  if (!this.featureLayer) {
-    this.featureLayer = new GraphicsLayer({
-      id: this.id || 'arc-geojson-layer',
-      title: this.name || this.id || 'Arc GeoJSON Layer',
-      listMode: 'show'
-    });
-  }
-
-  if (!this.labelLayer) {
-    this.labelLayer = new GraphicsLayer({
-      id: `${this.id || 'arc-geojson-layer'}-labels`,
-      title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
-      listMode: 'hide'
-    });
-  }
-
-  const map = this.view.map;
-
-  if (!(this.featureLayer instanceof GraphicsLayer)) {
-    console.error('createLayer blocked: featureLayer is not GraphicsLayer');
-    return;
-  }
-
-  if (!(this.labelLayer instanceof GraphicsLayer)) {
-    console.error('createLayer blocked: labelLayer is not GraphicsLayer');
-    return;
-  }
-
-  const existingLayers = map.layers?.toArray?.() ?? [];
-
-  if (!existingLayers.includes(this.featureLayer)) {
-    map.add(this.featureLayer);
-  }
-
-  if (!existingLayers.includes(this.labelLayer)) {
-    map.add(this.labelLayer);
-  }
-
-  this.featureLayer.removeAll();
-  this.labelLayer.removeAll();
-
-  for (const graphic of fsInfo.graphics) {
-    if (!graphic || !graphic.geometry) {
-      console.warn('Skipping invalid graphic', graphic);
-      continue;
-    }
-
-    this.featureLayer.add(graphic);
-  }
-
-  console.log('graphics count after add', this.featureLayer.graphics.length);
-
-  this.currentGeometryType = fsInfo.geometryType;
-
-  this.updateInfoTemplate(this.infoTemplate);
-  this.refreshLabels();
-  this.updateLayerClass(this.layerClass);
-  this.updateLayerName(this.name);
-
-  void this.createEditor();
-  this.bindViewEvents();
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-}
-
-private geojsonFeatureToGraphic(feature: Feature, index: number): Graphic | null {
-  if (!feature || feature.type !== 'Feature') {
-    console.warn('Invalid feature', feature);
+  if (geojsonParseResult.error || !geojsonParseResult.parsedJson) {
+    console.error('Unable to parse geojson', geojsonParseResult.error);
     return null;
   }
 
-  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry ?? null);
+  const parsedGeojson = geojsonParseResult.parsedJson as FeatureCollection;
 
-  if (!geometry) {
-    console.warn('Could not convert feature geometry', feature);
+  if (
+    !parsedGeojson ||
+    parsedGeojson.type !== 'FeatureCollection' ||
+    !Array.isArray(parsedGeojson.features)
+  ) {
+    console.error('Invalid FeatureCollection', parsedGeojson);
     return null;
   }
 
-  const properties: any = {
-    ...(feature.properties ?? {})
-  };
+  const graphics: Graphic[] = [];
+  let geometryType: string | undefined;
 
-  if (properties[this.uniqueIdPropertyName] === undefined) {
-    properties[this.uniqueIdPropertyName] = index;
-  }
+  parsedGeojson.features.forEach((feature: Feature, index: number): void => {
+    const graphic = this.geojsonFeatureToGraphic(feature, index);
 
-  if (properties.OBJECTID === undefined) {
-    properties.OBJECTID = index + 1;
-  }
+    if (!graphic) {
+      console.warn('Skipped feature because graphic could not be created', feature);
+      return;
+    }
 
-  if (properties.LABEL === undefined && properties.label !== undefined) {
-    properties.LABEL = properties.label;
-  }
+    if (!graphic.geometry) {
+      console.warn('Skipped feature because geometry is missing', feature);
+      return;
+    }
 
-  const graphic = new Graphic({
-    geometry,
-    attributes: properties,
-    symbol: JsonUtils.getDefaultSymbolForGeometry(geometry)
+    if (geometryType === undefined) {
+      geometryType = graphic.geometry.type;
+    }
+
+    graphics.push(graphic);
   });
 
-  graphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent(
-    graphic,
-    this.infoTemplate,
-    this.uniqueIdPropertyName,
-    this.name || 'Details'
-  );
-
-  return graphic;
+  return {
+    graphics,
+    geometryType
+  };
 }
-
-private geojsonGeometryToArcGeometry(geometry: GeoJsonGeometry | null): ArcLayerGeometry | null {
-  if (!geometry || !geometry.type) {
-    return null;
-  }
-
-  switch (geometry.type) {
-    case 'Point': {
-      const coords = geometry.coordinates as number[];
-      if (!Array.isArray(coords) || coords.length < 2) {
-        return null;
-      }
-
-      return new Point({
-        x: coords[0],
-        y: coords[1],
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    case 'MultiPoint': {
-      const coords = geometry.coordinates as number[][];
-      if (!Array.isArray(coords) || coords.length === 0) {
-        return null;
-      }
-
-      return new Multipoint({
-        points: coords,
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    case 'LineString': {
-      const coords = geometry.coordinates as number[][];
-      if (!Array.isArray(coords) || coords.length < 2) {
-        return null;
-      }
-
-      return new Polyline({
-        paths: [coords],
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    case 'MultiLineString': {
-      const coords = geometry.coordinates as number[][][];
-      if (!Array.isArray(coords) || coords.length === 0) {
-        return null;
-      }
-
-      return new Polyline({
-        paths: coords,
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    case 'Polygon': {
-      const coords = geometry.coordinates as number[][][];
-      if (!Array.isArray(coords) || coords.length === 0) {
-        return null;
-      }
-
-      return new Polygon({
-        rings: coords,
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    case 'MultiPolygon': {
-      const coords = geometry.coordinates as number[][][][];
-      if (!Array.isArray(coords) || coords.length === 0) {
-        return null;
-      }
-
-      const rings: number[][][] = [];
-      coords.forEach((polygonCoords: number[][][]) => {
-        polygonCoords.forEach((ring: number[][]) => {
-          rings.push(ring);
-        });
-      });
-
-      if (!rings.length) {
-        return null;
-      }
-
-      return new Polygon({
-        rings,
-        spatialReference: { wkid: 4326 }
-      });
-    }
-
-    default:
-      console.warn('Unsupported geometry type', geometry.type);
-      return null;
-  }
-}
-
