@@ -1,141 +1,709 @@
-protected override updated(changedProperties: Map<string, unknown>): void {
-  if (
-    changedProperties.has('geojson') &&
-    !this.blockGeoJsonUpdate &&
-    this.view &&
-    this.view.map
-  ) {
-    void this.updateGeojson(this.geojson);
+import Graphic from '@arcgis/core/Graphic';
+import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
+import PopupTemplate from '@arcgis/core/PopupTemplate';
+
+import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
+import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
+import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
+import TextSymbol from '@arcgis/core/symbols/TextSymbol';
+
+import Point from '@arcgis/core/geometry/Point';
+import Polyline from '@arcgis/core/geometry/Polyline';
+import Polygon from '@arcgis/core/geometry/Polygon';
+import Multipoint from '@arcgis/core/geometry/Multipoint';
+import Extent from '@arcgis/core/geometry/Extent';
+
+type ArcLayerGeometry = Point | Polyline | Polygon | Multipoint | Extent;
+
+type InfoTemplateDetails = {
+  listItem: string | ((graphic: Graphic) => string);
+  details: string | ((graphic: Graphic) => string);
+};
+
+export default class JsonUtils {
+  static readonly DEFAULT_SYMBOL_COLOR: number[] = [0, 0, 255, 255];
+  static readonly DEFAULT_SYMBOL_MARKER_SIZE = 12;
+  static readonly DEFAULT_SYMBOL_LINE_WIDTH = 2;
+  static readonly DEFAULT_SYMBOL_POLYGON_WIDTH = 2;
+  static readonly DEFAULT_LABEL_SIZE = 10;
+
+  static getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+    if (jsonObj === undefined || jsonObj === null) {
+      return { parsedJson: undefined };
+    }
+
+    if (typeof jsonObj === 'string') {
+      if (jsonObj.trim() === '') {
+        return { parsedJson: undefined };
+      }
+
+      try {
+        return {
+          parsedJson: JSON.parse(jsonObj)
+        };
+      } catch (error) {
+        return {
+          error: error as Error
+        };
+      }
+    }
+
+    return {
+      parsedJson: jsonObj
+    };
   }
 
-  if (changedProperties.has('renderer') && this.featureLayer) {
-    this.updateRenderer(this.renderer);
+  static clonePlain<T>(value: T): T {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    return JSON.parse(JSON.stringify(value)) as T;
   }
 
-  if (
-    (changedProperties.has('labeljson') ||
-      changedProperties.has('labelcolor') ||
-      changedProperties.has('labelsize')) &&
-    this.featureLayer &&
-    this.labelLayer
-  ) {
-    this.refreshLabels();
-  }
+  static updateRenderer(newRenderer: any, graphicsLayer: GraphicsLayer): void {
+    if (!graphicsLayer) {
+      return;
+    }
 
-  if (changedProperties.has('infoTemplate') && this.featureLayer) {
-    this.updateInfoTemplate(this.infoTemplate);
-  }
-
-  if (changedProperties.has('layerClass')) {
-    this.updateLayerClass(this.layerClass);
-  }
-
-  if (changedProperties.has('name')) {
-    this.updateLayerName(this.name);
-  }
-}
-
-async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
-  if (!this.view || !this.view.map) {
-    console.warn('updateGeojson blocked: view/map not ready');
-    return;
-  }
-
-  if (!this.featureLayer) {
-    this.createLayer(newGeojson);
-    return;
-  }
-
-  const fsInfo = this.getArcGISJson(newGeojson);
-
-  if (!fsInfo) {
-    return;
-  }
-
-  this.featureLayer.removeAll();
-  this.labelLayer?.removeAll();
-
-  for (const graphic of fsInfo.graphics) {
-    this.featureLayer.add(graphic);
-  }
-
-  this.currentGeometryType = fsInfo.geometryType;
-
-  this.updateRenderer(this.renderer);
-  this.updateInfoTemplate(this.infoTemplate);
-  this.refreshLabels();
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-}
-
-private createLayer(geojson: string | FeatureCollection): void {
-  if (!this.view || !this.view.map) {
-    console.error('createLayer blocked: view/map not ready');
-    return;
-  }
-
-  const fsInfo = this.getArcGISJson(geojson);
-  console.log('createLayer fsInfo', fsInfo);
-
-  if (!fsInfo) {
-    console.error('createLayer: fsInfo is null');
-    return;
-  }
-
-  if (!this.featureLayer) {
-    this.featureLayer = new GraphicsLayer({
-      id: this.id || 'arc-geojson-layer',
-      title: this.name || this.id || 'Arc GeoJSON Layer',
-      listMode: 'show'
+    graphicsLayer.graphics.forEach((graphic: Graphic): void => {
+      graphic.symbol =
+        JsonUtils.resolveGraphicSymbol(graphic, newRenderer) ??
+        JsonUtils.getDefaultSymbolForGeometry(graphic.geometry as ArcLayerGeometry | null | undefined);
     });
   }
 
-  if (!this.labelLayer) {
-    this.labelLayer = new GraphicsLayer({
-      id: `${this.id || 'arc-geojson-layer'}-labels`,
-      title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
-      listMode: 'hide'
+  static resolveGraphicSymbol(graphic: Graphic, renderer: any): any {
+    const geometry = graphic.geometry as ArcLayerGeometry | null | undefined;
+    const defaultSymbol = JsonUtils.getDefaultSymbolForGeometry(geometry);
+    const rendererParseResult = JsonUtils.getJsonFor(renderer);
+
+    if (!rendererParseResult.parsedJson || rendererParseResult.error) {
+      return defaultSymbol;
+    }
+
+    const rendererConfig = JsonUtils.clonePlain(rendererParseResult.parsedJson);
+    const type = rendererConfig?.type;
+
+    if (type === 'simple') {
+      return JsonUtils.normalizeLegacySymbol(rendererConfig.symbol) ?? defaultSymbol;
+    }
+
+    if (type === 'uniqueValue') {
+      const fieldName = rendererConfig.field1;
+      const fieldValue = graphic.attributes?.[fieldName];
+      const info = (rendererConfig.uniqueValueInfos ?? []).find((item: any) => item.value === fieldValue);
+      return JsonUtils.normalizeLegacySymbol(info?.symbol ?? rendererConfig.defaultSymbol) ?? defaultSymbol;
+    }
+
+    if (type === 'classBreaks') {
+      const fieldName = rendererConfig.field;
+      const fieldValue = Number(graphic.attributes?.[fieldName]);
+      const info = (rendererConfig.classBreakInfos ?? []).find((item: any) => {
+        const min = item.minValue ?? Number.NEGATIVE_INFINITY;
+        const max = item.maxValue ?? Number.POSITIVE_INFINITY;
+        return fieldValue >= min && fieldValue <= max;
+      });
+      return JsonUtils.normalizeLegacySymbol(info?.symbol ?? rendererConfig.defaultSymbol) ?? defaultSymbol;
+    }
+
+    return defaultSymbol;
+  }
+
+  static updatePopupTemplate(infoTemplate: any, graphicsLayer: GraphicsLayer): void {
+    if (!graphicsLayer) {
+      return;
+    }
+
+    graphicsLayer.graphics.forEach((graphic: Graphic): void => {
+      graphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent(graphic, infoTemplate);
     });
   }
 
-  const map = this.view.map;
+  static buildPopupTemplateFromCurrent(
+    graphic: Graphic,
+    infoTemplate: any,
+    uniqueIdPropertyName = 'id',
+    fallbackTitle = 'Details'
+  ): PopupTemplate {
+    const parsedInfoTemplate = JsonUtils.getInfoTemplateJson(infoTemplate);
+    const attributes = graphic.attributes ?? {};
 
-  try {
-    const existingLayers = map.layers?.toArray?.() ?? [];
+    const title = parsedInfoTemplate?.listItem
+      ? JsonUtils.resolveTemplateValue(parsedInfoTemplate.listItem, graphic)
+      : attributes[uniqueIdPropertyName] !== undefined
+        ? `${uniqueIdPropertyName}: ${attributes[uniqueIdPropertyName]}`
+        : fallbackTitle;
 
-    if (this.featureLayer && !existingLayers.includes(this.featureLayer)) {
-      map.add(this.featureLayer);
-    }
+    const content = parsedInfoTemplate?.details
+      ? JsonUtils.resolveTemplateValue(parsedInfoTemplate.details, graphic)
+      : JsonUtils.buildDefaultPopupContent(attributes);
 
-    if (this.labelLayer && !existingLayers.includes(this.labelLayer)) {
-      map.add(this.labelLayer);
-    }
-  } catch (error) {
-    console.error('createLayer: failed adding layers to map', error);
-    return;
+    return new PopupTemplate({
+      title,
+      content
+    });
   }
 
-  this.featureLayer.removeAll();
-  this.labelLayer.removeAll();
+  static getInfoTemplateJson(value: any): InfoTemplateDetails | null {
+    if (typeof value === 'string' && value.trim() === '') {
+      return null;
+    }
 
-  for (const graphic of fsInfo.graphics) {
-    this.featureLayer.add(graphic);
+    const parsed = JsonUtils.getJsonFor(value);
+
+    if (parsed.error || !parsed.parsedJson) {
+      return null;
+    }
+
+    return parsed.parsedJson as InfoTemplateDetails;
   }
 
-  this.currentGeometryType = fsInfo.geometryType;
+  static resolveTemplateValue(
+    value: string | ((graphic: Graphic) => string),
+    graphic: Graphic
+  ): string {
+    if (typeof value === 'function') {
+      try {
+        return value(graphic);
+      } catch (error) {
+        console.warn('Failed resolving template function', error);
+        return '';
+      }
+    }
 
-  this.updateRenderer(this.renderer);
-  this.updateInfoTemplate(this.infoTemplate);
-  this.refreshLabels();
-  this.updateLayerClass(this.layerClass);
-  this.updateLayerName(this.name);
+    return value ?? '';
+  }
 
-  void this.createEditor();
-  this.bindViewEvents();
+  static buildDefaultPopupContent(attributes: Record<string, any>): string {
+    const rows = Object.entries(attributes)
+      .map(([key, value]) => `<div><strong>${key}:</strong> ${String(value)}</div>`)
+      .join('');
 
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
+    return rows || '<div>No Details Available</div>';
+  }
+
+  static getLabelJson(
+    userLabel: string | object | object[],
+    userColor: string | number[],
+    userSize: number
+  ): any {
+    if (typeof userLabel === 'string' && userLabel.trim() === '') {
+      return JsonUtils.getJsonLabelFor(
+        JsonUtils.resolveLabelColor(userColor),
+        JsonUtils.resolveLabelSize(userSize)
+      );
+    }
+
+    const labelJson = JsonUtils.getJsonFor(userLabel);
+
+    if (labelJson.error || !labelJson.parsedJson) {
+      console.warn(
+        'Could not parse label json, falling back to color and size properties',
+        labelJson.error
+      );
+
+      return JsonUtils.getJsonLabelFor(
+        JsonUtils.resolveLabelColor(userColor),
+        JsonUtils.resolveLabelSize(userSize)
+      );
+    }
+
+    const parsed = JsonUtils.clonePlain(labelJson.parsedJson);
+
+    if (Array.isArray(parsed)) {
+      return parsed.map((item: any) => JsonUtils.normalizeLegacyLabelClass(item, userColor, userSize));
+    }
+
+    return JsonUtils.normalizeLegacyLabelClass(parsed, userColor, userSize);
+  }
+
+  static getJsonLabelFor(color: number[], fontsize: number): any {
+    return {
+      labelExpressionInfo: {
+        expression: '$feature.LABEL'
+      },
+      symbol: {
+        type: 'text',
+        color,
+        haloColor: 'black',
+        haloSize: 1,
+        xoffset: 3,
+        yoffset: 3,
+        font: {
+          size: fontsize,
+          family: 'sans-serif',
+          weight: 'bold'
+        }
+      }
+    };
+  }
+
+  static refreshGraphicsLayerLabels(
+    featureLayer: GraphicsLayer,
+    labelLayer: GraphicsLayer,
+    labelJsonInput: string | object | object[],
+    labelColorInput: string | number[],
+    labelSizeInput: number,
+    getPopupPoint: (graphic: Graphic) => Point
+  ): void {
+    if (!featureLayer || !labelLayer) {
+      return;
+    }
+
+    labelLayer.removeAll();
+
+    const labelJson = JsonUtils.getLabelJson(labelJsonInput, labelColorInput, labelSizeInput);
+    if (!labelJson?.symbol) {
+      return;
+    }
+
+    featureLayer.graphics.forEach((graphic: Graphic): void => {
+      const labelText = JsonUtils.resolveLabelText(graphic);
+      if (!labelText) {
+        return;
+      }
+
+      const labelPoint = getPopupPoint(graphic);
+
+      const labelGraphic = new Graphic({
+        geometry: labelPoint,
+        attributes: {
+          sourceId: graphic.attributes?.id ?? graphic.attributes?.OBJECTID
+        },
+        symbol: new TextSymbol({
+          text: labelText,
+          color: labelJson.symbol.color,
+          haloColor: labelJson.symbol.haloColor,
+          haloSize: labelJson.symbol.haloSize,
+          xoffset: labelJson.symbol.xoffset,
+          yoffset: labelJson.symbol.yoffset,
+          font: labelJson.symbol.font
+        })
+      });
+
+      labelLayer.add(labelGraphic);
+    });
+  }
+
+  static normalizeLegacyLabelClass(
+    labelClass: any,
+    userColor: string | number[],
+    userSize: number
+  ): any {
+    const safe = JsonUtils.clonePlain(labelClass);
+
+    if (!safe || typeof safe !== 'object') {
+      return JsonUtils.getJsonLabelFor(
+        JsonUtils.resolveLabelColor(userColor),
+        JsonUtils.resolveLabelSize(userSize)
+      );
+    }
+
+    safe.symbol = JsonUtils.normalizeLegacyLabelSymbol(safe.symbol, userColor, userSize);
+
+    if (!safe.labelExpressionInfo) {
+      safe.labelExpressionInfo = {
+        expression: '$feature.LABEL'
+      };
+    }
+
+    return safe;
+  }
+
+  static normalizeLegacyLabelSymbol(
+    symbol: any,
+    userColor: string | number[],
+    userSize: number
+  ): any {
+    const safe = JsonUtils.clonePlain(symbol);
+
+    if (!safe || typeof safe !== 'object') {
+      return {
+        type: 'text',
+        color: JsonUtils.resolveLabelColor(userColor),
+        haloColor: 'black',
+        haloSize: 1,
+        xoffset: 3,
+        yoffset: 3,
+        font: {
+          size: JsonUtils.resolveLabelSize(userSize),
+          family: 'sans-serif',
+          weight: 'bold'
+        }
+      };
+    }
+
+    if (safe.type === 'esriTS') {
+      return {
+        type: 'text',
+        text: safe.text ?? '',
+        color: safe.color ?? JsonUtils.resolveLabelColor(userColor),
+        haloColor: safe.haloColor ?? safe.halocolor ?? 'black',
+        haloSize: safe.haloSize ?? safe.halosize ?? 1,
+        xoffset: safe.xoffset ?? 0,
+        yoffset: safe.yoffset ?? 0,
+        angle: safe.angle ?? 0,
+        font: {
+          size: safe.font?.size ?? safe.fontSize ?? JsonUtils.resolveLabelSize(userSize),
+          family: safe.font?.family ?? 'sans-serif',
+          weight: safe.font?.weight ?? 'bold'
+        }
+      };
+    }
+
+    if (safe.type === 'text') {
+      return {
+        ...safe,
+        color: safe.color ?? JsonUtils.resolveLabelColor(userColor),
+        haloColor: safe.haloColor ?? safe.halocolor ?? 'black',
+        haloSize: safe.haloSize ?? safe.halosize ?? 1,
+        xoffset: safe.xoffset ?? 0,
+        yoffset: safe.yoffset ?? 0,
+        font: {
+          size: safe.font?.size ?? JsonUtils.resolveLabelSize(userSize),
+          family: safe.font?.family ?? 'sans-serif',
+          weight: safe.font?.weight ?? 'bold'
+        }
+      };
+    }
+
+    return {
+      type: 'text',
+      color: JsonUtils.resolveLabelColor(userColor),
+      haloColor: 'black',
+      haloSize: 1,
+      xoffset: 3,
+      yoffset: 3,
+      font: {
+        size: JsonUtils.resolveLabelSize(userSize),
+        family: 'sans-serif',
+        weight: 'bold'
+      }
+    };
+  }
+
+  static resolveLabelText(graphic: Graphic): string {
+    const attributes = graphic.attributes ?? {};
+
+    if (attributes.LABEL !== undefined && attributes.LABEL !== null) {
+      return String(attributes.LABEL);
+    }
+
+    if (attributes.label !== undefined && attributes.label !== null) {
+      return String(attributes.label);
+    }
+
+    if (attributes.id !== undefined && attributes.id !== null) {
+      return String(attributes.id);
+    }
+
+    if (attributes.OBJECTID !== undefined && attributes.OBJECTID !== null) {
+      return String(attributes.OBJECTID);
+    }
+
+    return '';
+  }
+
+  static resolveLabelColor(userColor: string | number[]): number[] {
+    if (Array.isArray(userColor) && userColor.length >= 3) {
+      return [
+        Number(userColor[0]) || 0,
+        Number(userColor[1]) || 0,
+        Number(userColor[2]) || 0,
+        userColor.length > 3 ? Number(userColor[3]) || 255 : 255
+      ];
+    }
+
+    const colorJson = JsonUtils.getJsonFor(userColor);
+    if (Array.isArray(colorJson.parsedJson)) {
+      const parsedColor = colorJson.parsedJson as number[];
+      return [
+        Number(parsedColor[0]) || 0,
+        Number(parsedColor[1]) || 0,
+        Number(parsedColor[2]) || 0,
+        parsedColor.length > 3 ? Number(parsedColor[3]) || 255 : 255
+      ];
+    }
+
+    return [0, 0, 0, 255];
+  }
+
+  static resolveLabelSize(userSize: number): number {
+    if (!Number.isNaN(userSize) && userSize > 0) {
+      return userSize;
+    }
+
+    return JsonUtils.DEFAULT_LABEL_SIZE;
+  }
+
+  static getDefaultSymbolForGraphic(graphic: Graphic): any {
+    return JsonUtils.getDefaultSymbolForGeometry(
+      graphic.geometry as ArcLayerGeometry | null | undefined
+    );
+  }
+
+  static getDefaultSymbolForGeometry(geometry: ArcLayerGeometry | null | undefined): any {
+    if (!geometry) {
+      return new SimpleMarkerSymbol({
+        style: 'circle',
+        color: JsonUtils.DEFAULT_SYMBOL_COLOR as any,
+        size: JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE,
+        outline: {
+          color: [0, 0, 0, 200] as any,
+          width: 1
+        }
+      });
+    }
+
+    if (JsonUtils.isPoint(geometry) || geometry.type === 'multipoint') {
+      return new SimpleMarkerSymbol({
+        style: 'circle',
+        color: JsonUtils.DEFAULT_SYMBOL_COLOR as any,
+        size: JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE,
+        outline: {
+          color: [0, 0, 0, 200] as any,
+          width: 1
+        }
+      });
+    }
+
+    if (JsonUtils.isPolyline(geometry)) {
+      return new SimpleLineSymbol({
+        style: 'solid',
+        color: JsonUtils.DEFAULT_SYMBOL_COLOR as any,
+        width: JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH
+      });
+    }
+
+    return new SimpleFillSymbol({
+      style: 'solid',
+      color: [
+        JsonUtils.DEFAULT_SYMBOL_COLOR[0],
+        JsonUtils.DEFAULT_SYMBOL_COLOR[1],
+        JsonUtils.DEFAULT_SYMBOL_COLOR[2],
+        100
+      ] as any,
+      outline: {
+        color: [110, 110, 110, 255] as any,
+        width: JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
+      }
+    });
+  }
+
+  static normalizeLegacySymbol(symbol: any): any {
+    const safe = JsonUtils.clonePlain(symbol);
+
+    if (!safe || typeof safe !== 'object') {
+      return safe;
+    }
+
+    const type = safe.type;
+
+    if (type === 'esriSMS') {
+      return new SimpleMarkerSymbol({
+        style: JsonUtils.normalizeLegacyMarkerStyle(safe.style),
+        color: safe.color ?? JsonUtils.DEFAULT_SYMBOL_COLOR,
+        size: safe.size ?? JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE,
+        angle: safe.angle ?? 0,
+        xoffset: safe.xoffset ?? 0,
+        yoffset: safe.yoffset ?? 0,
+        outline: safe.outline
+          ? {
+              color: safe.outline.color ?? [0, 0, 0, 200],
+              width: safe.outline.width ?? 1,
+              style: JsonUtils.normalizeLegacyLineStyle(safe.outline.style)
+            }
+          : undefined
+      });
+    }
+
+    if (type === 'esriSLS') {
+      return new SimpleLineSymbol({
+        style: JsonUtils.normalizeLegacyLineStyle(safe.style),
+        color: safe.color ?? JsonUtils.DEFAULT_SYMBOL_COLOR,
+        width: safe.width ?? JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH
+      });
+    }
+
+    if (type === 'esriSFS') {
+      return new SimpleFillSymbol({
+        style: JsonUtils.normalizeLegacyFillStyle(safe.style),
+        color: safe.color ?? [0, 0, 255, 100],
+        outline: safe.outline
+          ? {
+              color: safe.outline.color ?? [110, 110, 110, 255],
+              width: safe.outline.width ?? JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH,
+              style: JsonUtils.normalizeLegacyLineStyle(safe.outline.style)
+            }
+          : undefined
+      });
+    }
+
+    if (type === 'text' || type === 'esriTS') {
+      return new TextSymbol({
+        text: safe.text ?? '',
+        color: safe.color ?? [0, 0, 0, 255],
+        haloColor: safe.haloColor ?? safe.halocolor ?? 'black',
+        haloSize: safe.haloSize ?? safe.halosize ?? 1,
+        xoffset: safe.xoffset ?? 0,
+        yoffset: safe.yoffset ?? 0,
+        angle: safe.angle ?? 0,
+        font: {
+          size: safe.font?.size ?? safe.fontSize ?? JsonUtils.DEFAULT_LABEL_SIZE,
+          family: safe.font?.family ?? 'sans-serif',
+          weight: safe.font?.weight ?? 'normal'
+        }
+      });
+    }
+
+    return safe;
+  }
+
+  static normalizeLegacyMarkerStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrismscircle':
+      case 'circle':
+        return 'circle';
+      case 'esrismssquare':
+      case 'square':
+        return 'square';
+      case 'esrismsdiamond':
+      case 'diamond':
+        return 'diamond';
+      case 'esrismscross':
+      case 'cross':
+        return 'cross';
+      case 'esrismsx':
+      case 'x':
+        return 'x';
+      case 'esrismstriangle':
+      case 'triangle':
+        return 'triangle';
+      default:
+        return 'circle';
+    }
+  }
+
+  static normalizeLegacyLineStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrislssolid':
+      case 'solid':
+        return 'solid';
+      case 'esrislsdash':
+      case 'dash':
+        return 'dash';
+      case 'esrislsdot':
+      case 'dot':
+        return 'dot';
+      case 'esrislsdashdot':
+      case 'dash-dot':
+        return 'dash-dot';
+      case 'esrislsdashdotdot':
+      case 'long-dash-dot-dot':
+        return 'long-dash-dot-dot';
+      default:
+        return 'solid';
+    }
+  }
+
+  static normalizeLegacyFillStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrisfssolid':
+      case 'solid':
+        return 'solid';
+      case 'esrisfsbackwarddiagonal':
+      case 'backward-diagonal':
+        return 'backward-diagonal';
+      case 'esrisfscross':
+      case 'cross':
+        return 'cross';
+      case 'esrisfsdiagonalcross':
+      case 'diagonal-cross':
+        return 'diagonal-cross';
+      case 'esrisfsforwarddiagonal':
+      case 'forward-diagonal':
+        return 'forward-diagonal';
+      case 'esrisfshorizontal':
+      case 'horizontal':
+        return 'horizontal';
+      case 'esrisfsvertical':
+      case 'vertical':
+        return 'vertical';
+      case 'none':
+      case 'esrifsnull':
+        return 'none';
+      default:
+        return 'solid';
+    }
+  }
+
+  static getPopupPoint(geometry: ArcLayerGeometry | null | undefined): Point {
+    if (!geometry) {
+      return new Point({
+        x: 0,
+        y: 0,
+        spatialReference: { wkid: 4326 }
+      });
+    }
+
+    if (JsonUtils.isPoint(geometry)) {
+      return geometry;
+    }
+
+    if (JsonUtils.isPolyline(geometry)) {
+      const path = geometry.paths?.[0] ?? [];
+      const mid = path[Math.floor(path.length / 2)] ?? [0, 0];
+
+      return new Point({
+        x: mid[0],
+        y: mid[1],
+        spatialReference: geometry.spatialReference
+      });
+    }
+
+    if (JsonUtils.isPolygon(geometry)) {
+      return (
+        geometry.centroid ??
+        geometry.extent?.center ??
+        new Point({
+          x: 0,
+          y: 0,
+          spatialReference: geometry.spatialReference
+        })
+      );
+    }
+
+    if (geometry.type === 'multipoint') {
+      const multipoint = geometry as Multipoint;
+      const first = multipoint.points?.[0] ?? [0, 0];
+
+      return new Point({
+        x: first[0],
+        y: first[1],
+        spatialReference: multipoint.spatialReference
+      });
+    }
+
+    return (
+      geometry.extent?.center ??
+      new Point({
+        x: 0,
+        y: 0,
+        spatialReference: { wkid: 4326 }
+      })
+    );
+  }
+
+  static isPoint(geometry: ArcLayerGeometry): geometry is Point {
+    return geometry.type === 'point';
+  }
+
+  static isPolyline(geometry: ArcLayerGeometry): geometry is Polyline {
+    return geometry.type === 'polyline';
+  }
+
+  static isPolygon(geometry: ArcLayerGeometry): geometry is Polygon {
+    return geometry.type === 'polygon';
+  }
 }
