@@ -1,45 +1,141 @@
-async connectedCallback(): Promise<void> {
-  super.connectedCallback();
+protected override updated(changedProperties: Map<string, unknown>): void {
+  if (
+    changedProperties.has('geojson') &&
+    !this.blockGeoJsonUpdate &&
+    this.view &&
+    this.view.map
+  ) {
+    void this.updateGeojson(this.geojson);
+  }
+
+  if (changedProperties.has('renderer') && this.featureLayer) {
+    this.updateRenderer(this.renderer);
+  }
+
+  if (
+    (changedProperties.has('labeljson') ||
+      changedProperties.has('labelcolor') ||
+      changedProperties.has('labelsize')) &&
+    this.featureLayer &&
+    this.labelLayer
+  ) {
+    this.refreshLabels();
+  }
+
+  if (changedProperties.has('infoTemplate') && this.featureLayer) {
+    this.updateInfoTemplate(this.infoTemplate);
+  }
+
+  if (changedProperties.has('layerClass')) {
+    this.updateLayerClass(this.layerClass);
+  }
+
+  if (changedProperties.has('name')) {
+    this.updateLayerName(this.name);
+  }
+}
+
+async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
+  if (!this.view || !this.view.map) {
+    console.warn('updateGeojson blocked: view/map not ready');
+    return;
+  }
+
+  if (!this.featureLayer) {
+    this.createLayer(newGeojson);
+    return;
+  }
+
+  const fsInfo = this.getArcGISJson(newGeojson);
+
+  if (!fsInfo) {
+    return;
+  }
+
+  this.featureLayer.removeAll();
+  this.labelLayer?.removeAll();
+
+  for (const graphic of fsInfo.graphics) {
+    this.featureLayer.add(graphic);
+  }
+
+  this.currentGeometryType = fsInfo.geometryType;
+
+  this.updateRenderer(this.renderer);
+  this.updateInfoTemplate(this.infoTemplate);
+  this.refreshLabels();
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+}
+
+private createLayer(geojson: string | FeatureCollection): void {
+  if (!this.view || !this.view.map) {
+    console.error('createLayer blocked: view/map not ready');
+    return;
+  }
+
+  const fsInfo = this.getArcGISJson(geojson);
+  console.log('createLayer fsInfo', fsInfo);
+
+  if (!fsInfo) {
+    console.error('createLayer: fsInfo is null');
+    return;
+  }
+
+  if (!this.featureLayer) {
+    this.featureLayer = new GraphicsLayer({
+      id: this.id || 'arc-geojson-layer',
+      title: this.name || this.id || 'Arc GeoJSON Layer',
+      listMode: 'show'
+    });
+  }
+
+  if (!this.labelLayer) {
+    this.labelLayer = new GraphicsLayer({
+      id: `${this.id || 'arc-geojson-layer'}-labels`,
+      title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
+      listMode: 'hide'
+    });
+  }
+
+  const map = this.view.map;
 
   try {
-    this.ancestormap = this.closest('arc-map') as any;
+    const existingLayers = map.layers?.toArray?.() ?? [];
 
-    if (!this.ancestormap) {
-      console.error('arc-geojson-layer must be inside arc-map');
-      return;
+    if (this.featureLayer && !existingLayers.includes(this.featureLayer)) {
+      map.add(this.featureLayer);
     }
 
-    await this.ancestormap.updateComplete;
-
-    // ✅ WAIT for view
-    await this._getView();
-
-    console.log('VIEW READY', this.view);
-
-    // ✅ ONLY AFTER view exists
-    this.createLayer(this.geojson);
-
-  } catch (e) {
-    console.error('connectedCallback error', e);
-  }
-}
-
-private async _getView(): Promise<MapView> {
-  if (!this.ancestormap?.getViewInstance) {
-    throw new Error('arc-map must expose getViewInstance()');
+    if (this.labelLayer && !existingLayers.includes(this.labelLayer)) {
+      map.add(this.labelLayer);
+    }
+  } catch (error) {
+    console.error('createLayer: failed adding layers to map', error);
+    return;
   }
 
-  const view = await this.ancestormap.getViewInstance();
+  this.featureLayer.removeAll();
+  this.labelLayer.removeAll();
 
-  if (!view) {
-    throw new Error('getViewInstance returned null');
+  for (const graphic of fsInfo.graphics) {
+    this.featureLayer.add(graphic);
   }
 
-  this.view = view;
-  return view;
-}
+  this.currentGeometryType = fsInfo.geometryType;
 
-if (!this.view || !this.view.map) {
-  console.error('createLayer blocked: view/map not ready');
-  return;
+  this.updateRenderer(this.renderer);
+  this.updateInfoTemplate(this.infoTemplate);
+  this.refreshLabels();
+  this.updateLayerClass(this.layerClass);
+  this.updateLayerName(this.name);
+
+  void this.createEditor();
+  this.bindViewEvents();
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
 }
