@@ -1,18 +1,11 @@
-// Must be before any imports
-(global as any).customElements = {
-  define() {},
-  get() { return undefined; },
-  whenDefined() { return Promise.resolve(); },
-};
+import { JSDOM } from 'jsdom';
 
-(global as any).HTMLElement = class {
-  closest() { return null; }
-  querySelector() { return null; }
-  querySelectorAll() { return []; }
-  addEventListener() {}
-  removeEventListener() {}
-  dispatchEvent() { return true; }
-  setAttribute() {}
-  getAttribute() { return null; }
-  removeAttribute() {}
-};
+const dom = new JSDOM('<!DOCTYPE html><body></body>');
+
+(global as any).window = dom.window;
+(global as any).document = dom.window.document;
+(global as any).HTMLElement = dom.window.HTMLElement;
+(global as any).customElements = dom.window.customElements;
+(global as any).CustomEvent = dom.window.CustomEvent;
+(global as any).Event = dom.window.Event;
+(global as any).MutationObserver = dom.window.MutationObserver;
