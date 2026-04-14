@@ -1,49 +1,42 @@
-private getArcGISJson(
-  geojson: string | FeatureCollection
-): { graphics: Graphic[]; geometryType: string | undefined } | null {
-  const geojsonParseResult = JsonUtils.getJsonFor(geojson);
-
-  if (geojsonParseResult.error || !geojsonParseResult.parsedJson) {
-    console.error('Unable to parse geojson', geojsonParseResult.error);
-    return null;
+private createLayer(geojson: any): void {
+  if (!this.view) {
+    console.error('view not ready');
+    return;
   }
 
-  const parsedGeojson = geojsonParseResult.parsedJson as FeatureCollection;
+  const fsInfo = JsonUtils.getArcGISJson(geojson);
 
-  if (
-    !parsedGeojson ||
-    parsedGeojson.type !== 'FeatureCollection' ||
-    !Array.isArray(parsedGeojson.features)
-  ) {
-    console.error('Invalid FeatureCollection', parsedGeojson);
-    return null;
+  if (!fsInfo || !fsInfo.graphics.length) {
+    console.warn('No features to render');
+    return;
   }
 
-  const graphics: Graphic[] = [];
-  let geometryType: string | undefined;
+  // Create layers ONLY ONCE
+  if (!this.featureLayer) {
+    this.featureLayer = new GraphicsLayer();
+  }
 
-  parsedGeojson.features.forEach((feature: Feature, index: number): void => {
-    const graphic = this.geojsonFeatureToGraphic(feature, index);
+  if (!this.labelLayer) {
+    this.labelLayer = new GraphicsLayer();
+  }
 
-    if (!graphic) {
-      console.warn('Skipped feature because graphic could not be created', feature);
-      return;
-    }
+  // Add layers ONLY ONCE
+  if (!this.featureLayer.parent) {
+    this.view.map.add(this.featureLayer);
+  }
 
-    if (!graphic.geometry) {
-      console.warn('Skipped feature because geometry is missing', feature);
-      return;
-    }
+  if (!this.labelLayer.parent) {
+    this.view.map.add(this.labelLayer);
+  }
 
-    if (geometryType === undefined) {
-      geometryType = graphic.geometry.type;
-    }
+  // Clear old graphics
+  this.featureLayer.removeAll();
+  this.labelLayer.removeAll();
 
-    graphics.push(graphic);
-  });
+  // Add new graphics
+  for (const graphic of fsInfo.graphics) {
+    this.featureLayer.add(graphic);
+  }
 
-  return {
-    graphics,
-    geometryType
-  };
+  console.log('graphics count after add', fsInfo.graphics.length);
 }
