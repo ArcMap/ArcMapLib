@@ -1,94 +1,63 @@
-import { LitElement } from 'lit';
-import { property, customElement } from 'lit/decorators.js';
+import { LitElement, html } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
 
 import Graphic from '@arcgis/core/Graphic';
+import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
+import MapView from '@arcgis/core/views/MapView';
 import Point from '@arcgis/core/geometry/Point';
 import Polyline from '@arcgis/core/geometry/Polyline';
 import Polygon from '@arcgis/core/geometry/Polygon';
+import Multipoint from '@arcgis/core/geometry/Multipoint';
 import Extent from '@arcgis/core/geometry/Extent';
-import SpatialReference from '@arcgis/core/geometry/SpatialReference';
-
-import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
-import GraphicsLayer from '@arcgis/core/layers/GraphicsLayer';
-import Field from '@arcgis/core/layers/support/Field';
-
 import PopupTemplate from '@arcgis/core/PopupTemplate';
 import SketchViewModel from '@arcgis/core/widgets/Sketch/SketchViewModel';
-
+import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
 import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
 import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
 import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
 import TextSymbol from '@arcgis/core/symbols/TextSymbol';
 
-import * as webMercatorUtils from '@arcgis/core/geometry/support/webMercatorUtils';
-import * as reactiveUtils from '@arcgis/core/core/reactiveUtils';
-
-import JsonUtils from '../common/json-utils';
-import ValidationService from '../common/validation-service';
-
-/**
- * Keep names compatible with old behavior where possible.
- * Replace external imports with your real external-api imports if needed.
- */
-type LatLongPoint = {
-  latitude: number;
-  longitude: number;
-};
-
-type MouseEventDetail = {
-  coordinates: LatLongPoint;
-  attributes: any;
-};
-
-type InfoTemplateDetails = {
-  listItem: string | ((graphic: any) => string);
-  details: string | ((graphic: any) => string);
-};
-
-/**
- * GeoJSON minimal local typings
- */
-type GeoJsonPoint = {
+type GeoJsonPointGeometry = {
   type: 'Point';
   coordinates: number[];
 };
 
-type GeoJsonMultiPoint = {
+type GeoJsonMultiPointGeometry = {
   type: 'MultiPoint';
   coordinates: number[][];
 };
 
-type GeoJsonLineString = {
+type GeoJsonLineStringGeometry = {
   type: 'LineString';
   coordinates: number[][];
 };
 
-type GeoJsonMultiLineString = {
+type GeoJsonMultiLineStringGeometry = {
   type: 'MultiLineString';
   coordinates: number[][][];
 };
 
-type GeoJsonPolygon = {
+type GeoJsonPolygonGeometry = {
   type: 'Polygon';
   coordinates: number[][][];
 };
 
-type GeoJsonMultiPolygon = {
+type GeoJsonMultiPolygonGeometry = {
   type: 'MultiPolygon';
   coordinates: number[][][][];
 };
 
 type GeoJsonGeometry =
-  | GeoJsonPoint
-  | GeoJsonMultiPoint
-  | GeoJsonLineString
-  | GeoJsonMultiLineString
-  | GeoJsonPolygon
-  | GeoJsonMultiPolygon;
+  | GeoJsonPointGeometry
+  | GeoJsonMultiPointGeometry
+  | GeoJsonLineStringGeometry
+  | GeoJsonMultiLineStringGeometry
+  | GeoJsonPolygonGeometry
+  | GeoJsonMultiPolygonGeometry;
 
 type Feature = {
   type: 'Feature';
-  geometry: GeoJsonGeometry | null;
+  geometry: GeoJsonGeometry;
   properties: Record<string, any>;
 };
 
@@ -97,7 +66,29 @@ type FeatureCollection = {
   features: Feature[];
 };
 
-type UpLayerGeometry = Point | Polyline | Polygon;
+type InfoTemplateDetails = {
+  listItem: string | ((graphic: Graphic) => string);
+  details: string | ((graphic: Graphic) => string);
+};
+
+type LayerMouseEvent = {
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  attributes: any;
+};
+
+type PopupEvent = {
+  features: Graphic[];
+  selectedIndex: number;
+};
+
+type ArcLayerGeometry = Point | Polyline | Polygon | Multipoint | Extent;
+
+type ArcMapElement = HTMLElement & {
+  getViewInstant?: () => Promise<MapView> | MapView;
+};
 
 enum DrawGeometryTypes {
   FREEHAND_POLYLINE = 'FREEHAND_POLYLINE',
@@ -119,357 +110,408 @@ enum DrawGeometryTypes {
   UP_ARROW = 'UP_ARROW'
 }
 
-@customElement('arc-geojoson-layer')
-export class ArcGeoJsonLayer extends LitElement {
-  static DEFAULT_SYMBOL_COLOR = [0, 153, 255, 255];
-  static DEFAULT_SYMBOL_MARKER_SIZE = 12;
-  static DEFAULT_SYMBOL_LINE_WIDTH = 2;
-  static DEFAULT_LABEL_SIZE = 10;
+@customElement('arc-geojson-layer')
+export class ArcGeojsonLayer extends LitElement {
+  private static readonly DEFAULT_SYMBOL_COLOR: number[] = [0, 0, 255, 255];
+  private static readonly DEFAULT_LABEL_SIZE = 10;
+  private static readonly DEFAULT_SYMBOL_MARKER_SIZE = 12;
+  private static readonly DEFAULT_SYMBOL_LINE_WIDTH = 2;
+  private static readonly DEFAULT_SYMBOL_POLYGON_WIDTH = 2;
 
-  @property({ type: Object }) geojson: string | FeatureCollection = {
+  @property({ attribute: false })
+  geojson: string | FeatureCollection = {
     type: 'FeatureCollection',
     features: []
   };
 
-  @property({ type: String }) infoTemplate: string | InfoTemplateDetails = '';
-  @property({ type: String }) labelcolor: string | number[] = '';
-  @property({ type: Object }) labelJson: string | object | object[] = '';
-  @property({ type: Number }) labelsize = ArcGeoJsonLayer.DEFAULT_LABEL_SIZE;
-  @property({ type: String }) layerclass = '';
-  @property({ type: String }) name = '';
-  @property({ type: Object }) renderer: any = null;
-  @property({ type: String }) uniqueIdPropertyName = 'id';
+  @property({ attribute: false })
+  infoTemplate: string | InfoTemplateDetails | null = null;
 
-  @property({ type: Boolean }) enableUserEdit = false;
-  @property({ type: Boolean }) enableUserEditMove = true;
-  @property({ type: Boolean }) enableUserEditVertices = true;
-  @property({ type: Boolean }) enableUserEditAddVertices = true;
-  @property({ type: Boolean }) enableUserEditDeleteVertices = true;
-  @property({ type: Boolean }) enableUserEditScaling = true;
-  @property({ type: Boolean }) enableUserEditRotating = true;
-  @property({ type: Boolean }) enableUserEditUniformScaling = true;
-  @property({ type: Boolean }) enableUserEditRemove = true;
+  @property({ attribute: false })
+  labelcolor: string | number[] = '';
 
-  @property({ type: Boolean }) isPopupVisible = true;
+  @property({ attribute: false })
+  labeljson: string | object | object[] = '';
 
-  private ancestorMap: any = null;
-  private view: any = null;
+  @property({ type: Number })
+  labelsize = ArcGeojsonLayer.DEFAULT_LABEL_SIZE;
 
-  /**
-   * Split layers by geometry type so mixed GeoJSON displays correctly.
-   */
-  private pointLayer: FeatureLayer | null = null;
-  private polylineLayer: FeatureLayer | null = null;
-  private polygonLayer: FeatureLayer | null = null;
+  @property({ type: String })
+  layerClass = '';
 
-  /**
-   * Active edit layer used by SketchViewModel
-   */
-  private editLayer: GraphicsLayer | null = null;
+  @property({ type: String })
+  name = '';
 
-  /**
-   * Label layers
-   */
-  private pointLabelLayer: GraphicsLayer | null = null;
-  private polylineLabelLayer: GraphicsLayer | null = null;
-  private polygonLabelLayer: GraphicsLayer | null = null;
+  @property({ attribute: false })
+  renderer: any = null;
 
+  @property({ type: String })
+  uniqueIdPropertyName = 'id';
+
+  @property({ type: Boolean })
+  enableUserEdit = false;
+
+  @property({ type: Boolean })
+  enableUserEditMove = true;
+
+  @property({ type: Boolean })
+  enableUserEditRemove = true;
+
+  @property({ type: Boolean })
+  enableUserEditVertices = true;
+
+  @property({ type: Boolean })
+  enableUserEditAddVertices = true;
+
+  @property({ type: Boolean })
+  enableUserEditDeleteVertices = true;
+
+  @property({ type: Boolean })
+  enableUserEditScaling = true;
+
+  @property({ type: Boolean })
+  enableUserEditRotating = true;
+
+  @property({ type: Boolean })
+  enableUserEditUniformScaling = true;
+
+  private ancestorMap: ArcMapElement | null = null;
+  private view: MapView | null = null;
+  private featureLayer: GraphicsLayer | null = null;
+  private labelLayer: GraphicsLayer | null = null;
   private graphicsEditor: SketchViewModel | null = null;
-  private inDrawingMode = false;
   private blockGeoJsonUpdate = false;
-  private removingItem = false;
-  private handles: IHandle[] = [];
-  private updatingHandles: IHandle[] = [];
-  private editorWatchHandles: IHandle[] = [];
-  private graphicMoved = false;
+  private inDrawingMode = false;
+  private hoveredGraphicId: string | number | null = null;
+  private currentGeometryType: string | undefined;
+  private viewHandles: Array<{ remove: () => void }> = [];
 
-  render() {
-    return null;
+  protected render() {
+    return html``;
   }
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
 
-    this.ancestorMap = this.closest('arc-map') ?? this.closest('arc-map');
-    if (!this.ancestorMap) {
-      console.error('arc-geojoson-layer must be inside arc-map/arc-map');
-      return;
+    try {
+      this.ancestorMap = this.closest('arc-map') as ArcMapElement | null;
+
+      if (!this.ancestorMap) {
+        console.error('arc-geojson-layer must be a descendent of an arc-map element');
+        return;
+      }
+
+      if (typeof this.ancestorMap.getViewInstant !== 'function') {
+        console.error('ancestor map must expose getViewInstant()');
+        return;
+      }
+
+      const resolvedView = await this.ancestorMap.getViewInstant();
+      this.view = resolvedView ?? null;
+
+      if (!this.view) {
+        console.error('getViewInstant() returned no view');
+        return;
+      }
+
+      this.createLayer(this.geojson);
+    } catch (error) {
+      console.error('arc-geojson-layer failed during connectedCallback', error);
     }
-
-    const getView =
-      this.ancestorMap.getViewInstance ??
-      this.ancestorMap.getView ??
-      this.ancestorMap.getMapView;
-
-    if (typeof getView !== 'function') {
-      console.error('Ancestor map does not expose getView instance');
-      return;
-    }
-
-    this.view = await getView.call(this.ancestorMap);
-    if (!this.view) {
-      console.error('Could not resolve view from ancestor map');
-      return;
-    }
-
-    this.createLayer(this.geojson);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
 
-    this.removeAllLayers();
-    this.removeAllHandles();
+    this.viewHandles.forEach((handle: { remove: () => void }) => {
+      try {
+        handle.remove();
+      } catch (error) {
+        console.warn('Failed to remove view handle', error);
+      }
+    });
+    this.viewHandles = [];
 
-    this.graphicsEditor?.destroy();
-    this.graphicsEditor = null;
-  }
-
-  updated(changedProps: Map<string, unknown>): void {
-    if (changedProps.has('geojson') && !this.blockGeoJsonUpdate) {
-      this.updateGeojson(this.geojson);
+    if (this.graphicsEditor) {
+      try {
+        this.graphicsEditor.cancel();
+        this.graphicsEditor.destroy();
+      } catch (error) {
+        console.warn('Failed to destroy graphics editor', error);
+      }
+      this.graphicsEditor = null;
     }
 
-    if (changedProps.has('infoTemplate')) {
-      this.updateInfoTemplate(this.infoTemplate);
+    if (this.view?.map && this.featureLayer) {
+      this.view.map.remove(this.featureLayer);
+    }
+
+    if (this.view?.map && this.labelLayer) {
+      this.view.map.remove(this.labelLayer);
+    }
+
+    this.featureLayer = null;
+    this.labelLayer = null;
+    this.view = null;
+    this.ancestorMap = null;
+  }
+
+  protected updated(changedProperties: Map<string, unknown>): void {
+    if (changedProperties.has('geojson') && !this.blockGeoJsonUpdate) {
+      void this.updateGeojson(this.geojson);
+    }
+
+    if (changedProperties.has('renderer')) {
+      this.updateRenderer(this.renderer);
     }
 
     if (
-      changedProps.has('labelJson') ||
-      changedProps.has('labelcolor') ||
-      changedProps.has('labelsize')
+      changedProperties.has('labeljson') ||
+      changedProperties.has('labelcolor') ||
+      changedProperties.has('labelsize')
     ) {
       this.refreshLabels();
     }
 
-    if (changedProps.has('renderer')) {
-      this.updateRenderer(this.renderer);
+    if (changedProperties.has('infoTemplate')) {
+      this.updateInfoTemplate(this.infoTemplate);
     }
 
-    if (changedProps.has('layerclass')) {
-      this.updateLayerClass(this.layerclass);
+    if (changedProperties.has('layerClass')) {
+      this.updateLayerClass(this.layerClass);
+    }
+
+    if (changedProperties.has('name')) {
+      this.updateLayerName(this.name);
     }
   }
 
   async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
-    if (!this.pointLayer && !this.polylineLayer && !this.polygonLayer) {
+    if (!this.featureLayer) {
       this.createLayer(newGeojson);
       return;
     }
 
-    this.removeAllLayers();
-    this.removeEditorHandles();
+    const fsInfo = this.getArcGISJson(newGeojson);
+    if (!fsInfo) {
+      return;
+    }
 
-    this.createLayer(newGeojson);
+    this.featureLayer.removeAll();
+    this.labelLayer?.removeAll();
+
+    for (const graphic of fsInfo.graphics) {
+      this.featureLayer.add(graphic);
+    }
+
+    this.currentGeometryType = fsInfo.geometryType;
+    this.updateRenderer(this.renderer);
+    this.refreshLabels();
+    this.updateInfoTemplate(this.infoTemplate);
+
+    this.blockGeoJsonUpdate = true;
+    this.geojson = this.toFeatureCollectionFromLayer();
+    this.blockGeoJsonUpdate = false;
   }
 
   updateInfoTemplate(newInfoTemplate: any): void {
     this.infoTemplate = newInfoTemplate;
-  }
 
-  updateLayerClass(newLayerclass: string): void {
-    this.layerclass = newLayerclass;
+    if (!this.featureLayer) {
+      return;
+    }
 
-    [
-      this.pointLayer,
-      this.polylineLayer,
-      this.polygonLayer,
-      this.pointLabelLayer,
-      this.polylineLabelLayer,
-      this.polygonLabelLayer
-    ].forEach((layer) => {
-      if (!layer) return;
-      layer.listMode = 'show';
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      graphic.popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
     });
   }
 
+  updateLabelJson(newLabelJson: string | object | object[]): void {
+    this.labeljson = newLabelJson;
+    this.refreshLabels();
+  }
+
+  updateLayerClass(newLayerClass: string): void {
+    this.layerClass = newLayerClass;
+    // GraphicsLayer has no DOM className equivalent in ArcGIS core.
+    // Kept for API compatibility.
+  }
+
   async startDrawing(drawGeometryType: string): Promise<void> {
-    if (!this.view || !this.editLayer) {
+    if (!this.view || !this.featureLayer) {
+      return;
+    }
+
+    if (!this.graphicsEditor) {
+      await this.createEditor();
+    }
+
+    if (!this.graphicsEditor) {
       return;
     }
 
     this.inDrawingMode = true;
     this.closePopup();
-    this.ensurePopupSuppressed();
 
-    const geometryType = this.determineFeatureLayerGeometryType(drawGeometryType);
-    const tool = this.mapDrawTypeToSketchCreateTool(drawGeometryType);
-
-    if (!tool) {
-      console.error(`Unsupported draw geometry type: ${drawGeometryType}`);
+    const createTool = this.mapDrawGeometryTypeToSketchCreateTool(drawGeometryType);
+    if (!createTool) {
+      console.error('The geometry type', drawGeometryType, 'is invalid. Drawing cancelled.');
       this.inDrawingMode = false;
       return;
     }
 
-    this.ensureEditor();
-
-    if (!this.graphicsEditor) {
-      this.inDrawingMode = false;
-      return;
-    }
-
-    this.graphicsEditor.layer = this.editLayer;
-    this.graphicsEditor.create(tool as any);
+    this.graphicsEditor.create(createTool as any);
   }
 
-  async cancelDrawing(): Promise<void> {
+  cancelDrawing(): void {
     this.inDrawingMode = false;
-    this.graphicsEditor?.cancel();
-    this.ensurePopupEnabledWhenAllowed();
+
+    if (this.graphicsEditor) {
+      this.graphicsEditor.cancel();
+    }
+  }
+
+  async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
+    return this.featureLayer?.graphics.find((graphic: Graphic) => {
+      return graphic.attributes?.[this.uniqueIdPropertyName] === uniqueId;
+    });
+  }
+
+  async getLayerId(): Promise<string> {
+    return this.featureLayer?.id ?? '';
   }
 
   async openPopup(id: string | number): Promise<void> {
     const graphicMatch = await this.findFeatureByUniqueId(id);
     if (!graphicMatch) {
+      console.warn(
+        'No feature found with a',
+        this.uniqueIdPropertyName,
+        'value of',
+        id,
+        '. Cannot open popup.'
+      );
       return;
     }
 
-    const popupPoint = ArcGeoJsonLayer.getPopupPoint(graphicMatch.geometry as UpLayerGeometry | null | undefined);
+    const popupPoint = ArcGeojsonLayer.getPopupPoint(graphicMatch.geometry as ArcLayerGeometry | null | undefined);
     this.showGraphicPopup(graphicMatch, popupPoint);
   }
 
   async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
+    if (!this.view) {
+      return;
+    }
+
     const graphicMatch = await this.findFeatureByUniqueId(id);
     if (!graphicMatch) {
+      console.warn(
+        'No feature found with a',
+        this.uniqueIdPropertyName,
+        'value of',
+        id,
+        '. Cannot zoom to.'
+      );
       return;
     }
 
-    const geometry = graphicMatch.geometry as UpLayerGeometry | null | undefined;
-    if (!geometry || !this.view) {
+    const geometry = graphicMatch.geometry as ArcLayerGeometry | null | undefined;
+    if (!geometry) {
       return;
     }
 
-    if (ArcGeoJsonLayer.isPoint(geometry)) {
-      await this.view.goTo({ target: geometry, zoom: zoomLevel });
+    if (ArcGeojsonLayer.isPoint(geometry)) {
+      await this.view.goTo({
+        center: geometry,
+        zoom: zoomLevel
+      });
       return;
     }
 
-    if (ArcGeoJsonLayer.isPolyline(geometry) || ArcGeoJsonLayer.isPolygon(geometry)) {
-      await this.view.goTo(geometry.extent ?? geometry);
+    const target = ArcGeojsonLayer.isPolygon(geometry) || ArcGeojsonLayer.isPolyline(geometry)
+      ? geometry.extent
+      : geometry.extent;
+
+    if (target) {
+      await this.view.goTo(target);
     }
   }
 
   private createLayer(geojson: string | FeatureCollection): void {
-    const parsedGeojson = this.getJsonFor(geojson).parsedJson as FeatureCollection | undefined;
-    const safeGeojson: FeatureCollection = parsedGeojson && parsedGeojson.type === 'FeatureCollection'
-      ? parsedGeojson
-      : { type: 'FeatureCollection', features: [] };
+    if (!this.view) {
+      return;
+    }
 
-    const fsInfo = this.getArcGISJson(safeGeojson);
+    const parsedGeojson = geojson ?? {
+      type: 'FeatureCollection',
+      features: []
+    };
+
+    const fsInfo = this.getArcGISJson(parsedGeojson);
     if (!fsInfo) {
+      console.error('arc-geojson-layer unable to create layer, geojson property contains invalid data');
       return;
     }
 
-    if (!this.view?.map) {
-      return;
-    }
-
-    if (fsInfo.pointGraphics.length > 0) {
-      this.pointLayer = this.createFeatureLayerByGeometryType(
-        'point',
-        `${this.id || 'arc-geojoson-layer'}-point`,
-        `${this.name || this.id || 'Arc GeoJSON Layer'} - Points`,
-        fsInfo.pointGraphics
-      );
-      this.view.map.add(this.pointLayer);
-
-      this.pointLabelLayer = new GraphicsLayer({
-        id: `${this.id || 'arc-geojoson-layer'}-point-labels`,
-        title: `${this.name || this.id || 'Arc GeoJSON Layer'} - Point Labels`
+    if (!this.featureLayer) {
+      this.featureLayer = new GraphicsLayer({
+        id: this.id || 'arc-geojson-layer',
+        title: this.name || this.id || 'Arc GeoJSON Layer',
+        listMode: 'show'
       });
-      this.view.map.add(this.pointLabelLayer);
     }
 
-    if (fsInfo.polylineGraphics.length > 0) {
-      this.polylineLayer = this.createFeatureLayerByGeometryType(
-        'polyline',
-        `${this.id || 'arc-geojoson-layer'}-polyline`,
-        `${this.name || this.id || 'Arc GeoJSON Layer'} - Lines`,
-        fsInfo.polylineGraphics
-      );
-      this.view.map.add(this.polylineLayer);
-
-      this.polylineLabelLayer = new GraphicsLayer({
-        id: `${this.id || 'arc-geojoson-layer'}-polyline-labels`,
-        title: `${this.name || this.id || 'Arc GeoJSON Layer'} - Line Labels`
+    if (!this.labelLayer) {
+      this.labelLayer = new GraphicsLayer({
+        id: `${this.id || 'arc-geojson-layer'}-labels`,
+        title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
+        listMode: 'hide'
       });
-      this.view.map.add(this.polylineLabelLayer);
     }
 
-    if (fsInfo.polygonGraphics.length > 0) {
-      this.polygonLayer = this.createFeatureLayerByGeometryType(
-        'polygon',
-        `${this.id || 'arc-geojoson-layer'}-polygon`,
-        `${this.name || this.id || 'Arc GeoJSON Layer'} - Polygons`,
-        fsInfo.polygonGraphics
-      );
-      this.view.map.add(this.polygonLayer);
-
-      this.polygonLabelLayer = new GraphicsLayer({
-        id: `${this.id || 'arc-geojoson-layer'}-polygon-labels`,
-        title: `${this.name || this.id || 'Arc GeoJSON Layer'} - Polygon Labels`
-      });
-      this.view.map.add(this.polygonLabelLayer);
+    if (this.view.map && !this.view.map.layers.includes(this.featureLayer)) {
+      this.view.map.add(this.featureLayer);
     }
 
-    this.editLayer = new GraphicsLayer({
-      id: `${this.id || 'arc-geojoson-layer'}-edit`,
-      title: `${this.name || this.id || 'Arc GeoJSON Layer'} - Edit`
-    });
-    this.view.map.add(this.editLayer);
+    if (this.view.map && !this.view.map.layers.includes(this.labelLayer)) {
+      this.view.map.add(this.labelLayer);
+    }
+
+    this.featureLayer.removeAll();
+    this.labelLayer.removeAll();
+
+    for (const graphic of fsInfo.graphics) {
+      this.featureLayer.add(graphic);
+    }
+
+    this.currentGeometryType = fsInfo.geometryType;
 
     this.updateRenderer(this.renderer);
     this.refreshLabels();
     this.updateInfoTemplate(this.infoTemplate);
-    this.updateLayerClass(this.layerclass);
+    this.updateLayerClass(this.layerClass);
+    this.updateLayerName(this.name);
 
-    this.createEditor();
-    this.wireLayerEvents();
+    void this.createEditor();
+    this.wireViewEvents();
 
     this.blockGeoJsonUpdate = true;
-    this.geojson = this.toFeatureCollectionFromLayers();
+    this.geojson = this.toFeatureCollectionFromLayer();
     this.blockGeoJsonUpdate = false;
   }
 
-  private createFeatureLayerByGeometryType(
-    geometryType: 'point' | 'polyline' | 'polygon',
-    id: string,
-    title: string,
-    graphics: Graphic[]
-  ): FeatureLayer {
-    const fields = [
-      new Field({
-        name: 'OBJECTID',
-        alias: 'OBJECTID',
-        type: 'oid'
-      }),
-      new Field({
-        name: 'LABEL',
-        alias: 'LABEL',
-        type: 'string'
-      })
-    ];
-
-    return new FeatureLayer({
-      id,
-      title,
-      source: graphics,
-      objectIdField: 'OBJECTID',
-      fields,
-      geometryType,
-      spatialReference: new SpatialReference({ wkid: 4326 }),
-      popupEnabled: true
-    });
-  }
-
   private async createEditor(): Promise<void> {
-    if (!this.view || !this.editLayer) {
+    if (!this.view || !this.featureLayer) {
+      return;
+    }
+
+    if (this.graphicsEditor) {
       return;
     }
 
     this.graphicsEditor = new SketchViewModel({
       view: this.view,
-      layer: this.editLayer,
+      layer: this.featureLayer,
       defaultUpdateOptions: {
         enableRotation: this.enableUserEditRotating,
         enableScaling: this.enableUserEditScaling,
@@ -483,206 +525,242 @@ export class ArcGeoJsonLayer extends LitElement {
     this.wireEditorEvents();
   }
 
-  private ensureEditor(): void {
-    if (!this.graphicsEditor && this.view && this.editLayer) {
-      this.createEditor();
-    }
-  }
-
   private wireEditorEvents(): void {
     if (!this.graphicsEditor) {
       return;
     }
 
-    this.removeEditorHandles();
-
-    this.editorWatchHandles.push(
-      this.graphicsEditor.on('create', (evt: any): void => {
-        if (evt.state === 'complete' && evt.graphic) {
-          this.inDrawingMode = false;
-          this.addToGeojson(evt.graphic as Graphic);
-          this.ensurePopupEnabledWhenAllowed();
-        }
-      })
-    );
-
-    this.editorWatchHandles.push(
-      this.graphicsEditor.on('update', (evt: any): void => {
+    this.graphicsEditor.on('create', (event: any): void => {
+      if (event.state === 'start') {
+        this.inDrawingMode = true;
         this.closePopup();
+      }
 
-        if (evt.state === 'start') {
-          this.ensurePopupSuppressed();
-          return;
-        }
+      if (event.state === 'complete' && event.graphic) {
+        this.inDrawingMode = false;
+        this.addToGeojson(event.graphic as Graphic);
+      }
 
-        if (evt.state === 'complete' || evt.state === 'cancel') {
-          if (Array.isArray(evt.graphics)) {
-            evt.graphics.forEach((graphic: Graphic): void => {
-              this.commitEditGraphicToLayers(graphic);
-            });
-          }
-          this.ensurePopupEnabledWhenAllowed();
-        }
-      })
-    );
-  }
+      if (event.state === 'cancel') {
+        this.inDrawingMode = false;
+      }
+    });
 
-  private wireLayerEvents(): void {
-    const renderLayers: FeatureLayer[] = [
-      this.pointLayer,
-      this.polylineLayer,
-      this.polygonLayer
-    ].filter(Boolean) as FeatureLayer[];
+    this.graphicsEditor.on('update', (event: any): void => {
+      if (event.state === 'start') {
+        this.closePopup();
+      }
 
-    renderLayers.forEach((layer: FeatureLayer): void => {
-      this.handles.push(
-        reactiveUtils.on(
-          () => this.view,
-          'click',
-          async (event: any): Promise<void> => {
-            if (!this.view || !layer) {
-              return;
-            }
+      if (event.state === 'complete' && Array.isArray(event.graphics)) {
+        event.graphics.forEach((graphic: Graphic) => {
+          this.updateGeojsonWithChanges(graphic);
+        });
+      }
 
-            const hit = await this.view.hitTest(event);
-            const result = hit.results?.find((r: any) => r.graphic?.layer === layer);
+      if (event.state === 'cancel') {
+        // no-op
+      }
+    });
 
-            if (!result?.graphic) {
-              return;
-            }
-
-            const graphic = result.graphic as Graphic;
-
-            if (this.enableUserEdit) {
-              this.closePopup();
-              this.ensurePopupSuppressed();
-
-              if (event.native?.ctrlKey && this.enableUserEditRemove) {
-                this.removeFromGeojson(graphic);
-                return;
-              }
-
-              this.activateGraphicsEditor(graphic);
-              return;
-            }
-
-            if (this.inDrawingMode) {
-              this.closePopup();
-              return;
-            }
-
-            this.showGraphicPopup(graphic, event.mapPoint as Point);
-            this.emitLayerEvent('layerClick', this.toMouseEventDetail(graphic, event.mapPoint));
-          }
-        )
-      );
-
-      this.handles.push(
-        reactiveUtils.on(
-          () => this.view,
-          'double-click',
-          async (event: any): Promise<void> => {
-            if (!this.view || !layer) {
-              return;
-            }
-
-            const hit = await this.view.hitTest(event);
-            const result = hit.results?.find((r: any) => r.graphic?.layer === layer);
-
-            if (!result?.graphic) {
-              return;
-            }
-
-            const graphic = result.graphic as Graphic;
-
-            if (this.enableUserEdit) {
-              event.stopPropagation?.();
-              this.closePopup();
-              this.ensurePopupSuppressed();
-              this.activateGraphicsEditor(graphic);
-              return;
-            }
-
-            if (!this.inDrawingMode) {
-              this.showGraphicPopup(graphic, event.mapPoint as Point);
-              this.emitLayerEvent('doubleClick', this.toMouseEventDetail(graphic, event.mapPoint));
-            }
-          }
-        )
-      );
+    this.graphicsEditor.on('delete', (event: any): void => {
+      if (Array.isArray(event.graphics)) {
+        event.graphics.forEach((graphic: Graphic) => {
+          this.removeFromGeojson(graphic);
+        });
+      }
     });
   }
 
-  private activateGraphicsEditor(graphic: Graphic): void {
-    if (!this.enableUserEdit || !this.graphicsEditor || !this.editLayer) {
+  private wireViewEvents(): void {
+    if (!this.view || this.viewHandles.length > 0) {
+      return;
+    }
+
+    const clickHandle = this.view.on('click', async (event: any): Promise<void> => {
+      const graphic = await this.getGraphicFromViewEvent(event);
+      if (!graphic) {
+        return;
+      }
+
+      this.emitLayerEvent('layerClick', this.buildLayerMouseEvent(graphic, event));
+
+      const nativeEvent = event?.native;
+      const ctrlKey = Boolean(nativeEvent?.ctrlKey || nativeEvent?.metaKey);
+
+      if (this.enableUserEdit) {
+        if (ctrlKey && this.enableUserEditRemove) {
+          this.removeFromGeojson(graphic);
+          return;
+        }
+
+        await this.activateGraphicsEditor(graphic);
+        return;
+      }
+
+      const popupPoint = event?.mapPoint ?? ArcGeojsonLayer.getPopupPoint(graphic.geometry as ArcLayerGeometry | null | undefined);
+      this.showGraphicPopup(graphic, popupPoint);
+    });
+
+    const doubleClickHandle = this.view.on('double-click', async (event: any): Promise<void> => {
+      event.stopPropagation();
+
+      const graphic = await this.getGraphicFromViewEvent(event);
+      if (!graphic) {
+        return;
+      }
+
+      this.emitLayerEvent('doubleClick', this.buildLayerMouseEvent(graphic, event));
+
+      if (this.enableUserEdit) {
+        await this.activateGraphicsEditor(graphic);
+      }
+    });
+
+    const pointerMoveHandle = this.view.on('pointer-move', async (event: any): Promise<void> => {
+      const graphic = await this.getGraphicFromViewEvent(event);
+      const newHoverId = graphic?.attributes?.[this.uniqueIdPropertyName] ?? null;
+
+      if (this.hoveredGraphicId === newHoverId) {
+        return;
+      }
+
+      if (this.hoveredGraphicId !== null) {
+        const previous = this.featureLayer?.graphics.find((g: Graphic) => {
+          return g.attributes?.[this.uniqueIdPropertyName] === this.hoveredGraphicId;
+        });
+
+        if (previous) {
+          this.emitLayerEvent('layerMouseOut', this.buildLayerMouseEvent(previous, event));
+        }
+      }
+
+      if (graphic) {
+        this.emitLayerEvent('layerMouseOver', this.buildLayerMouseEvent(graphic, event));
+      }
+
+      this.hoveredGraphicId = newHoverId;
+    });
+
+    this.viewHandles.push(clickHandle, doubleClickHandle, pointerMoveHandle);
+  }
+
+  private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+    if (!this.enableUserEdit || !this.graphicsEditor) {
       return;
     }
 
     this.closePopup();
-    this.ensurePopupSuppressed();
 
-    this.editLayer.removeAll();
-    this.editLayer.add(graphic.clone());
-
-    const editGraphic = this.editLayer.graphics.getItemAt(0);
-    if (!editGraphic) {
-      return;
-    }
-
-    let tool: 'move' | 'transform' | 'reshape' = 'move';
-
-    if (
-      this.enableUserEditVertices ||
-      this.enableUserEditAddVertices ||
-      this.enableUserEditDeleteVertices
-    ) {
-      tool = 'reshape';
-    } else if (
-      this.enableUserEditScaling ||
-      this.enableUserEditRotating
-    ) {
-      tool = 'transform';
-    }
-
-    this.graphicsEditor.update([editGraphic], {
-      tool,
+    const updateOptions: any = {
       enableRotation: this.enableUserEditRotating,
       enableScaling: this.enableUserEditScaling,
       preserveAspectRatio: this.enableUserEditUniformScaling,
-      toggleToolOnClick: false
-    } as any);
+      toggleToolOnClick: false,
+      multipleSelectionEnabled: false,
+      tool: this.getUpdateTool()
+    };
+
+    this.graphicsEditor.update([graphic], updateOptions);
   }
 
-  private commitEditGraphicToLayers(graphic: Graphic): void {
-    const targetLayer = this.getTargetFeatureLayerForGraphic(graphic);
-    if (!targetLayer) {
+  private getUpdateTool(): 'move' | 'reshape' | 'transform' {
+    if (this.enableUserEditScaling || this.enableUserEditRotating) {
+      return 'transform';
+    }
+
+    if (this.enableUserEditVertices || this.enableUserEditAddVertices || this.enableUserEditDeleteVertices) {
+      return 'reshape';
+    }
+
+    return 'move';
+  }
+
+  private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
+    if (!this.view || this.enableUserEdit || this.inDrawingMode) {
       return;
     }
 
-    const objectId = graphic.attributes?.OBJECTID;
-    if (objectId === undefined || objectId === null) {
+    const location = mapPoint ?? ArcGeojsonLayer.getPopupPoint(graphic.geometry as ArcLayerGeometry | null | undefined);
+    const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+
+    graphic.popupTemplate = popupTemplate;
+
+    this.view.popup.open({
+      location,
+      features: [graphic]
+    });
+
+    this.emitLayerEvent('popupChangeEvent', {
+      features: [graphic],
+      selectedIndex: 0
+    } as PopupEvent);
+  }
+
+  private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate {
+    const parsed = this.getInfoTemplateJson(this.infoTemplate);
+    const attributes = graphic.attributes ?? {};
+
+    const title = parsed?.listItem
+      ? this.resolveTemplateValue(parsed.listItem, graphic)
+      : attributes[this.uniqueIdPropertyName] !== undefined
+        ? `${this.uniqueIdPropertyName}: ${attributes[this.uniqueIdPropertyName]}`
+        : this.name || 'Details';
+
+    const content = parsed?.details
+      ? this.resolveTemplateValue(parsed.details, graphic)
+      : this.buildDefaultPopupContent(attributes);
+
+    return new PopupTemplate({
+      title,
+      content
+    });
+  }
+
+  private refreshLabels(): void {
+    if (!this.featureLayer || !this.labelLayer) {
       return;
     }
 
-    const target = targetLayer.source.toArray().find((g: Graphic) => g.attributes?.OBJECTID === objectId);
-    if (!target) {
+    this.labelLayer.removeAll();
+
+    const labelConfig = this.getLabelJson(this.labeljson, this.labelcolor, this.labelsize);
+
+    if (!labelConfig) {
       return;
     }
 
-    target.geometry = graphic.geometry;
-    target.attributes = { ...(graphic.attributes ?? {}) };
-    target.symbol = this.getDefaultSymbolForGraphic(graphic);
-    target.popupTemplate = this.buildPopupTemplateFromCurrent(target);
+    this.featureLayer.graphics.forEach((graphic: Graphic): void => {
+      const textValue = this.resolveLabelText(graphic);
+      if (!textValue) {
+        return;
+      }
 
-    this.blockGeoJsonUpdate = true;
-    this.geojson = this.toFeatureCollectionFromLayers();
-    this.blockGeoJsonUpdate = false;
+      const popupPoint = ArcGeojsonLayer.getPopupPoint(graphic.geometry as ArcLayerGeometry | null | undefined);
+      const labelGraphic = new Graphic({
+        geometry: popupPoint,
+        attributes: {
+          sourceId: graphic.attributes?.[this.uniqueIdPropertyName]
+        },
+        symbol: new TextSymbol({
+          text: textValue,
+          color: labelConfig.symbol.color,
+          haloColor: labelConfig.symbol.haloColor,
+          haloSize: labelConfig.symbol.haloSize,
+          xoffset: labelConfig.symbol.xoffset,
+          yoffset: labelConfig.symbol.yoffset,
+          font: labelConfig.symbol.font
+        })
+      });
 
-    this.refreshLabels();
-    this.emitLayerEvent('userEditItemUpdated', this.graphicToGeoJsonFeature(target));
+      this.labelLayer?.add(labelGraphic);
+    });
   }
 
   private addToGeojson(newGraphic: Graphic): void {
+    if (!this.featureLayer) {
+      return;
+    }
+
     if (!newGraphic.attributes) {
       newGraphic.attributes = {};
     }
@@ -698,16 +776,12 @@ export class ArcGeoJsonLayer extends LitElement {
     newGraphic.symbol = this.getDefaultSymbolForGraphic(newGraphic);
     newGraphic.popupTemplate = this.buildPopupTemplateFromCurrent(newGraphic);
 
-    const targetLayer = this.getTargetFeatureLayerForGraphic(newGraphic);
-    if (!targetLayer) {
-      console.error('Could not resolve target layer for new graphic');
-      return;
+    if (!this.featureLayer.graphics.includes(newGraphic)) {
+      this.featureLayer.add(newGraphic);
     }
 
-    targetLayer.source.add(newGraphic);
-
     this.blockGeoJsonUpdate = true;
-    this.geojson = this.toFeatureCollectionFromLayers();
+    this.geojson = this.toFeatureCollectionFromLayer();
     this.blockGeoJsonUpdate = false;
 
     this.refreshLabels();
@@ -715,255 +789,156 @@ export class ArcGeoJsonLayer extends LitElement {
   }
 
   private removeFromGeojson(graphicToRemove: Graphic): void {
-    const targetLayer = this.getTargetFeatureLayerForGraphic(graphicToRemove);
-    if (!targetLayer) {
+    if (!this.featureLayer) {
       return;
     }
 
-    const objectId = graphicToRemove.attributes?.OBJECTID;
-    if (objectId === undefined || objectId === null) {
-      return;
-    }
-
-    const existing = targetLayer.source.toArray().find((g: Graphic) => g.attributes?.OBJECTID === objectId);
-    if (!existing) {
-      return;
-    }
-
-    targetLayer.source.remove(existing);
+    this.featureLayer.remove(graphicToRemove);
 
     this.blockGeoJsonUpdate = true;
-    this.geojson = this.toFeatureCollectionFromLayers();
+    this.geojson = this.toFeatureCollectionFromLayer();
     this.blockGeoJsonUpdate = false;
 
     this.refreshLabels();
-    this.emitLayerEvent('userEditItemRemoved', this.graphicToGeoJsonFeature(existing));
+    this.emitLayerEvent('userEditItemRemoved', this.graphicToGeoJsonFeature(graphicToRemove));
   }
 
-  private async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
-    const allGraphics = this.getAllLayerGraphics();
+  private updateGeojsonWithChanges(graphicToUpdate: Graphic): void {
+    if (!this.featureLayer) {
+      return;
+    }
 
-    return allGraphics.find((graphic: Graphic): boolean => {
-      return graphic.attributes?.[this.uniqueIdPropertyName] === uniqueId;
-    });
+    graphicToUpdate.popupTemplate = this.buildPopupTemplateFromCurrent(graphicToUpdate);
+    graphicToUpdate.symbol = this.getDefaultSymbolForGraphic(graphicToUpdate);
+
+    this.blockGeoJsonUpdate = true;
+    this.geojson = this.toFeatureCollectionFromLayer();
+    this.blockGeoJsonUpdate = false;
+
+    this.refreshLabels();
+    this.emitLayerEvent('userEditItemUpdated', this.graphicToGeoJsonFeature(graphicToUpdate));
   }
 
-  private getAllLayerGraphics(): Graphic[] {
-    return [
-      ...(this.pointLayer?.source.toArray() ?? []),
-      ...(this.polylineLayer?.source.toArray() ?? []),
-      ...(this.polygonLayer?.source.toArray() ?? [])
-    ];
+  private toFeatureCollectionFromLayer(): FeatureCollection {
+    return {
+      type: 'FeatureCollection',
+      features: (this.featureLayer?.graphics.toArray() ?? []).map((graphic: Graphic) =>
+        this.graphicToGeoJsonFeature(graphic)
+      )
+    };
   }
 
-  private getTargetFeatureLayerForGraphic(graphic: Graphic): FeatureLayer | null {
-    const geometry = graphic.geometry as UpLayerGeometry | null | undefined;
+  private graphicToGeoJsonFeature(graphic: Graphic): Feature {
+    const geometry = this.arcGeometryToGeojsonGeometry(graphic.geometry as ArcLayerGeometry | null | undefined);
 
+    return {
+      type: 'Feature',
+      geometry: geometry ?? {
+        type: 'Point',
+        coordinates: [0, 0]
+      },
+      properties: {
+        ...(graphic.attributes ?? {})
+      }
+    };
+  }
+
+  private arcGeometryToGeojsonGeometry(
+    geometry: ArcLayerGeometry | null | undefined
+  ): GeoJsonGeometry | null {
     if (!geometry) {
       return null;
     }
 
-    if (ArcGeoJsonLayer.isPoint(geometry)) {
-      return this.pointLayer;
+    if (ArcGeojsonLayer.isPoint(geometry)) {
+      const geographic = this.toGeographicPoint(geometry);
+      return {
+        type: 'Point',
+        coordinates: [geographic.x, geographic.y]
+      };
     }
 
-    if (ArcGeoJsonLayer.isPolyline(geometry)) {
-      return this.polylineLayer;
+    if (ArcGeojsonLayer.isPolyline(geometry)) {
+      const polyline = this.toGeographicPolyline(geometry);
+      const paths = polyline.paths ?? [];
+
+      if (paths.length <= 1) {
+        return {
+          type: 'LineString',
+          coordinates: paths[0] ?? []
+        };
+      }
+
+      return {
+        type: 'MultiLineString',
+        coordinates: paths
+      };
     }
 
-    if (ArcGeoJsonLayer.isPolygon(geometry)) {
-      return this.polygonLayer;
+    if (ArcGeojsonLayer.isPolygon(geometry)) {
+      const polygon = this.toGeographicPolygon(geometry);
+      return {
+        type: 'Polygon',
+        coordinates: polygon.rings as number[][][]
+      };
+    }
+
+    if (geometry.type === 'multipoint') {
+      const multipoint = geometry as Multipoint;
+      const converted = webMercatorUtils.webMercatorToGeographic(multipoint) as Multipoint;
+      return {
+        type: 'MultiPoint',
+        coordinates: converted.points as number[][]
+      };
     }
 
     return null;
   }
 
-  private updateRenderer(newRenderer: any): void {
-    JsonUtils.updateRenderer(
-      newRenderer,
-      [this.pointLayer, this.polylineLayer, this.polygonLayer].filter(Boolean) as FeatureLayer[],
-      this.getSymbolJson.bind(this)
-    );
-  }
-
-  private refreshLabels(): void {
-    JsonUtils.refreshGraphicsLayerLabels(
-      this.pointLayer,
-      this.pointLabelLayer,
-      (graphic: Graphic): Point => ArcGeoJsonLayer.getPopupPoint(graphic.geometry as UpLayerGeometry | null | undefined),
-      this.labelJson,
-      this.labelcolor,
-      this.labelsize
-    );
-
-    JsonUtils.refreshGraphicsLayerLabels(
-      this.polylineLayer,
-      this.polylineLabelLayer,
-      (graphic: Graphic): Point => ArcGeoJsonLayer.getPopupPoint(graphic.geometry as UpLayerGeometry | null | undefined),
-      this.labelJson,
-      this.labelcolor,
-      this.labelsize
-    );
-
-    JsonUtils.refreshGraphicsLayerLabels(
-      this.polygonLayer,
-      this.polygonLabelLayer,
-      (graphic: Graphic): Point => ArcGeoJsonLayer.getPopupPoint(graphic.geometry as UpLayerGeometry | null | undefined),
-      this.labelJson,
-      this.labelcolor,
-      this.labelsize
-    );
-  }
-
-  private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
-    if (this.enableUserEdit || this.inDrawingMode || !this.isPopupVisible) {
-      return;
-    }
-
-    if (!this.view?.popup) {
-      return;
-    }
-
-    const location = mapPoint ?? ArcGeoJsonLayer.getPopupPoint(graphic.geometry as UpLayerGeometry | null | undefined);
-    const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-
-    graphic.popupTemplate = popupTemplate;
-    this.view.popup.open({
-      location,
-      features: [graphic]
-    });
-  }
-
-  private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate {
-    const parsed = this.getJsonFor(this.infoTemplate);
-
-    let title = 'Details';
-    let content = 'No Details Available';
-
-    if (!parsed.error && parsed.parsedJson) {
-      const template = parsed.parsedJson as InfoTemplateDetails;
-      title = this.resolveInfoTemplateValue(template.listItem, graphic) || title;
-      content = this.resolveInfoTemplateValue(template.details, graphic) || content;
-    }
-
-    return new PopupTemplate({
-      title,
-      content
-    });
-  }
-
-  private resolveInfoTemplateValue(
-    value: string | ((graphic: any) => string) | undefined,
-    graphic: Graphic
-  ): string {
-    if (typeof value === 'function') {
-      return value(graphic);
-    }
-
-    if (typeof value === 'string') {
-      return value;
-    }
-
-    return '';
-  }
-
-  private ensurePopupSuppressed(): void {
-    if (!this.view?.popup) {
-      return;
-    }
-
-    this.closePopup();
-    this.view.popup.autoOpenEnabled = false;
-  }
-
-  private ensurePopupEnabledWhenAllowed(): void {
-    if (!this.view?.popup) {
-      return;
-    }
-
-    if (!this.enableUserEdit && !this.inDrawingMode) {
-      this.view.popup.autoOpenEnabled = true;
-    }
-  }
-
-  private closePopup(): void {
-    if (this.view?.popup) {
-      this.view.popup.close();
-    }
-  }
-
-  private emitLayerEvent(eventName: string, detail: any): void {
-    this.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail,
-        bubbles: true,
-        composed: true
-      })
-    );
-  }
-
-  private toMouseEventDetail(graphic: Graphic, mapPoint?: Point): MouseEventDetail {
-    const point = mapPoint
-      ? this.toGeographicPoint(mapPoint)
-      : ArcGeoJsonLayer.getPopupPoint(graphic.geometry as UpLayerGeometry | null | undefined);
-
-    return {
-      coordinates: {
-        latitude: point.y,
-        longitude: point.x
-      },
-      attributes: graphic.attributes
-    };
-  }
-
-  private getArcGISJson(geojson: string | FeatureCollection): {
-    pointGraphics: Graphic[];
-    polylineGraphics: Graphic[];
-    polygonGraphics: Graphic[];
-  } | null {
+  private getArcGISJson(
+    geojson: string | FeatureCollection
+  ): { graphics: Graphic[]; geometryType: string | undefined } | null {
     const geojsonParseResult = this.getJsonFor(geojson);
-    if (geojsonParseResult.error) {
+
+    if (geojsonParseResult.error || !geojsonParseResult.parsedJson) {
+      console.error('Unable to parse geojson string', geojsonParseResult.error);
       return null;
     }
 
     const parsedGeojson = geojsonParseResult.parsedJson as FeatureCollection;
-    if (!parsedGeojson || parsedGeojson.type !== 'FeatureCollection') {
+
+    if (!parsedGeojson || parsedGeojson.type !== 'FeatureCollection' || !Array.isArray(parsedGeojson.features)) {
       return null;
     }
 
-    const pointGraphics: Graphic[] = [];
-    const polylineGraphics: Graphic[] = [];
-    const polygonGraphics: Graphic[] = [];
+    const graphics: Graphic[] = [];
+    let geometryType: string | undefined;
 
     parsedGeojson.features.forEach((feature: Feature, index: number): void => {
       const graphic = this.geojsonFeatureToGraphic(feature, index);
-      if (!graphic?.geometry) {
-        return;
-      }
-
-      if (ArcGeoJsonLayer.isPoint(graphic.geometry)) {
-        pointGraphics.push(graphic);
-      } else if (ArcGeoJsonLayer.isPolyline(graphic.geometry)) {
-        polylineGraphics.push(graphic);
-      } else if (ArcGeoJsonLayer.isPolygon(graphic.geometry)) {
-        polygonGraphics.push(graphic);
+      if (graphic) {
+        if (geometryType === undefined) {
+          geometryType = graphic.geometry?.type;
+        }
+        graphics.push(graphic);
       }
     });
 
     return {
-      pointGraphics,
-      polylineGraphics,
-      polygonGraphics
+      graphics,
+      geometryType
     };
   }
 
   private geojsonFeatureToGraphic(feature: Feature, index: number): Graphic | null {
-    const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
+    const geometry = this.geojsonGeometryToArcGeometry(feature?.geometry ?? null);
     if (!geometry) {
       return null;
     }
 
-    const properties: any = { ...(feature.properties ?? {}) };
+    const properties: any = {
+      ...(feature?.properties ?? {})
+    };
 
     if (properties[this.uniqueIdPropertyName] === undefined) {
       properties[this.uniqueIdPropertyName] = index;
@@ -971,6 +946,10 @@ export class ArcGeoJsonLayer extends LitElement {
 
     if (properties.OBJECTID === undefined) {
       properties.OBJECTID = index;
+    }
+
+    if (properties.LABEL === undefined && properties.label !== undefined) {
+      properties.LABEL = properties.label;
     }
 
     const graphic = new Graphic({
@@ -985,14 +964,14 @@ export class ArcGeoJsonLayer extends LitElement {
     return graphic;
   }
 
-  private geojsonGeometryToArcGeometry(geometry: GeoJsonGeometry | null): UpLayerGeometry | null {
+  private geojsonGeometryToArcGeometry(geometry: GeoJsonGeometry | null): ArcLayerGeometry | null {
     if (!geometry) {
       return null;
     }
 
     switch (geometry.type) {
       case 'Point': {
-        const [x, y] = geometry.coordinates;
+        const [x, y] = geometry.coordinates as number[];
         return new Point({
           x,
           y,
@@ -1001,41 +980,39 @@ export class ArcGeoJsonLayer extends LitElement {
       }
 
       case 'MultiPoint': {
-        if (!geometry.coordinates.length) {
-          return null;
-        }
-
-        const [x, y] = geometry.coordinates[0];
-        return new Point({
-          x,
-          y,
+        return new Multipoint({
+          points: geometry.coordinates as number[][],
           spatialReference: { wkid: 4326 }
         });
       }
 
       case 'LineString': {
         return new Polyline({
-          paths: [geometry.coordinates],
+          paths: [geometry.coordinates as number[][]],
           spatialReference: { wkid: 4326 }
         });
       }
 
       case 'MultiLineString': {
         return new Polyline({
-          paths: geometry.coordinates,
+          paths: geometry.coordinates as number[][][],
           spatialReference: { wkid: 4326 }
         });
       }
 
       case 'Polygon': {
         return new Polygon({
-          rings: geometry.coordinates,
+          rings: geometry.coordinates as number[][][],
           spatialReference: { wkid: 4326 }
         });
       }
 
       case 'MultiPolygon': {
-        const rings = geometry.coordinates.flat();
+        const rings: number[][][] = [];
+        (geometry.coordinates as number[][][][]).forEach((polygonCoordinates: number[][][]) => {
+          polygonCoordinates.forEach((ring: number[][]) => rings.push(ring));
+        });
+
         return new Polygon({
           rings,
           spatialReference: { wkid: 4326 }
@@ -1047,100 +1024,16 @@ export class ArcGeoJsonLayer extends LitElement {
     }
   }
 
-  private toFeatureCollectionFromLayers(): FeatureCollection {
-    return {
-      type: 'FeatureCollection',
-      features: this.getAllLayerGraphics().map((graphic: Graphic): Feature =>
-        this.graphicToGeoJsonFeature(graphic)
-      )
-    };
-  }
-
-  private graphicToGeoJsonFeature(graphic: Graphic): Feature {
-    const geometry = graphic.geometry as UpLayerGeometry | null | undefined;
-
-    return {
-      type: 'Feature',
-      geometry: this.arcGeometryToGeojsonGeometry(geometry),
-      properties: { ...(graphic.attributes ?? {}) }
-    };
-  }
-
-  private arcGeometryToGeojsonGeometry(geometry: UpLayerGeometry | null | undefined): GeoJsonGeometry | null {
-    if (!geometry) {
-      return null;
-    }
-
-    if (ArcGeoJsonLayer.isPoint(geometry)) {
-      const geographic = this.toGeographicPoint(geometry);
-      return {
-        type: 'Point',
-        coordinates: [geographic.x, geographic.y]
-      };
-    }
-
-    if (ArcGeoJsonLayer.isPolyline(geometry)) {
-      const geographic = this.toGeographicPolyline(geometry);
-      const paths = geographic.paths ?? [];
-
-      if (paths.length <= 1) {
-        return {
-          type: 'LineString',
-          coordinates: paths[0] ?? []
-        };
-      }
-
-      return {
-        type: 'MultiLineString',
-        coordinates: paths as number[][][]
-      };
-    }
-
-    if (ArcGeoJsonLayer.isPolygon(geometry)) {
-      const geographic = this.toGeographicPolygon(geometry);
-      return {
-        type: 'Polygon',
-        coordinates: geographic.rings as number[][][]
-      };
-    }
-
-    return null;
-  }
-
-  private toGeographicPoint(point: Point): Point {
-    if (point.spatialReference?.isWGS84) {
-      return point;
-    }
-
-    return webMercatorUtils.webMercatorToGeographic(point) as Point;
-  }
-
-  private toGeographicPolyline(polyline: Polyline): Polyline {
-    if (polyline.spatialReference?.isWGS84) {
-      return polyline;
-    }
-
-    return webMercatorUtils.webMercatorToGeographic(polyline) as Polyline;
-  }
-
-  private toGeographicPolygon(polygon: Polygon): Polygon {
-    if (polygon.spatialReference?.isWGS84) {
-      return polygon;
-    }
-
-    return webMercatorUtils.webMercatorToGeographic(polygon) as Polygon;
-  }
-
   private getDefaultSymbolForGraphic(graphic: Graphic): any {
-    return this.getDefaultSymbolForGeometry(graphic.geometry as UpLayerGeometry | null | undefined);
+    return this.resolveGraphicSymbol(graphic) ?? this.getDefaultSymbolForGeometry(graphic.geometry as ArcLayerGeometry | null | undefined);
   }
 
-  private getDefaultSymbolForGeometry(geometry: UpLayerGeometry | null | undefined): any {
-    if (geometry && ArcGeoJsonLayer.isPoint(geometry)) {
+  private getDefaultSymbolForGeometry(geometry: ArcLayerGeometry | null | undefined): any {
+    if (!geometry) {
       return new SimpleMarkerSymbol({
         style: 'circle',
-        color: this.DEFAULT_SYMBOL_COLOR as any,
-        size: ArcGeoJsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+        color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR as any,
+        size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
         outline: {
           color: [0, 0, 0, 200] as any,
           width: 1
@@ -1148,92 +1041,433 @@ export class ArcGeoJsonLayer extends LitElement {
       });
     }
 
-    if (geometry && ArcGeoJsonLayer.isPolyline(geometry)) {
+    if (ArcGeojsonLayer.isPoint(geometry) || geometry.type === 'multipoint') {
+      return new SimpleMarkerSymbol({
+        style: 'circle',
+        color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR as any,
+        size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+        outline: {
+          color: [0, 0, 0, 200] as any,
+          width: 1
+        }
+      });
+    }
+
+    if (ArcGeojsonLayer.isPolyline(geometry)) {
       return new SimpleLineSymbol({
         style: 'solid',
-        color: this.DEFAULT_SYMBOL_COLOR as any,
-        width: ArcGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+        color: ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR as any,
+        width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
       });
     }
 
     return new SimpleFillSymbol({
       style: 'solid',
       color: [
-        ArcGeoJsonLayer.DEFAULT_SYMBOL_COLOR[0],
-        ArcGeoJsonLayer.DEFAULT_SYMBOL_COLOR[1],
-        ArcGeoJsonLayer.DEFAULT_SYMBOL_COLOR[2],
+        ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR[0],
+        ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR[1],
+        ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR[2],
         100
       ] as any,
       outline: {
         color: [110, 110, 110, 255] as any,
-        width: ArcGeoJsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+        width: ArcGeojsonLayer.DEFAULT_SYMBOL_POLYGON_WIDTH
       }
     });
   }
 
-  private getSymbolJson(
-    geomType: string,
-    defaultColor: number[],
-    defaultSymbolMarkerSize: number,
-    widthGeomLine: number,
-    widthGeomPolygon: number
-  ): object {
-    return JsonUtils.getSymbolJson(
-      geomType,
-      defaultColor,
-      defaultSymbolMarkerSize,
-      widthGeomLine,
-      widthGeomPolygon
-    );
+  private updateRenderer(newRenderer: any): void {
+    if (!this.featureLayer) {
+      return;
+    }
+
+    this.renderer = newRenderer;
+
+    this.featureLayer.graphics.forEach((graphic: Graphic): void => {
+      graphic.symbol = this.resolveGraphicSymbol(graphic) ?? this.getDefaultSymbolForGeometry(graphic.geometry as ArcLayerGeometry | null | undefined);
+    });
   }
 
-  private getJsonFor(jsonObject: any): { error?: Error; parsedJson?: any } {
-    return JsonUtils.getJsonFor(jsonObject);
+  private resolveGraphicSymbol(graphic: Graphic): any {
+    const geometry = graphic.geometry as ArcLayerGeometry | null | undefined;
+    const defaultSymbol = this.getDefaultSymbolForGeometry(geometry);
+    const rendererParseResult = this.getJsonFor(this.renderer);
+
+    if (!rendererParseResult.parsedJson || rendererParseResult.error) {
+      return defaultSymbol;
+    }
+
+    const rendererConfig = this.clonePlain(rendererParseResult.parsedJson);
+    const type = rendererConfig?.type;
+
+    if (type === 'simple') {
+      return this.normalizeLegacySymbol(rendererConfig.symbol) ?? defaultSymbol;
+    }
+
+    if (type === 'uniqueValue') {
+      const fieldName = rendererConfig.field1;
+      const fieldValue = graphic.attributes?.[fieldName];
+      const info = (rendererConfig.uniqueValueInfos ?? []).find((item: any) => item.value === fieldValue);
+      return this.normalizeLegacySymbol(info?.symbol ?? rendererConfig.defaultSymbol) ?? defaultSymbol;
+    }
+
+    if (type === 'classBreaks') {
+      const fieldName = rendererConfig.field;
+      const fieldValue = Number(graphic.attributes?.[fieldName]);
+      const info = (rendererConfig.classBreakInfos ?? []).find((item: any) => {
+        const min = item.minValue ?? Number.NEGATIVE_INFINITY;
+        const max = item.maxValue ?? Number.POSITIVE_INFINITY;
+        return fieldValue >= min && fieldValue <= max;
+      });
+      return this.normalizeLegacySymbol(info?.symbol ?? rendererConfig.defaultSymbol) ?? defaultSymbol;
+    }
+
+    return defaultSymbol;
   }
 
-  private determineExistingGeometryType(): string | undefined {
-    const firstGraphic =
-      this.pointLayer?.source.getItemAt(0) ??
-      this.polylineLayer?.source.getItemAt(0) ??
-      this.polygonLayer?.source.getItemAt(0);
+  private getLabelJson(
+    userLabel: string | object | object[],
+    userColor: string | number[],
+    userSize: number
+  ): any {
+    const labelJson = this.getJsonFor(userLabel);
 
-    return firstGraphic?.geometry?.type;
+    if (typeof userLabel === 'string' && userLabel.trim() === '') {
+      return this.getJsonLabelFor(this.resolveLabelColor(userColor), this.resolveLabelSize(userSize));
+    }
+
+    if (labelJson.error || !labelJson.parsedJson) {
+      console.warn('Could not parse label json, falling back to color and size properties', labelJson.error);
+      return this.getJsonLabelFor(this.resolveLabelColor(userColor), this.resolveLabelSize(userSize));
+    }
+
+    return labelJson.parsedJson;
   }
 
-  private validGeometryType(drawGeometryType: string, featureLayerGeometryType: string): boolean {
-    const required = this.determineFeatureLayerGeometryType(drawGeometryType);
-    return required === featureLayerGeometryType;
+  private getJsonLabelFor(color: number[], fontsize: number): any {
+    return {
+      labelExpressionInfo: {
+        expression: '$feature.LABEL'
+      },
+      symbol: {
+        type: 'text',
+        color,
+        haloColor: 'black',
+        haloSize: 1,
+        xoffset: 3,
+        yoffset: 3,
+        font: {
+          size: fontsize,
+          family: 'sans-serif',
+          weight: 'bold'
+        }
+      }
+    };
   }
 
-  private determineFeatureLayerGeometryType(drawGeometryType: string): string {
-    switch ((drawGeometryType || '').toUpperCase()) {
-      case DrawGeometryTypes.FREEHAND_POLYLINE:
-      case DrawGeometryTypes.LINE:
-      case DrawGeometryTypes.POLYLINE:
-        return 'polyline';
+  private resolveLabelText(graphic: Graphic): string {
+    const attrs = graphic.attributes ?? {};
+    if (attrs.LABEL !== undefined && attrs.LABEL !== null) {
+      return String(attrs.LABEL);
+    }
 
-      case DrawGeometryTypes.MULTI_POINT:
-      case DrawGeometryTypes.POINT:
-        return 'point';
+    if (attrs.label !== undefined && attrs.label !== null) {
+      return String(attrs.label);
+    }
 
-      case DrawGeometryTypes.ARROW:
-      case DrawGeometryTypes.CIRCLE:
-      case DrawGeometryTypes.DOWN_ARROW:
-      case DrawGeometryTypes.ELLIPSE:
-      case DrawGeometryTypes.EXTENT:
-      case DrawGeometryTypes.FREEHAND_POLYGON:
-      case DrawGeometryTypes.LEFT_ARROW:
-      case DrawGeometryTypes.POLYGON:
-      case DrawGeometryTypes.RECTANGLE:
-      case DrawGeometryTypes.RIGHT_ARROW:
-      case DrawGeometryTypes.TRIANGLE:
-      case DrawGeometryTypes.UP_ARROW:
+    return '';
+  }
+
+  private resolveLabelColor(userColor: string | number[]): number[] {
+    if (Array.isArray(userColor) && userColor.length >= 3) {
+      return [
+        Number(userColor[0]) || 0,
+        Number(userColor[1]) || 0,
+        Number(userColor[2]) || 0,
+        userColor.length > 3 ? Number(userColor[3]) || 255 : 255
+      ];
+    }
+
+    const colorJson = this.getJsonFor(userColor);
+    if (Array.isArray(colorJson.parsedJson)) {
+      const parsedColor = colorJson.parsedJson as number[];
+      return [
+        Number(parsedColor[0]) || 0,
+        Number(parsedColor[1]) || 0,
+        Number(parsedColor[2]) || 0,
+        parsedColor.length > 3 ? Number(parsedColor[3]) || 255 : 255
+      ];
+    }
+
+    return [0, 0, 0, 255];
+  }
+
+  private resolveLabelSize(userSize: number): number {
+    if (!Number.isNaN(userSize) && userSize > 0) {
+      return userSize;
+    }
+    return ArcGeojsonLayer.DEFAULT_LABEL_SIZE;
+  }
+
+  private normalizeLegacySymbol(symbol: any): any {
+    const safe = this.clonePlain(symbol);
+
+    if (!safe || typeof safe !== 'object') {
+      return safe;
+    }
+
+    const type = safe.type;
+
+    if (type === 'esriSMS') {
+      return new SimpleMarkerSymbol({
+        style: this.normalizeLegacyMarkerStyle(safe.style),
+        color: safe.color ?? ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR,
+        size: safe.size ?? ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+        angle: safe.angle ?? 0,
+        xoffset: safe.xoffset ?? 0,
+        yoffset: safe.yoffset ?? 0,
+        outline: safe.outline
+          ? {
+              color: safe.outline.color ?? [0, 0, 0, 200],
+              width: safe.outline.width ?? 1,
+              style: this.normalizeLegacyLineStyle(safe.outline.style)
+            }
+          : undefined
+      });
+    }
+
+    if (type === 'esriSLS') {
+      return new SimpleLineSymbol({
+        style: this.normalizeLegacyLineStyle(safe.style),
+        color: safe.color ?? ArcGeojsonLayer.DEFAULT_SYMBOL_COLOR,
+        width: safe.width ?? ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+      });
+    }
+
+    if (type === 'esriSFS') {
+      return new SimpleFillSymbol({
+        style: this.normalizeLegacyFillStyle(safe.style),
+        color: safe.color ?? [0, 0, 255, 100],
+        outline: safe.outline
+          ? {
+              color: safe.outline.color ?? [110, 110, 110, 255],
+              width: safe.outline.width ?? ArcGeojsonLayer.DEFAULT_SYMBOL_POLYGON_WIDTH,
+              style: this.normalizeLegacyLineStyle(safe.outline.style)
+            }
+          : undefined
+      });
+    }
+
+    if (type === 'simple-marker' || type === 'simple-line' || type === 'simple-fill') {
+      return safe;
+    }
+
+    return safe;
+  }
+
+  private normalizeLegacyMarkerStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrismscircle':
+      case 'circle':
+        return 'circle';
+      case 'esrismssquare':
+      case 'square':
+        return 'square';
+      case 'esrismsdiamond':
+      case 'diamond':
+        return 'diamond';
+      case 'esrismscross':
+      case 'cross':
+        return 'cross';
+      case 'esrismsx':
+      case 'x':
+        return 'x';
+      case 'esrismstriangle':
+      case 'triangle':
+        return 'triangle';
       default:
-        return 'polygon';
+        return 'circle';
     }
   }
 
-  private mapDrawTypeToSketchCreateTool(drawGeometryType: string): string | null {
+  private normalizeLegacyLineStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrislssolid':
+      case 'solid':
+        return 'solid';
+      case 'esrislsdash':
+      case 'dash':
+        return 'dash';
+      case 'esrislsdot':
+      case 'dot':
+        return 'dot';
+      case 'esrislsdashdot':
+      case 'dash-dot':
+        return 'dash-dot';
+      case 'esrislsdashdotdot':
+      case 'long-dash-dot-dot':
+        return 'long-dash-dot-dot';
+      default:
+        return 'solid';
+    }
+  }
+
+  private normalizeLegacyFillStyle(style: string | undefined): any {
+    switch ((style ?? '').toLowerCase()) {
+      case 'esrisfssolid':
+      case 'solid':
+        return 'solid';
+      case 'esrisfsbackwarddiagonal':
+      case 'backward-diagonal':
+        return 'backward-diagonal';
+      case 'esrisfscross':
+      case 'cross':
+        return 'cross';
+      case 'esrisfsdiagonalcross':
+      case 'diagonal-cross':
+        return 'diagonal-cross';
+      case 'esrisfsforwarddiagonal':
+      case 'forward-diagonal':
+        return 'forward-diagonal';
+      case 'esrifsnull':
+      case 'none':
+        return 'none';
+      case 'esrisfshorizontal':
+      case 'horizontal':
+        return 'horizontal';
+      case 'esrisfsvertical':
+      case 'vertical':
+        return 'vertical';
+      default:
+        return 'solid';
+    }
+  }
+
+  private getInfoTemplateJson(value: any): InfoTemplateDetails | null {
+    const parsed = this.getJsonFor(value);
+
+    if (typeof value === 'string' && value.trim() === '') {
+      return null;
+    }
+
+    if (parsed.error || !parsed.parsedJson) {
+      return null;
+    }
+
+    return parsed.parsedJson as InfoTemplateDetails;
+  }
+
+  private resolveTemplateValue(value: string | ((graphic: Graphic) => string), graphic: Graphic): string {
+    if (typeof value === 'function') {
+      try {
+        return value(graphic);
+      } catch (error) {
+        console.warn('Failed to resolve popup template function', error);
+        return '';
+      }
+    }
+
+    return value ?? '';
+  }
+
+  private buildDefaultPopupContent(attributes: Record<string, any>): string {
+    const rows = Object.entries(attributes)
+      .map(([key, value]) => `<div><strong>${key}:</strong> ${String(value)}</div>`)
+      .join('');
+
+    return rows || '<div>No Details Available</div>';
+  }
+
+  private updateLayerName(newName: string): void {
+    if (this.featureLayer) {
+      this.featureLayer.title = newName || this.id || 'Arc GeoJSON Layer';
+    }
+
+    if (this.labelLayer) {
+      this.labelLayer.title = `${newName || this.id || 'Arc GeoJSON Layer'} Labels`;
+    }
+  }
+
+  private async getGraphicFromViewEvent(event: any): Promise<Graphic | null> {
+    if (!this.view || !this.featureLayer) {
+      return null;
+    }
+
+    const hitTestResult = await this.view.hitTest(event);
+    const result = (hitTestResult?.results ?? []).find((item: any) => {
+      return item?.graphic?.layer === this.featureLayer;
+    });
+
+    return (result?.graphic as Graphic) ?? null;
+  }
+
+  private buildLayerMouseEvent(graphic: Graphic, event: any): LayerMouseEvent {
+    const mapPoint = event?.mapPoint
+      ? webMercatorUtils.webMercatorToGeographic(event.mapPoint)
+      : ArcGeojsonLayer.getPopupPoint(graphic.geometry as ArcLayerGeometry | null | undefined);
+
+    return {
+      coordinates: {
+        latitude: (mapPoint as Point)?.y ?? 0,
+        longitude: (mapPoint as Point)?.x ?? 0
+      },
+      attributes: graphic.attributes
+    };
+  }
+
+  private emitLayerEvent(name: string, detail: any): void {
+    this.dispatchEvent(
+      new CustomEvent(name, {
+        detail,
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+
+  private closePopup(): void {
+    if (this.view?.popup) {
+      this.view.popup.close();
+    }
+  }
+
+  private getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+    if (jsonObj === undefined || jsonObj === null) {
+      return { parsedJson: undefined };
+    }
+
+    if (typeof jsonObj === 'string') {
+      if (jsonObj.trim() === '') {
+        return { parsedJson: undefined };
+      }
+
+      try {
+        return {
+          parsedJson: JSON.parse(jsonObj)
+        };
+      } catch (error) {
+        return {
+          error: error as Error
+        };
+      }
+    }
+
+    return {
+      parsedJson: jsonObj
+    };
+  }
+
+  private clonePlain<T>(value: T): T {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
+  private mapDrawGeometryTypeToSketchCreateTool(
+    drawGeometryType: string
+  ): 'point' | 'polyline' | 'polygon' | 'rectangle' | 'circle' | null {
     switch ((drawGeometryType || '').toUpperCase()) {
       case DrawGeometryTypes.POINT:
       case DrawGeometryTypes.MULTI_POINT:
@@ -1244,14 +1478,18 @@ export class ArcGeoJsonLayer extends LitElement {
       case DrawGeometryTypes.FREEHAND_POLYLINE:
         return 'polyline';
 
+      case DrawGeometryTypes.RECTANGLE:
+      case DrawGeometryTypes.EXTENT:
+        return 'rectangle';
+
+      case DrawGeometryTypes.CIRCLE:
+        return 'circle';
+
       case DrawGeometryTypes.POLYGON:
       case DrawGeometryTypes.FREEHAND_POLYGON:
-      case DrawGeometryTypes.RECTANGLE:
-      case DrawGeometryTypes.CIRCLE:
-      case DrawGeometryTypes.ELLIPSE:
-      case DrawGeometryTypes.EXTENT:
       case DrawGeometryTypes.ARROW:
       case DrawGeometryTypes.DOWN_ARROW:
+      case DrawGeometryTypes.ELLIPSE:
       case DrawGeometryTypes.LEFT_ARROW:
       case DrawGeometryTypes.RIGHT_ARROW:
       case DrawGeometryTypes.TRIANGLE:
@@ -1263,67 +1501,40 @@ export class ArcGeoJsonLayer extends LitElement {
     }
   }
 
-  private removeAllLayers(): void {
-    [
-      this.pointLayer,
-      this.polylineLayer,
-      this.polygonLayer,
-      this.editLayer,
-      this.pointLabelLayer,
-      this.polylineLabelLayer,
-      this.polygonLabelLayer
-    ].forEach((layer) => {
-      if (layer && this.view?.map?.layers?.includes(layer)) {
-        this.view.map.remove(layer);
-      }
-    });
+  private toGeographicPoint(point: Point): Point {
+    if (point.spatialReference?.isWGS84) {
+      return point;
+    }
 
-    this.pointLayer = null;
-    this.polylineLayer = null;
-    this.polygonLayer = null;
-    this.editLayer = null;
-    this.pointLabelLayer = null;
-    this.polylineLabelLayer = null;
-    this.polygonLabelLayer = null;
+    return (webMercatorUtils.webMercatorToGeographic(point) as Point) ?? point;
   }
 
-  private removeAllHandles(): void {
-    this.handles.forEach((h: IHandle): void => h.remove());
-    this.handles = [];
+  private toGeographicPolyline(polyline: Polyline): Polyline {
+    if (polyline.spatialReference?.isWGS84) {
+      return polyline;
+    }
 
-    this.updatingHandles.forEach((h: IHandle): void => h.remove());
-    this.updatingHandles = [];
-
-    this.removeEditorHandles();
+    return (webMercatorUtils.webMercatorToGeographic(polyline) as Polyline) ?? polyline;
   }
 
-  private removeEditorHandles(): void {
-    this.editorWatchHandles.forEach((h: IHandle): void => h.remove());
-    this.editorWatchHandles = [];
+  private toGeographicPolygon(polygon: Polygon): Polygon {
+    if (polygon.spatialReference?.isWGS84) {
+      return polygon;
+    }
+
+    return (webMercatorUtils.webMercatorToGeographic(polygon) as Polygon) ?? polygon;
   }
 
-  private static isPoint(geometry: any): geometry is Point {
-    return geometry?.type === 'point';
-  }
-
-  private static isPolyline(geometry: any): geometry is Polyline {
-    return geometry?.type === 'polyline';
-  }
-
-  private static isPolygon(geometry: any): geometry is Polygon {
-    return geometry?.type === 'polygon';
-  }
-
-  private static getPopupPoint(geometry: UpLayerGeometry | null | undefined): Point {
+  private static getPopupPoint(geometry: ArcLayerGeometry | null | undefined): Point {
     if (!geometry) {
       return new Point({ x: 0, y: 0, spatialReference: { wkid: 4326 } });
     }
 
-    if (ArcGeoJsonLayer.isPoint(geometry)) {
+    if (ArcGeojsonLayer.isPoint(geometry)) {
       return geometry;
     }
 
-    if (ArcGeoJsonLayer.isPolyline(geometry)) {
+    if (ArcGeojsonLayer.isPolyline(geometry)) {
       const path = geometry.paths?.[0] ?? [];
       const mid = path[Math.floor(path.length / 2)] ?? [0, 0];
       return new Point({
@@ -1333,20 +1544,38 @@ export class ArcGeoJsonLayer extends LitElement {
       });
     }
 
-    if (ArcGeoJsonLayer.isPolygon(geometry)) {
-      return geometry.centroid;
+    if (ArcGeojsonLayer.isPolygon(geometry)) {
+      return geometry.centroid ?? geometry.extent?.center ?? new Point({ x: 0, y: 0, spatialReference: geometry.spatialReference });
     }
 
-    return new Point({ x: 0, y: 0, spatialReference: { wkid: 4326 } });
+    if (geometry.type === 'multipoint') {
+      const multipoint = geometry as Multipoint;
+      const first = multipoint.points?.[0] ?? [0, 0];
+      return new Point({
+        x: first[0],
+        y: first[1],
+        spatialReference: multipoint.spatialReference
+      });
+    }
+
+    return geometry.extent?.center ?? new Point({ x: 0, y: 0, spatialReference: { wkid: 4326 } });
+  }
+
+  private static isPoint(geometry: ArcLayerGeometry): geometry is Point {
+    return geometry.type === 'point';
+  }
+
+  private static isPolyline(geometry: ArcLayerGeometry): geometry is Polyline {
+    return geometry.type === 'polyline';
+  }
+
+  private static isPolygon(geometry: ArcLayerGeometry): geometry is Polygon {
+    return geometry.type === 'polygon';
   }
 }
 
-type IHandle = {
-  remove: () => void;
-};
-
 declare global {
   interface HTMLElementTagNameMap {
-    'arc-geojoson-layer': ArcGeoJsonLayer;
+    'arc-geojson-layer': ArcGeojsonLayer;
   }
 }
