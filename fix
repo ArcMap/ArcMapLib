@@ -1,42 +1,42 @@
-private createLayer(geojson: any): void {
-  if (!this.view) {
-    console.error('view not ready');
-    return;
-  }
+const map = this.view?.map;
 
-  const fsInfo = JsonUtils.getArcGISJson(geojson);
+if (!map) {
+  console.error('createLayer blocked: map not ready');
+  return;
+}
 
-  if (!fsInfo || !fsInfo.graphics.length) {
-    console.warn('No features to render');
-    return;
-  }
+if (!(this.featureLayer instanceof GraphicsLayer)) {
+  console.error('createLayer blocked: featureLayer is not an instance of GraphicsLayer');
+  return;
+}
 
-  // Create layers ONLY ONCE
-  if (!this.featureLayer) {
-    this.featureLayer = new GraphicsLayer();
-  }
+if (!(this.labelLayer instanceof GraphicsLayer)) {
+  console.error('createLayer blocked: labelLayer is not an instance of GraphicsLayer');
+  return;
+}
 
-  if (!this.labelLayer) {
-    this.labelLayer = new GraphicsLayer();
-  }
-
-  // Add layers ONLY ONCE
+try {
   if (!this.featureLayer.parent) {
-    this.view.map.add(this.featureLayer);
+    console.log('adding featureLayer to map', this.featureLayer);
+    map.add(this.featureLayer);
+    console.log('featureLayer added successfully');
+  } else {
+    console.log('featureLayer already has parent', this.featureLayer.parent);
   }
+} catch (error) {
+  console.error('featureLayer add failed', error, this.featureLayer);
+  return;
+}
 
+try {
   if (!this.labelLayer.parent) {
-    this.view.map.add(this.labelLayer);
+    console.log('adding labelLayer to map', this.labelLayer);
+    map.add(this.labelLayer);
+    console.log('labelLayer added successfully');
+  } else {
+    console.log('labelLayer already has parent', this.labelLayer.parent);
   }
-
-  // Clear old graphics
-  this.featureLayer.removeAll();
-  this.labelLayer.removeAll();
-
-  // Add new graphics
-  for (const graphic of fsInfo.graphics) {
-    this.featureLayer.add(graphic);
-  }
-
-  console.log('graphics count after add', fsInfo.graphics.length);
+} catch (error) {
+  console.error('labelLayer add failed', error, this.labelLayer);
+  return;
 }
