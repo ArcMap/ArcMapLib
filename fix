@@ -1,3 +1,52 @@
+async connectedCallback(): Promise<void> {
+  super.connectedCallback();
+
+  try {
+    this.ancestormap = this.closest('up-map') as any;
+
+    if (!this.ancestormap) {
+      console.error('<arc-geojson-layer> must be a descendant of an <up-map> element');
+      return;
+    }
+
+    if (typeof this.ancestormap.componentOnReady === 'function') {
+      await this.ancestormap.componentOnReady();
+    }
+
+    if ('updateComplete' in this.ancestormap) {
+      await this.ancestormap.updateComplete;
+    }
+
+    await this._getView();
+
+    console.log('this.view in connectedCallback of geojson layer', this.view);
+
+    if (!this.view) {
+      console.error('GeoJSON layer could not resolve view');
+      return;
+    }
+
+    this.createLayer(this.geojson);
+  } catch (error) {
+    console.error('connectedCallback failed', error);
+  }
+}
+
+private async _getView(): Promise<MapView | null> {
+  if (!this.ancestormap || typeof this.ancestormap.getViewInstance !== 'function') {
+    console.error('ancestor map must expose getViewInstance()');
+    return null;
+  }
+
+  const result = await this.ancestormap.getViewInstance();
+  this.view = result as MapView;
+
+  console.log('result of getViewInstance of geojson layer', result);
+  console.log('this.view after setting in getViewInstance of geojson layer', this.view);
+
+  return this.view;
+}
+
 private createLayer(geojson: string | FeatureCollection): void {
   if (!this.view) {
     console.error('createLayer: view is missing');
@@ -33,16 +82,25 @@ private createLayer(geojson: string | FeatureCollection): void {
   console.log('featureLayer instanceof GraphicsLayer', this.featureLayer instanceof GraphicsLayer);
   console.log('labelLayer instanceof GraphicsLayer', this.labelLayer instanceof GraphicsLayer);
 
-  if (this.view.map) {
-    const mapLayers = this.view.map.layers.toArray();
+  const arcMap = this.getArcMapInstance();
+  if (!arcMap) {
+    console.error('createLayer: map is missing');
+    return;
+  }
 
-    if (this.featureLayer && !mapLayers.includes(this.featureLayer)) {
-      this.view.map.add(this.featureLayer);
+  try {
+    const existingLayers = arcMap.layers?.toArray?.() ?? [];
+
+    if (this.featureLayer && !existingLayers.includes(this.featureLayer)) {
+      arcMap.add(this.featureLayer as any);
     }
 
-    if (this.labelLayer && !mapLayers.includes(this.labelLayer)) {
-      this.view.map.add(this.labelLayer);
+    if (this.labelLayer && !existingLayers.includes(this.labelLayer)) {
+      arcMap.add(this.labelLayer as any);
     }
+  } catch (error) {
+    console.error('createLayer: failed adding layers to map', error);
+    return;
   }
 
   this.featureLayer.removeAll();
