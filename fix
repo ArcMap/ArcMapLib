@@ -1,15 +1,18 @@
-// Mock HTMLElement for Node environment
-if (typeof HTMLElement === 'undefined') {
-  (global as any).HTMLElement = class HTMLElement {
-    closest() { return null; }
-    querySelector() { return null; }
-    querySelectorAll() { return []; }
-    addEventListener() {}
-    removeEventListener() {}
-    dispatchEvent() { return true; }
-    setAttribute() {}
-    getAttribute() { return null; }
-    hasAttribute() { return false; }
-    removeAttribute() {}
-  };
-}
+// Must be before any imports
+(global as any).customElements = {
+  define() {},
+  get() { return undefined; },
+  whenDefined() { return Promise.resolve(); },
+};
+
+(global as any).HTMLElement = class {
+  closest() { return null; }
+  querySelector() { return null; }
+  querySelectorAll() { return []; }
+  addEventListener() {}
+  removeEventListener() {}
+  dispatchEvent() { return true; }
+  setAttribute() {}
+  getAttribute() { return null; }
+  removeAttribute() {}
+};
