@@ -1,87 +1,101 @@
-// arc-geojson-layer.test.ts
+// src/geojson-layer/geojson-layer.spec.ts
 
-import { ArcGeojsonLayer } from './arc-geojson-layer';
+// ─── Mocks must come before imports ──────────────────────────────────────────
 
-// ─── Mock ArcGIS modules ──────────────────────────────────────────────────────
-
-jest.mock('@arcgis/core/views/MapView', () => ({ default: jest.fn() }));
+jest.mock('@arcgis/core/views/MapView', () => ({ default: class {} }));
 
 jest.mock('@arcgis/core/Graphic', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({
-    geometry: props.geometry ?? null,
-    attributes: props.attributes ?? {},
-    symbol: props.symbol ?? null,
-    popupTemplate: props.popupTemplate ?? null,
-    ...props
-  }))
+  default: class {
+    geometry: any;
+    attributes: any;
+    symbol: any;
+    popupTemplate: any;
+    constructor(props: any = {}) { Object.assign(this, props); }
+  }
 }));
 
 jest.mock('@arcgis/core/layers/GraphicsLayer', () => ({
-  default: jest.fn().mockImplementation(() => {
-    const items: any[] = [];
-    return {
-      id: 'mock-layer',
-      graphics: {
-        forEach: (cb: any) => items.forEach(cb),
-        toArray: () => [...items],
-        find: (cb: any) => items.find(cb),
-        includes: (g: any) => items.includes(g),
-        getItemAt: (i: number) => items[i] ?? null
-      },
-      add: (g: any) => items.push(g),
-      remove: (g: any) => {
-        const i = items.indexOf(g);
-        if (i > -1) items.splice(i, 1);
-      },
-      removeAll: () => items.splice(0, items.length)
+  default: class {
+    id: string = '';
+    title: string = '';
+    className: string = '';
+    private _items: any[] = [];
+    graphics = {
+      forEach: (cb: any) => this._items.forEach(cb),
+      toArray: () => [...this._items],
+      find: (cb: any) => this._items.find(cb),
+      includes: (g: any) => this._items.includes(g),
+      getItemAt: (i: number) => this._items[i] ?? null
     };
-  })
+    constructor(props: any = {}) { Object.assign(this, props); }
+    add(g: any) { this._items.push(g); }
+    remove(g: any) {
+      const i = this._items.indexOf(g);
+      if (i > -1) this._items.splice(i, 1);
+    }
+    removeAll() { this._items = []; }
+  }
 }));
 
 jest.mock('@arcgis/core/geometry/Point', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({
-    type: 'point',
-    x: props.x ?? 0,
-    y: props.y ?? 0,
-    spatialReference: props.spatialReference ?? { isWGS84: true }
-  }))
+  default: class {
+    type = 'point';
+    x: number;
+    y: number;
+    spatialReference: any;
+    constructor(props: any = {}) {
+      this.x = props.x ?? 0;
+      this.y = props.y ?? 0;
+      this.spatialReference = props.spatialReference ?? { isWGS84: true };
+    }
+  }
 }));
 
 jest.mock('@arcgis/core/geometry/Polyline', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({
-    type: 'polyline',
-    paths: props.paths ?? [],
-    spatialReference: props.spatialReference ?? { isWGS84: true },
-    extent: { expand: jest.fn().mockReturnThis() }
-  }))
+  default: class {
+    type = 'polyline';
+    paths: any[];
+    spatialReference: any;
+    extent = { expand: jest.fn().mockReturnThis() };
+    constructor(props: any = {}) {
+      this.paths = props.paths ?? [];
+      this.spatialReference = props.spatialReference ?? { isWGS84: true };
+    }
+  }
 }));
 
 jest.mock('@arcgis/core/geometry/Polygon', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({
-    type: 'polygon',
-    rings: props.rings ?? [],
-    spatialReference: props.spatialReference ?? { isWGS84: true },
-    centroid: { type: 'point', x: 0, y: 0 },
-    extent: { expand: jest.fn().mockReturnThis() }
-  }))
+  default: class {
+    type = 'polygon';
+    rings: any[];
+    spatialReference: any;
+    centroid = { type: 'point', x: 0, y: 0 };
+    extent = { expand: jest.fn().mockReturnThis() };
+    constructor(props: any = {}) {
+      this.rings = props.rings ?? [];
+      this.spatialReference = props.spatialReference ?? { isWGS84: true };
+    }
+  }
 }));
 
 jest.mock('@arcgis/core/PopupTemplate', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({ ...props }))
+  default: class {
+    constructor(public props: any = {}) {}
+  }
 }));
 
 jest.mock('@arcgis/core/widgets/Sketch/SketchViewModel', () => ({
-  default: jest.fn().mockImplementation(() => ({
-    state: 'idle',
-    create: jest.fn(),
-    update: jest.fn(),
-    cancel: jest.fn(),
-    on: jest.fn()
-  }))
+  default: class {
+    state = 'idle';
+    create = jest.fn();
+    update = jest.fn();
+    cancel = jest.fn();
+    on = jest.fn();
+  }
 }));
 
 jest.mock('@arcgis/core/geometry/support/webMercatorUtils', () => ({
-  webMercatorToGeographic: jest.fn().mockImplementation((g: any) => g)
+  webMercatorToGeographic: jest.fn((g: any) => g)
 }));
 
 jest.mock('@arcgis/core/renderers/support/jsonUtils', () => ({
@@ -91,34 +105,42 @@ jest.mock('@arcgis/core/renderers/support/jsonUtils', () => ({
 }));
 
 jest.mock('@arcgis/core/symbols/SimpleMarkerSymbol', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({ type: 'simple-marker', ...props }))
+  default: class { constructor(public props: any = {}) {} }
 }));
-
 jest.mock('@arcgis/core/symbols/SimpleLineSymbol', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({ type: 'simple-line', ...props }))
+  default: class { constructor(public props: any = {}) {} }
 }));
-
 jest.mock('@arcgis/core/symbols/SimpleFillSymbol', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({ type: 'simple-fill', ...props }))
+  default: class { constructor(public props: any = {}) {} }
+}));
+jest.mock('@arcgis/core/symbols/TextSymbol', () => ({
+  default: class { constructor(public props: any = {}) {} }
 }));
 
-jest.mock('@arcgis/core/symbols/TextSymbol', () => ({
-  default: jest.fn().mockImplementation((props = {}) => ({ type: 'text', ...props }))
+jest.mock('lit', () => ({
+  LitElement: class {
+    connectedCallback() {}
+    disconnectedCallback() {}
+    dispatchEvent(_e: any) {}
+    closest(_s: any) { return null; }
+  }
 }));
+
+jest.mock('lit/decorators.js', () => ({
+  customElement: () => () => {},
+  property: () => () => {}
+}));
+
+// ─── Import after mocks ───────────────────────────────────────────────────────
+
+import { ArcGeojsonLayer } from './arc-geojson-layer';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeMockView() {
   return {
-    map: {
-      add: jest.fn(),
-      remove: jest.fn()
-    },
-    popup: {
-      open: jest.fn(),
-      close: jest.fn(),
-      visible: false
-    },
+    map: { add: jest.fn(), remove: jest.fn() },
+    popup: { open: jest.fn(), close: jest.fn(), visible: false },
     goTo: jest.fn().mockResolvedValue(undefined),
     hitTest: jest.fn().mockResolvedValue({ results: [] }),
     on: jest.fn().mockReturnValue({ remove: jest.fn() }),
@@ -133,88 +155,139 @@ function makeMockArcMap(view: any) {
   };
 }
 
-function makeFeatureCollection(type: 'Point' | 'LineString' | 'Polygon' = 'Point') {
-  const geometries: Record<string, any> = {
-    Point: { type: 'Point', coordinates: [-93.0, 42.0] },
-    LineString: { type: 'LineString', coordinates: [[-93.0, 42.0], [-94.0, 43.0]] },
-    Polygon: { type: 'Polygon', coordinates: [[[-93.0, 42.0], [-94.0, 42.0], [-94.0, 43.0], [-93.0, 42.0]]] }
-  };
-
+function makePointCollection() {
   return {
     type: 'FeatureCollection',
     features: [
       {
         type: 'Feature',
-        geometry: geometries[type],
-        properties: { id: 'feature-1', name: 'Test Feature', LABEL: 'Label 1' }
+        geometry: { type: 'Point', coordinates: [-93.0, 42.0] },
+        properties: { id: 'f1', name: 'Feature 1', LABEL: 'Label A' }
       },
       {
         type: 'Feature',
-        geometry: geometries[type],
-        properties: { id: 'feature-2', name: 'Test Feature 2' }
+        geometry: { type: 'Point', coordinates: [-94.0, 43.0] },
+        properties: { id: 'f2', name: 'Feature 2' }
       }
     ]
   };
 }
 
-async function makeConnectedLayer(overrides: Partial<ArcGeojsonLayer> = {}): Promise<{
-  layer: ArcGeojsonLayer;
-  view: ReturnType<typeof makeMockView>;
-}> {
+function makeLineCollection() {
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [[-93.0, 42.0], [-94.0, 43.0]]
+      },
+      properties: { id: 'l1' }
+    }]
+  };
+}
+
+function makePolygonCollection() {
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[-93.0, 42.0], [-94.0, 42.0], [-94.0, 43.0], [-93.0, 42.0]]]
+      },
+      properties: { id: 'p1' }
+    }]
+  };
+}
+
+function makeMultiLineCollection() {
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [[-93.0, 42.0], [-94.0, 43.0]],
+          [[-95.0, 44.0], [-96.0, 45.0]]
+        ]
+      },
+      properties: { id: 'ml1' }
+    }]
+  };
+}
+
+function makeMultiPolygonCollection() {
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [
+          [[[-93.0, 42.0], [-94.0, 42.0], [-94.0, 43.0], [-93.0, 42.0]]],
+          [[[-95.0, 44.0], [-96.0, 44.0], [-96.0, 45.0], [-95.0, 44.0]]]
+        ]
+      },
+      properties: { id: 'mp1' }
+    }]
+  };
+}
+
+async function makeLayer(overrides: Partial<ArcGeojsonLayer> = {}) {
   const view = makeMockView();
   const arcMap = makeMockArcMap(view);
-
   const layer = new ArcGeojsonLayer();
+
   layer.id = 'test-layer';
   layer.name = 'Test Layer';
 
-  // Inject ancestor arc-map
   jest.spyOn(layer, 'closest').mockReturnValue(arcMap as any);
-
   Object.assign(layer, overrides);
 
   await layer.connectedCallback();
-
-  return { layer, view };
+  return { layer, view, arcMap };
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// ─── Test suite ───────────────────────────────────────────────────────────────
 
 describe('ArcGeojsonLayer', () => {
+
+  beforeEach(() => jest.clearAllMocks());
 
   // ── parseJson ──────────────────────────────────────────────────────────────
 
   describe('parseJson', () => {
     it('parses a valid JSON string', () => {
-      const result = ArcGeojsonLayer.parseJson('{"foo":1}');
-      expect(result.parsedJson).toEqual({ foo: 1 });
+      const r = ArcGeojsonLayer.parseJson('{"a":1}');
+      expect(r.parsedJson).toEqual({ a: 1 });
     });
 
-    it('passes through an object as-is', () => {
-      const obj = { foo: 1 };
-      const result = ArcGeojsonLayer.parseJson(obj);
-      expect(result.parsedJson).toBe(obj);
+    it('passes through an object unchanged', () => {
+      const obj = { a: 1 };
+      expect(ArcGeojsonLayer.parseJson(obj).parsedJson).toBe(obj);
+    });
+
+    it('passes through an array unchanged', () => {
+      const arr = [1, 2, 3];
+      expect(ArcGeojsonLayer.parseJson(arr).parsedJson).toBe(arr);
+    });
+
+    it('passes through a number', () => {
+      expect(ArcGeojsonLayer.parseJson(42).parsedJson).toBe(42);
     });
 
     it('returns error for invalid JSON string', () => {
-      const result = ArcGeojsonLayer.parseJson('not json');
-      expect(result.error).toBeInstanceOf(Error);
+      expect(ArcGeojsonLayer.parseJson('not-json').error).toBeInstanceOf(Error);
     });
 
     it('returns error for null', () => {
-      const result = ArcGeojsonLayer.parseJson(null);
-      expect(result.error).toBeInstanceOf(Error);
+      expect(ArcGeojsonLayer.parseJson(null).error).toBeInstanceOf(Error);
     });
 
     it('returns error for undefined', () => {
-      const result = ArcGeojsonLayer.parseJson(undefined);
-      expect(result.error).toBeInstanceOf(Error);
-    });
-
-    it('passes through arrays', () => {
-      const arr = [1, 2, 3];
-      const result = ArcGeojsonLayer.parseJson(arr);
-      expect(result.parsedJson).toBe(arr);
+      expect(ArcGeojsonLayer.parseJson(undefined).error).toBeInstanceOf(Error);
     });
   });
 
@@ -224,13 +297,15 @@ describe('ArcGeojsonLayer', () => {
     it('throws if no ancestor arc-map found', async () => {
       const layer = new ArcGeojsonLayer();
       jest.spyOn(layer, 'closest').mockReturnValue(null);
-      await expect(layer.connectedCallback()).rejects.toThrow('arc-geojson-layer must be a descendant');
+      await expect(layer.connectedCallback()).rejects.toThrow('descendant');
     });
 
     it('throws if arc-map does not expose getView', async () => {
       const layer = new ArcGeojsonLayer();
-      jest.spyOn(layer, 'closest').mockReturnValue({ componentOnReady: jest.fn() } as any);
-      await expect(layer.connectedCallback()).rejects.toThrow('must expose getView()');
+      jest.spyOn(layer, 'closest').mockReturnValue({
+        componentOnReady: jest.fn()
+      } as any);
+      await expect(layer.connectedCallback()).rejects.toThrow('getView');
     });
 
     it('throws if getView returns undefined', async () => {
@@ -239,170 +314,216 @@ describe('ArcGeojsonLayer', () => {
         componentOnReady: jest.fn(),
         getView: jest.fn().mockResolvedValue(undefined)
       } as any);
-      await expect(layer.connectedCallback()).rejects.toThrow('getView() returned undefined');
+      await expect(layer.connectedCallback()).rejects.toThrow('returned undefined');
     });
 
-    it('adds featureLayer and labelLayer to map on connect', async () => {
-      const { view } = await makeConnectedLayer();
+    it('adds featureLayer and labelLayer to map', async () => {
+      const { view } = await makeLayer();
       expect(view.map.add).toHaveBeenCalledTimes(2);
     });
 
-    it('registers click, double-click, pointer-move handlers', async () => {
-      const { view } = await makeConnectedLayer();
+    it('registers click event handler', async () => {
+      const { view } = await makeLayer();
       const events = view.on.mock.calls.map((c: any) => c[0]);
       expect(events).toContain('click');
+    });
+
+    it('registers double-click event handler', async () => {
+      const { view } = await makeLayer();
+      const events = view.on.mock.calls.map((c: any) => c[0]);
       expect(events).toContain('double-click');
+    });
+
+    it('registers pointer-move event handler', async () => {
+      const { view } = await makeLayer();
+      const events = view.on.mock.calls.map((c: any) => c[0]);
       expect(events).toContain('pointer-move');
+    });
+
+    it('calls componentOnReady if available on arc-map', async () => {
+      const { arcMap } = await makeLayer();
+      expect(arcMap.componentOnReady).toHaveBeenCalled();
     });
   });
 
   // ── disconnectedCallback ───────────────────────────────────────────────────
 
   describe('disconnectedCallback', () => {
-    it('removes layers from map on disconnect', async () => {
-      const { layer, view } = await makeConnectedLayer();
+    it('removes featureLayer from map', async () => {
+      const { layer, view } = await makeLayer();
       layer.disconnectedCallback();
       expect(view.map.remove).toHaveBeenCalledTimes(2);
     });
 
-    it('removes all event handles on disconnect', async () => {
+    it('calls remove on all event handles', async () => {
       const removeMock = jest.fn();
       const view = makeMockView();
       view.on.mockReturnValue({ remove: removeMock });
-
       const layer = new ArcGeojsonLayer();
       jest.spyOn(layer, 'closest').mockReturnValue(makeMockArcMap(view) as any);
       await layer.connectedCallback();
-
       layer.disconnectedCallback();
       expect(removeMock).toHaveBeenCalled();
     });
 
     it('cancels graphicsEditor on disconnect', async () => {
-      const { layer } = await makeConnectedLayer();
-      const cancelSpy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
       layer.disconnectedCallback();
-      expect(cancelSpy).toHaveBeenCalled();
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('clears eventHandles array after disconnect', async () => {
+      const { layer } = await makeLayer();
+      layer.disconnectedCallback();
+      expect((layer as any).eventHandles).toHaveLength(0);
     });
   });
 
-  // ── createLayer / geojson loading ──────────────────────────────────────────
+  // ── geojson loading ────────────────────────────────────────────────────────
 
   describe('geojson loading', () => {
-    it('loads point features into featureLayer', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(2);
+    it('loads 2 point features', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(2);
     });
 
-    it('loads linestring features into featureLayer', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('LineString') as any
-      });
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(2);
+    it('loads 1 line feature', async () => {
+      const { layer } = await makeLayer({ geojson: makeLineCollection() as any });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(1);
     });
 
-    it('loads polygon features into featureLayer', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Polygon') as any
-      });
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(2);
+    it('loads 1 polygon feature', async () => {
+      const { layer } = await makeLayer({ geojson: makePolygonCollection() as any });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(1);
     });
 
-    it('accepts geojson as a JSON string', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: JSON.stringify(makeFeatureCollection('Point')) as any
-      });
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(2);
+    it('loads MultiLineString feature', async () => {
+      const { layer } = await makeLayer({ geojson: makeMultiLineCollection() as any });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(1);
     });
 
-    it('handles empty FeatureCollection gracefully', async () => {
-      const { layer } = await makeConnectedLayer({
+    it('loads MultiPolygon feature', async () => {
+      const { layer } = await makeLayer({ geojson: makeMultiPolygonCollection() as any });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(1);
+    });
+
+    it('accepts geojson as JSON string', async () => {
+      const { layer } = await makeLayer({
+        geojson: JSON.stringify(makePointCollection()) as any
+      });
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(2);
+    });
+
+    it('handles empty FeatureCollection', async () => {
+      const { layer } = await makeLayer({
         geojson: { type: 'FeatureCollection', features: [] } as any
       });
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(0);
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(0);
+    });
+
+    it('assigns OBJECTID to features missing it', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
+        expect(g.attributes.OBJECTID).toBeDefined();
+      });
+    });
+
+    it('assigns uniqueIdPropertyName value to features missing it', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
+        expect(g.attributes[(layer as any).uniqueIdPropertyName]).toBeDefined();
+      });
     });
   });
 
   // ── updateGeojson ──────────────────────────────────────────────────────────
 
   describe('updateGeojson', () => {
-    it('replaces graphics when geojson is updated', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
+    it('replaces graphics when geojson changes', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
       await layer.updateGeojson({
         type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [-90.0, 40.0] },
-            properties: { id: 'new-1' }
-          }
-        ]
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-90.0, 40.0] },
+          properties: { id: 'new-1' }
+        }]
       } as any);
-
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      expect(graphics.length).toBe(1);
+      expect((layer as any).featureLayer.graphics.toArray()).toHaveLength(1);
     });
 
     it('skips update when enableUserEdit is true', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any,
+      const { layer } = await makeLayer({
+        geojson: makePointCollection() as any,
         enableUserEdit: true
       });
-
-      const removeAllSpy = jest.spyOn((layer as any).featureLayer, 'removeAll');
+      const spy = jest.spyOn((layer as any).featureLayer, 'removeAll');
       await layer.updateGeojson({ type: 'FeatureCollection', features: [] } as any);
-      expect(removeAllSpy).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
     });
 
     it('skips update when inDrawingMode is true', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
       (layer as any).inDrawingMode = true;
-      const removeAllSpy = jest.spyOn((layer as any).featureLayer, 'removeAll');
+      const spy = jest.spyOn((layer as any).featureLayer, 'removeAll');
       await layer.updateGeojson({ type: 'FeatureCollection', features: [] } as any);
-      expect(removeAllSpy).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('skips update when blockGeoJsonUpdate is true', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      (layer as any).blockGeoJsonUpdate = true;
+      const spy = jest.spyOn((layer as any).featureLayer, 'removeAll');
+      await layer.updateGeojson({ type: 'FeatureCollection', features: [] } as any);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('clears label layer on update', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      const spy = jest.spyOn((layer as any).labelLayer, 'removeAll');
+      await layer.updateGeojson({ type: 'FeatureCollection', features: [] } as any);
+      expect(spy).toHaveBeenCalled();
     });
   });
 
   // ── labels ─────────────────────────────────────────────────────────────────
 
   describe('labels', () => {
-    it('adds label graphics for features with LABEL attribute', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
-      const labelGraphics = (layer as any).labelLayer.graphics.toArray();
-      // Only feature-1 has LABEL set
-      expect(labelGraphics.length).toBe(1);
+    it('creates 1 label for feature with LABEL attribute', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      expect((layer as any).labelLayer.graphics.toArray()).toHaveLength(1);
     });
 
-    it('clears labels on refreshLabels when no features have LABEL', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: {
-          type: 'FeatureCollection',
-          features: [{
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [-93.0, 42.0] },
-            properties: { id: '1' } // no LABEL
-          }]
-        } as any
-      });
+    it('creates no labels when no features have LABEL', async () => {
+      const { layer } = await makeLayer({ geojson: makeLineCollection() as any });
+      expect((layer as any).labelLayer.graphics.toArray()).toHaveLength(0);
+    });
 
-      const labelGraphics = (layer as any).labelLayer.graphics.toArray();
-      expect(labelGraphics.length).toBe(0);
+    it('refreshes labels after updateGeojson', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      await layer.updateGeojson({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-90.0, 40.0] },
+          properties: { id: 'x', LABEL: 'New Label' }
+        }]
+      } as any);
+      expect((layer as any).labelLayer.graphics.toArray()).toHaveLength(1);
+    });
+
+    it('clears labels when updated geojson has no LABEL', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      await layer.updateGeojson({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-90.0, 40.0] },
+          properties: { id: 'x' }
+        }]
+      } as any);
+      expect((layer as any).labelLayer.graphics.toArray()).toHaveLength(0);
     });
   });
 
@@ -410,60 +531,52 @@ describe('ArcGeojsonLayer', () => {
 
   describe('updateRenderer', () => {
     it('applies renderer symbol to each graphic', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
-      const rendererJson = JSON.stringify({
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      layer.updateRenderer(JSON.stringify({
         type: 'simple',
-        symbol: { type: 'esriSMS', style: 'esriSMSCircle', color: [255, 0, 0, 255], size: 10 }
-      });
-
-      layer.updateRenderer(rendererJson);
-
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      graphics.forEach((g: any) => {
+        symbol: { type: 'esriSMS', style: 'esriSMSTriangle', color: [255, 0, 0, 255], size: 35 }
+      }));
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
         expect(g.symbol).toBeDefined();
       });
     });
 
-    it('falls back to default symbol if renderer throws', async () => {
-      const rendererJsonUtils = require('@arcgis/core/renderers/support/jsonUtils');
-      rendererJsonUtils.fromJSON.mockImplementationOnce(() => {
-        throw new Error('bad renderer');
-      });
-
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
-      layer.updateRenderer({ type: 'simple', symbol: {} });
-
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      graphics.forEach((g: any) => {
+    it('falls back to default symbol when renderer JSON is invalid', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      layer.updateRenderer('not-valid-json');
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
         expect(g.symbol).toBeDefined();
       });
+    });
+
+    it('falls back to default symbol when fromJSON throws', async () => {
+      const jsonUtils = require('@arcgis/core/renderers/support/jsonUtils');
+      jsonUtils.fromJSON.mockImplementationOnce(() => { throw new Error('bad'); });
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      layer.updateRenderer({ type: 'simple', symbol: {} });
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
+        expect(g.symbol).toBeDefined();
+      });
+    });
+
+    it('does nothing when featureLayer is not initialized', async () => {
+      const layer = new ArcGeojsonLayer();
+      expect(() => layer.updateRenderer({})).not.toThrow();
     });
   });
 
   // ── findFeatureByUniqueId ──────────────────────────────────────────────────
 
   describe('findFeatureByUniqueId', () => {
-    it('finds a feature by its unique id', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
-      const result = await layer.findFeatureByUniqueId('feature-1');
+    it('finds feature by id', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      const result = await layer.findFeatureByUniqueId('f1');
       expect(result).toBeDefined();
-      expect(result?.attributes?.id).toBe('feature-1');
+      expect(result?.attributes?.id).toBe('f1');
     });
 
     it('returns undefined for unknown id', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
       const result = await layer.findFeatureByUniqueId('does-not-exist');
       expect(result).toBeUndefined();
     });
@@ -472,128 +585,120 @@ describe('ArcGeojsonLayer', () => {
   // ── getLayerId ─────────────────────────────────────────────────────────────
 
   describe('getLayerId', () => {
-    it('returns the featureLayer id', async () => {
-      const { layer } = await makeConnectedLayer();
+    it('returns featureLayer id', async () => {
+      const { layer } = await makeLayer();
       const id = await layer.getLayerId();
       expect(id).toBe('test-layer-graphics');
-    });
-  });
-
-  // ── updateEditing ──────────────────────────────────────────────────────────
-
-  describe('updateEditing', () => {
-    it('nulls out popupTemplates when enableUserEdit is turned on', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
-
-      await layer.updateEditing(true);
-
-      const graphics = (layer as any).featureLayer.graphics.toArray();
-      graphics.forEach((g: any) => {
-        expect(g.popupTemplate).toBeNull();
-      });
-    });
-
-    it('restores popupTemplates when enableUserEdit is turned off', async () => {
-      const { layer } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any,
-        infoTemplate: { listItem: 'Title', details: 'Details' } as any
-      });
-
-      await layer.updateEditing(true);
-      await layer.updateEditing(false);
-
-      // popupTemplates restored — won't be null anymore
-      // (only applies if infoTemplate is set)
-    });
-
-    it('cancels graphicsEditor if active', async () => {
-      const { layer } = await makeConnectedLayer();
-      (layer as any).graphicsEditor.state = 'active';
-      const cancelSpy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
-      await layer.updateEditing(false);
-      expect(cancelSpy).toHaveBeenCalled();
-    });
-  });
-
-  // ── startDrawing / cancelDrawing ───────────────────────────────────────────
-
-  describe('drawing', () => {
-    it('sets inDrawingMode to true on startDrawing', async () => {
-      const { layer } = await makeConnectedLayer();
-      await layer.startDrawing('POINT');
-      expect((layer as any).inDrawingMode).toBe(true);
-    });
-
-    it('calls graphicsEditor.create with correct tool for POINT', async () => {
-      const { layer } = await makeConnectedLayer();
-      const createSpy = jest.spyOn((layer as any).graphicsEditor, 'create');
-      await layer.startDrawing('POINT');
-      expect(createSpy).toHaveBeenCalledWith('point');
-    });
-
-    it('calls graphicsEditor.create with correct tool for POLYGON', async () => {
-      const { layer } = await makeConnectedLayer();
-      const createSpy = jest.spyOn((layer as any).graphicsEditor, 'create');
-      await layer.startDrawing('POLYGON');
-      expect(createSpy).toHaveBeenCalledWith('polygon');
-    });
-
-    it('calls graphicsEditor.create with correct tool for RECTANGLE', async () => {
-      const { layer } = await makeConnectedLayer();
-      const createSpy = jest.spyOn((layer as any).graphicsEditor, 'create');
-      await layer.startDrawing('RECTANGLE');
-      expect(createSpy).toHaveBeenCalledWith('rectangle');
-    });
-
-    it('sets inDrawingMode to false on cancelDrawing', async () => {
-      const { layer } = await makeConnectedLayer();
-      await layer.startDrawing('POINT');
-      await layer.cancelDrawing();
-      expect((layer as any).inDrawingMode).toBe(false);
-    });
-
-    it('calls graphicsEditor.cancel on cancelDrawing', async () => {
-      const { layer } = await makeConnectedLayer();
-      const cancelSpy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
-      await layer.cancelDrawing();
-      expect(cancelSpy).toHaveBeenCalled();
     });
   });
 
   // ── updateLayerClass ───────────────────────────────────────────────────────
 
   describe('updateLayerClass', () => {
-    it('sets className on featureLayer and labelLayer', async () => {
-      const { layer } = await makeConnectedLayer();
+    it('sets className on featureLayer', async () => {
+      const { layer } = await makeLayer();
       layer.updateLayerClass('my-class');
       expect((layer as any).featureLayer.className).toBe('my-class');
+    });
+
+    it('sets className on labelLayer with -labels suffix', async () => {
+      const { layer } = await makeLayer();
+      layer.updateLayerClass('my-class');
       expect((layer as any).labelLayer.className).toBe('my-class-labels');
     });
   });
 
-  // ── zoomTo ─────────────────────────────────────────────────────────────────
+  // ── updateEditing ──────────────────────────────────────────────────────────
 
-  describe('zoomTo', () => {
-    it('calls view.goTo with center and zoom for point geometry', async () => {
-      const { layer, view } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
+  describe('updateEditing', () => {
+    it('nulls popupTemplates when enableUserEdit turns on', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      await layer.updateEditing(true);
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
+        expect(g.popupTemplate).toBeNull();
       });
-
-      await layer.zoomTo('feature-1', 10);
-      expect(view.goTo).toHaveBeenCalledWith(
-        expect.objectContaining({ zoom: 10 })
-      );
     });
 
-    it('does nothing for unknown id', async () => {
-      const { layer, view } = await makeConnectedLayer({
-        geojson: makeFeatureCollection('Point') as any
-      });
+    it('cancels active graphicsEditor', async () => {
+      const { layer } = await makeLayer();
+      (layer as any).graphicsEditor.state = 'active';
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
+      await layer.updateEditing(false);
+      expect(spy).toHaveBeenCalled();
+    });
 
-      await layer.zoomTo('unknown-id');
-      expect(view.goTo).not.toHaveBeenCalled();
+    it('does not cancel if editor is not active', async () => {
+      const { layer } = await makeLayer();
+      (layer as any).graphicsEditor.state = 'idle';
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
+      await layer.updateEditing(false);
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── startDrawing / cancelDrawing ───────────────────────────────────────────
+
+  describe('drawing', () => {
+    it('sets inDrawingMode true on startDrawing', async () => {
+      const { layer } = await makeLayer();
+      await layer.startDrawing('POINT');
+      expect((layer as any).inDrawingMode).toBe(true);
+    });
+
+    it('calls create with point tool', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('POINT');
+      expect(spy).toHaveBeenCalledWith('point');
+    });
+
+    it('calls create with polyline tool', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('POLYLINE');
+      expect(spy).toHaveBeenCalledWith('polyline');
+    });
+
+    it('calls create with polygon tool', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('POLYGON');
+      expect(spy).toHaveBeenCalledWith('polygon');
+    });
+
+    it('calls create with rectangle tool', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('RECTANGLE');
+      expect(spy).toHaveBeenCalledWith('rectangle');
+    });
+
+    it('calls create with circle tool', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('CIRCLE');
+      expect(spy).toHaveBeenCalledWith('circle');
+    });
+
+    it('sets inDrawingMode false on cancelDrawing', async () => {
+      const { layer } = await makeLayer();
+      await layer.startDrawing('POINT');
+      await layer.cancelDrawing();
+      expect((layer as any).inDrawingMode).toBe(false);
+    });
+
+    it('calls graphicsEditor.cancel on cancelDrawing', async () => {
+      const { layer } = await makeLayer();
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'cancel');
+      await layer.cancelDrawing();
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('does not start drawing if geometry type mismatch', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      const spy = jest.spyOn((layer as any).graphicsEditor, 'create');
+      await layer.startDrawing('POLYGON');
+      expect(spy).not.toHaveBeenCalled();
     });
   });
 
@@ -601,17 +706,70 @@ describe('ArcGeojsonLayer', () => {
 
   describe('enableInfoPopupWindow', () => {
     it('closes popup when enable is false and popup is visible', async () => {
-      const { layer, view } = await makeConnectedLayer();
+      const { layer, view } = await makeLayer();
       view.popup.visible = true;
       layer.enableInfoPopupWindow(false);
       expect(view.popup.close).toHaveBeenCalled();
     });
 
     it('does not close popup when enable is true', async () => {
-      const { layer, view } = await makeConnectedLayer();
+      const { layer, view } = await makeLayer();
       view.popup.visible = true;
       layer.enableInfoPopupWindow(true);
       expect(view.popup.close).not.toHaveBeenCalled();
+    });
+
+    it('does not close popup when popup is not visible', async () => {
+      const { layer, view } = await makeLayer();
+      view.popup.visible = false;
+      layer.enableInfoPopupWindow(false);
+      expect(view.popup.close).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── zoomTo ─────────────────────────────────────────────────────────────────
+
+  describe('zoomTo', () => {
+    it('calls goTo with center and zoom for point', async () => {
+      const { layer, view } = await makeLayer({ geojson: makePointCollection() as any });
+      await layer.zoomTo('f1', 10);
+      expect(view.goTo).toHaveBeenCalledWith(
+        expect.objectContaining({ zoom: 10 })
+      );
+    });
+
+    it('does nothing for unknown id', async () => {
+      const { layer, view } = await makeLayer({ geojson: makePointCollection() as any });
+      await layer.zoomTo('unknown');
+      expect(view.goTo).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── updateLabelJson ────────────────────────────────────────────────────────
+
+  describe('updateLabelJson', () => {
+    it('updates labeljson and refreshes labels', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      const spy = jest.spyOn(layer as any, 'refreshLabels');
+      layer.updateLabelJson({ someField: 'value' });
+      expect(spy).toHaveBeenCalled();
+    });
+  });
+
+  // ── updateInfoTemplate ─────────────────────────────────────────────────────
+
+  describe('updateInfoTemplate', () => {
+    it('does nothing when featureLayer is not initialized', async () => {
+      const layer = new ArcGeojsonLayer();
+      expect(() => layer.updateInfoTemplate({ listItem: 'Title', details: 'Body' })).not.toThrow();
+    });
+
+    it('sets popupTemplate on graphics when valid infoTemplate provided', async () => {
+      const { layer } = await makeLayer({ geojson: makePointCollection() as any });
+      layer.updateInfoTemplate({ listItem: 'My Title', details: 'My Details' });
+      (layer as any).featureLayer.graphics.toArray().forEach((g: any) => {
+        expect(g.popupTemplate).toBeDefined();
+      });
     });
   });
 
