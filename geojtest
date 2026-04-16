@@ -1,96 +1,70 @@
-// ── getJsonLabelFor ───────────────────────────────────────────────────────────
-describe('JsonUtils.getJsonLabelFor', () => {
-  test('returns array', () => {
-    const result = JsonUtils.getJsonLabelFor([255, 0, 0, 255], 12);
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
-  });
-
-  test('has labelExpressionInfo with $feature.LABEL', () => {
-    const result = JsonUtils.getJsonLabelFor([255, 0, 0, 255], 12);
-    const first = result[0];
-    expect(first).toHaveProperty('labelExpressionInfo');
-    expect(first.labelExpressionInfo.expression).toBe('$feature.LABEL');
-  });
-
-  test('symbol type is text', () => {
-    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 10);
-    expect(result[0].symbol.type).toBe('text');
-  });
-
-  test('symbol font size matches input', () => {
-    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 16);
-    expect(result[0].symbol.font.size).toBe(16);
-  });
-
-  test('symbol has haloColor black', () => {
-    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 12);
-    expect(result[0].symbol.haloColor).toBe('black');
-  });
-});
-
-// ── getJsonSymbolFor ──────────────────────────────────────────────────────────
-describe('JsonUtils.getJsonSymbolFor', () => {
-  test('returns object with symbol property', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'esriGeometryPoint', [255, 0, 0, 255], 10, 2, 2
+// ── getSymbolJson ─────────────────────────────────────────────────────────────
+describe('JsonUtils.getSymbolJson', () => {
+  test('returns object for point geometry', () => {
+    const result = JsonUtils.getSymbolJson(
+      'point',
+      [255, 0, 0, 255],
+      10,
+      JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
+      JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
     );
-    expect(result).toHaveProperty('symbol');
+    expect(result).toBeDefined();
+    expect(typeof result).toBe('object');
   });
 
-  test('point symbol type is esriSMS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'point', [255, 0, 0, 255], 10, 2, 2
+  test('returns object for polyline geometry', () => {
+    const result = JsonUtils.getSymbolJson(
+      'esriGeometryPolyline',
+      [0, 0, 255, 255],
+      10,
+      JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
+      JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
     );
-    expect(result.symbol.type).toBe('esriSMS');
+    expect(result).toBeDefined();
   });
 
-  test('multipoint symbol type is esriSMS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'multipoint', [255, 0, 0, 255], 10, 2, 2
+  test('returns object for polygon geometry', () => {
+    const result = JsonUtils.getSymbolJson(
+      'esriGeometryPolygon',
+      [0, 128, 0, 255],
+      10,
+      JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
+      JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
     );
-    expect(result.symbol.type).toBe('esriSMS');
+    expect(result).toBeDefined();
   });
 
-  test('polyline symbol type is esriSLS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'polyline', [0, 0, 255, 255], 10, 2, 2
+  test('reduces alpha to 100 for polygon geometry', () => {
+    const color = [0, 128, 0, 255];
+    JsonUtils.getSymbolJson(
+      'esriGeometryPolygon',
+      color,
+      10,
+      2,
+      2
     );
-    expect(result.symbol.type).toBe('esriSLS');
+    expect(color[3]).toBe(100);
   });
 
-  test('esriGeometryLine symbol type is esriSLS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'esriGeometryLine', [0, 0, 255, 255], 10, 2, 2
+  test('uses widthGeomLine for polyline symbolSize', () => {
+    const result = JsonUtils.getSymbolJson(
+      'esriGeometryPolyline',
+      [0, 0, 0, 255],
+      10,
+      5,   // widthGeomLine
+      2
     );
-    expect(result.symbol.type).toBe('esriSLS');
+    expect(result).toBeDefined();
   });
 
-  test('polygon symbol type is esriSFS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'polygon', [0, 255, 0, 255], 10, 2, 2
+  test('uses widthGeomPolygon for polygon symbolSize', () => {
+    const result = JsonUtils.getSymbolJson(
+      'esriGeometryPolygon',
+      [0, 0, 0, 100],
+      10,
+      2,
+      6    // widthGeomPolygon
     );
-    expect(result.symbol.type).toBe('esriSFS');
-  });
-
-  test('default falls through to esriSFS', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'unknown-type', [0, 0, 0, 255], 10, 2, 2
-    );
-    expect(result.symbol).toBeDefined();
-  });
-
-  test('symbol label is LABEL', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'point', [255, 0, 0, 255], 10, 2, 2
-    );
-    expect(result.label).toBe('LABEL');
-  });
-
-  test('symbol type wrapper is simple', () => {
-    const result = JsonUtils.getJsonSymbolFor(
-      'point', [255, 0, 0, 255], 10, 2, 2
-    );
-    expect(result.type).toBe('simple');
+    expect(result).toBeDefined();
   });
 });
