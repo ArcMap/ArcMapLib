@@ -1,24 +1,9 @@
-jest.mock('@arcgis/core/layers/GraphicsLayer', () => ({
-  default: jest.fn().mockImplementation((props: any = {}) => {
-    const _items: any[] = [];  // ← inside mockImplementation, fresh per instance
-    const instance = {
-      id: props.id ?? '',
-      title: props.title ?? '',
-      className: '',
-      graphics: {
-        forEach: (cb: any) => _items.forEach(cb),
-        toArray: () => [..._items],
-        find: (cb: any) => _items.find(cb),
-        includes: (g: any) => _items.includes(g),
-        getItemAt: (i: number) => _items[i] ?? null
-      },
-      add: (g: any) => _items.push(g),
-      remove: (g: any) => {
-        const i = _items.indexOf(g);
-        if (i > -1) _items.splice(i, 1);
-      },
-      removeAll: () => { _items.length = 0; }
-    };
-    return instance;
-  })
+jest.mock('lit', () => ({
+  LitElement: class LitElement {
+    connectedCallback() {}
+    disconnectedCallback() {}
+    dispatchEvent(_e: any) {}
+    closest(_s: any) { return null; }
+    requestUpdate() {}
+  }
 }));
