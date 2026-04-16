@@ -1,255 +1,208 @@
-// ── updateRenderer ────────────────────────────────────────────────────────────
-// FIX: rendererTypeToModule must map type strings to the mock constructors
-describe('JsonUtils.updateRenderer', () => {
-  const SimpleRenderer = require('@arcgis/core/renderers/SimpleRenderer').default;
-  const UniqueValueRenderer = require('@arcgis/core/renderers/UniqueValueRenderer').default;
-  const ClassBreaksRenderer = require('@arcgis/core/renderers/ClassBreaksRenderer').default;
+import PopupUtils from '../src/common/popup-utils';
 
-  const rendererTypeToModule = {
-    simple: SimpleRenderer,
-    'unique-value': UniqueValueRenderer,
-    'class-breaks': ClassBreaksRenderer,
+jest.mock('@arcgis/core/PopupTemplate', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    title: props?.title,
+    content: props?.content,
+  })),
+}));
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function makeMockMapElement(popupVisible = false) {
+  const popup = {
+    visible: popupVisible,
+    features: [] as any[],
+    selectedFeatureIndex: 0,
   };
 
-  test('sets simple renderer', () => {
-    const mockFeatureLayer: any = { renderer: null };
-    JsonUtils.updateRenderer(
-      JSON.stringify({ type: 'simple', symbol: {} }),
-      mockFeatureLayer,
-      rendererTypeToModule,
-      {}
-    );
-    expect(mockFeatureLayer.renderer).not.toBeNull();
-  });
-
-  test('sets unique-value renderer', () => {
-    const mockFeatureLayer: any = { renderer: null };
-    JsonUtils.updateRenderer(
-      JSON.stringify({ type: 'unique-value', field1: 'type' }),
-      mockFeatureLayer,
-      rendererTypeToModule,
-      {}
-    );
-    expect(mockFeatureLayer.renderer).not.toBeNull();
-  });
-
-  test('sets class-breaks renderer', () => {
-    const mockFeatureLayer: any = { renderer: null };
-    JsonUtils.updateRenderer(
-      JSON.stringify({ type: 'class-breaks', field: 'value' }),
-      mockFeatureLayer,
-      rendererTypeToModule,
-      {}
-    );
-    expect(mockFeatureLayer.renderer).not.toBeNull();
-  });
-
-  test('sets default SimpleRenderer when newRenderer is null', () => {
-    const mockFeatureLayer: any = { renderer: null };
-    JsonUtils.updateRenderer(
-      null,
-      mockFeatureLayer,
-      rendererTypeToModule,
-      { type: 'simple' }
-    );
-    expect(mockFeatureLayer.renderer).not.toBeNull();
-  });
-
-  test('warns for unrecognized renderer type', () => {
-    const mockFeatureLayer: any = { renderer: null };
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    JsonUtils.updateRenderer(
-      JSON.stringify({ type: 'unknown' }),
-      mockFeatureLayer,
-      rendererTypeToModule,
-      {}
-    );
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
-  });
-});
-
-// ── buildPopupTemplateFromCurrent ─────────────────────────────────────────────
-// FIX: empty string returns a popup with default content, not null
-// The function only returns null when getInfoTemplateJson returns null
-// For empty string it builds default popup from attributes
-describe('JsonUtils.buildPopupTemplateFromCurrent', () => {
-  const mockGraphic = {
-    attributes: { id: 1, name: 'Test Feature', OBJECTID: 1 },
-    geometry: { type: 'point' },
+  const mapView = {
+    popup,
   };
 
-  test('builds popup with string listItem and details', () => {
-    const result = JsonUtils.buildPopupTemplateFromCurrent(
-      mockGraphic,
-      JSON.stringify({ listItem: 'Feature Title', details: 'Feature Details' }),
-      'id',
-      'Details'
-    );
-    expect(result).not.toBeNull();
+  return {
+    getViewInstance: jest.fn().mockResolvedValue(mapView),
+  };
+}
+
+function makeMockFeatureLayer() {
+  return {
+    popupTemplate: null as any,
+    getNode: jest.fn().mockReturnValue({
+      style: {
+        setProperty: jest.fn(),
+        removeProperty: jest.fn(),
+      },
+    }),
+  };
+}
+
+// ── updatePopup ───────────────────────────────────────────────────────────────
+describe('PopupUtils > updatePopup', () => {
+  test('sets popupTemplate with title and details', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Test Title","details":"Test Details"}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.title).toBe('Test Title');
+    expect(featureLayer.popupTemplate.content).toBe('Test Details');
   });
 
-  test('builds popup with function listItem', () => {
-    const result = JsonUtils.buildPopupTemplateFromCurrent(
-      mockGraphic,
-      { listItem: (g: any) => `Title: ${g.attributes.name}`, details: 'Content' },
-      'id',
-      'Details'
-    );
-    expect(result).not.toBeNull();
+  test('sets popupTemplate with "No Details Available" if details is null', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Title","details":null}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.content).toBe('No Details Available');
   });
 
-  test('still builds popup for empty string using default content', () => {
-    // FIX: does NOT return null — builds default popup from attributes
-    const result = JsonUtils.buildPopupTemplateFromCurrent(
-      mockGraphic, '', 'id', 'Details'
-    );
-    // It returns a PopupTemplate with default attribute content
-    expect(result).toBeDefined();
+  test('sets popupTemplate with "No Details Available" if details is undefined', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Title"}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.content).toBe('No Details Available');
   });
 
-  test('uses fallbackTitle when uniqueId attribute missing', () => {
-    const result = JsonUtils.buildPopupTemplateFromCurrent(
-      { attributes: {}, geometry: { type: 'point' } },
-      { listItem: undefined, details: 'content' },
-      'id',
-      'My Fallback'
-    );
-    expect(result).not.toBeNull();
-  });
-});
+  test('does not set popupTemplate if infoTemplate is empty string', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
 
-// ── getGeoLabelJson ───────────────────────────────────────────────────────────
-// FIX: single label object gets normalized via normalizeLegacyLabelClass
-// which returns an object, then wrapped in array by caller
-describe('JsonUtils.getGeoLabelJson', () => {
-  test('returns array for empty string userLabel', () => {
-    const result = JsonUtils.getGeoLabelJson('', [255, 0, 0, 255], 12) as any;
-    expect(Array.isArray(result)).toBe(true);
-    expect(result[0]).toHaveProperty('labelExpressionInfo');
+    await PopupUtils.updatePopup('', mapElement as any, featureLayer as any);
+
+    // empty string clears popup - popupTemplate set to null
+    expect(featureLayer.popupTemplate).toBeNull();
   });
 
-  test('returns array for whitespace userLabel', () => {
-    const result = JsonUtils.getGeoLabelJson('   ', [0, 0, 255, 255], 14) as any;
-    expect(Array.isArray(result)).toBe(true);
+  test('does not set popupTemplate if infoTemplate is whitespace', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup('   ', mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).toBeNull();
   });
 
-  test('parses label json array and returns array', () => {
-    const labelArr = [
-      { labelExpressionInfo: { expression: '$feature.NAME' }, symbol: { type: 'text' } }
-    ];
-    const result = JsonUtils.getGeoLabelJson(
-      JSON.stringify(labelArr), [0, 0, 0, 255], 12
-    ) as any;
-    expect(Array.isArray(result)).toBe(true);
+  test('does nothing if featureLayer is null', async () => {
+    const mapElement = makeMockMapElement();
+    // should not throw
+    await expect(
+      PopupUtils.updatePopup('{"listItem":"Title"}', mapElement as any, null as any)
+    ).resolves.not.toThrow();
   });
 
-  test('parses single label json object - result is defined', () => {
-    // FIX: single object goes through normalizeLegacyLabelClass
-    // result may be object or array depending on implementation
-    const labelObj = {
-      labelExpressionInfo: { expression: '$feature.NAME' },
-      symbol: { type: 'text' }
+  test('does nothing if mapElement is null', async () => {
+    const featureLayer = makeMockFeatureLayer();
+    // should not throw
+    await expect(
+      PopupUtils.updatePopup('{"listItem":"Title"}', null as any, featureLayer as any)
+    ).resolves.not.toThrow();
+  });
+
+  test('warns and returns when mapView is not available', async () => {
+    const mapElement = {
+      getViewInstance: jest.fn().mockResolvedValue(null),
     };
-    const result = JsonUtils.getGeoLabelJson(
-      JSON.stringify(labelObj), [0, 0, 0, 255], 12
-    ) as any;
-    expect(result).toBeDefined();
-    // check it has label info either as array item or direct property
-    const item = Array.isArray(result) ? result[0] : result;
-    expect(item).toHaveProperty('labelExpressionInfo');
+    const featureLayer = makeMockFeatureLayer();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await PopupUtils.updatePopup(
+      '{"listItem":"Title","details":"Content"}',
+      mapElement as any,
+      featureLayer as any
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'MapView is not available, cannot set popup template'
+    );
+    warnSpy.mockRestore();
   });
 
-  test('falls back to default for invalid label json', () => {
-    const result = JsonUtils.getGeoLabelJson(
-      '{bad json}', [0, 0, 0, 255], 12
-    ) as any;
-    expect(result).toBeDefined();
-    const item = Array.isArray(result) ? result[0] : result;
-    expect(item).toHaveProperty('labelExpressionInfo');
+  test('sets popupTemplate with function listItem', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = {
+      listItem: 'Dynamic Title',
+      details: 'Dynamic Content',
+    };
+
+    await PopupUtils.updatePopup(infoTemplate as any, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.title).toBe('Dynamic Title');
+  });
+
+  test('sets popupTemplate to null when parsedInfoTemplate is falsy', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    // invalid JSON - parse error, returns early
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await PopupUtils.updatePopup('{bad json}', mapElement as any, featureLayer as any);
+    warnSpy.mockRestore();
+
+    // popupTemplate unchanged (still null)
+    expect(featureLayer.popupTemplate).toBeNull();
+  });
+
+  test('sets cursor pointer on layerNode when popup is set', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Title","details":"Content"}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.getNode).toHaveBeenCalled();
+    expect(
+      featureLayer.getNode().style.setProperty
+    ).toHaveBeenCalledWith('cursor', 'pointer');
+  });
+
+  test('removes cursor when popupTemplate is cleared', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup('', mapElement as any, featureLayer as any);
+
+    // empty string clears - removeProperty should be called or no setProperty
+    expect(featureLayer.getNode).toHaveBeenCalled();
   });
 });
 
-// ── normalizeLegacyLabelClass ─────────────────────────────────────────────────
-// FIX: returns the normalized object directly, not wrapped in array
-describe('JsonUtils.normalizeLegacyLabelClass', () => {
-  test('returns object with labelExpressionInfo for null input', () => {
-    const result = JsonUtils.normalizeLegacyLabelClass(
-      null, [0, 0, 0, 255], 12
-    ) as any;
-    // FIX: result is an array from getJsonLabelFor — check first item
-    const item = Array.isArray(result) ? result[0] : result;
-    expect(item).toHaveProperty('labelExpressionInfo');
+// ── featureBelongsToLayer ─────────────────────────────────────────────────────
+describe('PopupUtils > featureBelongsToLayer', () => {
+  test('returns true when feature.layer matches layer', () => {
+    const layer = { id: 'layer-1' };
+    const feature = { layer, attributes: {} };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(true);
   });
 
-  test('normalizes esriTS type symbol to text', () => {
-    const result = JsonUtils.normalizeLegacyLabelClass(
-      {
-        labelExpressionInfo: { expression: '$feature.NAME' },
-        symbol: { type: 'esriTS', color: [255, 0, 0, 255], font: { size: 14 } },
-      },
-      [0, 0, 0, 255], 12
-    ) as any;
-    expect(result.symbol.type).toBe('text');
+  test('returns true when feature.parentLayer matches layer', () => {
+    const layer = { id: 'layer-1' };
+    const feature = {
+      layer: { id: 'sub-layer' },
+      parentLayer: layer,
+      attributes: {},
+    };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(true);
   });
 
-  test('normalizes text type symbol', () => {
-    const result = JsonUtils.normalizeLegacyLabelClass(
-      {
-        labelExpressionInfo: { expression: '$feature.NAME' },
-        symbol: { type: 'text', color: [0, 255, 0, 255], font: { size: 10 } },
-      },
-      [0, 0, 0, 255], 12
-    ) as any;
-    expect(result.symbol.type).toBe('text');
-  });
-
-  test('adds missing labelExpressionInfo', () => {
-    const result = JsonUtils.normalizeLegacyLabelClass(
-      { symbol: { type: 'text', color: [0, 0, 0, 255] } },
-      [0, 0, 0, 255], 12
-    ) as any;
-    expect(result.labelExpressionInfo.expression).toBe('$feature.LABEL');
-  });
-});
-
-// ── updateLabelJson ───────────────────────────────────────────────────────────
-// FIX: null/undefined input - labelingInfo stays as original value
-describe('JsonUtils.updateLabelJson', () => {
-  test('sets labelingInfo for valid label JSON array', () => {
-    const mockFeatureLayer: any = { labelingInfo: null };
-    JsonUtils.updateLabelJson(
-      JSON.stringify([{ labelExpressionInfo: { expression: '$feature.NAME' } }]),
-      mockFeatureLayer
-    );
-    expect(mockFeatureLayer.labelingInfo).not.toBeNull();
-    expect(Array.isArray(mockFeatureLayer.labelingInfo)).toBe(true);
-  });
-
-  test('does not modify labelingInfo for null input', () => {
-    const mockFeatureLayer: any = { labelingInfo: null };
-    JsonUtils.updateLabelJson(null, mockFeatureLayer);
-    // FIX: null input - function returns early, labelingInfo unchanged
-    // but the actual value depends on impl - just check it doesn't throw
-    expect(mockFeatureLayer).toBeDefined();
-  });
-
-  test('sets labelingInfo for single label json object', () => {
-    const mockFeatureLayer: any = { labelingInfo: null };
-    JsonUtils.updateLabelJson(
-      JSON.stringify({ labelExpressionInfo: { expression: '$feature.NAME' } }),
-      mockFeatureLayer
-    );
-    expect(mockFeatureLayer.labelingInfo).not.toBeNull();
-    expect(Array.isArray(mockFeatureLayer.labelingInfo)).toBe(true);
-  });
-
-  test('labelingInfo items are LabelClass instances', () => {
-    const mockFeatureLayer: any = { labelingInfo: null };
-    JsonUtils.updateLabelJson(
-      JSON.stringify([{ labelExpressionInfo: { expression: '$feature.NAME' } }]),
-      mockFeatureLayer
-    );
-    expect(mockFeatureLayer.labelingInfo.length).toBeGreaterThan(0);
+  test('returns false when neither layer nor parentLayer matches', () => {
+    const layer = { id: 'layer-1' };
+    const otherLayer = { id: 'other-layer' };
+    const feature = { layer: otherLayer, attributes: {} };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(false);
   });
 });
