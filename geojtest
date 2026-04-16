@@ -1,9 +1,533 @@
-jest.mock('lit', () => ({
-  LitElement: class LitElement {
-    connectedCallback() {}
-    disconnectedCallback() {}
-    dispatchEvent(_e: any) {}
-    closest(_s: any) { return null; }
-    requestUpdate() {}
-  }
+import { jest } from '@jest/globals';
+
+// ── Mock ArcGIS modules ──────────────────────────────────────────────────────
+jest.mock('@arcgis/core/views/MapView', () => ({
+  default: jest.fn().mockImplementation(() => ({
+    map: { add: jest.fn(), remove: jest.fn() },
+    popup: { close: jest.fn(), visible: false },
+    hitTest: jest.fn().mockResolvedValue({ results: [] }),
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    goTo: jest.fn().mockResolvedValue(undefined),
+    openPopup: jest.fn(),
+  })),
 }));
+
+jest.mock('@arcgis/core/layers/GraphicsLayer', () => ({
+  default: jest.fn().mockImplementation(() => ({
+    graphics: {
+      forEach: jest.fn(),
+      find: jest.fn(),
+      includes: jest.fn().mockReturnValue(false),
+      toArray: jest.fn().mockReturnValue([]),
+      getItemAt: jest.fn(),
+      length: 0,
+    },
+    add: jest.fn(),
+    remove: jest.fn(),
+    removeAll: jest.fn(),
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+  })),
+}));
+
+jest.mock('@arcgis/core/Graphic', () => ({
+  default: jest.fn().mockImplementation((props: any) => ({
+    geometry: props?.geometry ?? null,
+    attributes: props?.attributes ?? {},
+    symbol: props?.symbol ?? null,
+    popupTemplate: props?.popupTemplate ?? null,
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Point', () => ({
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'point',
+    x: props?.x ?? 0,
+    y: props?.y ?? 0,
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Polyline', () => ({
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'polyline',
+    paths: props?.paths ?? [],
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Polygon', () => ({
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'polygon',
+    rings: props?.rings ?? [],
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+    centroid: { x: 0, y: 0 },
+  })),
+}));
+
+jest.mock('@arcgis/core/core/PopupTemplate', () => ({
+  default: jest.fn().mockImplementation(() => ({})),
+}));
+
+jest.mock('@arcgis/core/widgets/Sketch/SketchViewModel', () => ({
+  default: jest.fn().mockImplementation(() => ({
+    state: 'idle',
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    create: jest.fn(),
+    update: jest.fn(),
+    cancel: jest.fn(),
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/support/webMercatorUtils', () => ({
+  webMercatorToGeographic: jest.fn((g: any) => g),
+}));
+
+jest.mock('@arcgis/core/renderers/support/jsonUtils', () => ({
+  fromJSON: jest.fn().mockReturnValue({
+    getSymbol: jest.fn().mockReturnValue(null),
+  }),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleMarkerSymbol', () => ({
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-marker' })),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleLineSymbol', () => ({
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-line' })),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleFillSymbol', () => ({
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-fill' })),
+}));
+
+jest.mock('@arcgis/core/symbols/TextSymbol', () => ({
+  default: jest.fn().mockImplementation(() => ({ type: 'text' })),
+}));
+
+// ── Minimal LitElement stub ──────────────────────────────────────────────────
+class LitElementStub extends HTMLElement {
+  static properties: Record<string, any> = {};
+  private _updateCallbacks: Array<(map: Map<string, unknown>) => void> = [];
+
+  connectedCallback() {}
+  disconnectedCallback() {}
+  requestUpdate() {}
+
+  protected createRenderRoot() {
+    return this;
+  }
+
+  render() {
+    return null;
+  }
+
+  protected updated(_changedProps: Map<string, unknown>) {}
+
+  // Helper used by tests to simulate property changes
+  simulateUpdate(changedProps: Record<string, unknown>) {
+    this.updated(new Map(Object.entries(changedProps)));
+  }
+}
+
+jest.mock('lit', () => ({ LitElement: LitElementStub }));
+jest.mock('lit/decorators.js', () => ({
+  customElement: () => () => {},
+  property: () => () => {},
+}));
+
+// ── Import component AFTER mocks ─────────────────────────────────────────────
+// Rename: up-geojson-layer → arc-geojson-layer  /  UpGeoJsonLayer → ArcGeoJsonLayer
+import { UpGeoJsonLayer as ArcGeoJsonLayer } from '../src/geojson-layer/geojson-layer';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function makeView() {
+  const GraphicsLayer = require('@arcgis/core/layers/GraphicsLayer').default;
+  return {
+    map: { add: jest.fn(), remove: jest.fn() },
+    popup: { close: jest.fn(), visible: false },
+    hitTest: jest.fn().mockResolvedValue({ results: [] }),
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    goTo: jest.fn().mockResolvedValue(undefined),
+    openPopup: jest.fn(),
+  };
+}
+
+function makeAncestorMap(view: any) {
+  return {
+    componentOnReady: jest.fn().mockResolvedValue(undefined),
+    getViewInstance: jest.fn().mockResolvedValue(view),
+  };
+}
+
+async function buildComponent(props: Partial<ArcGeoJsonLayer> = {}): Promise<ArcGeoJsonLayer> {
+  const el = new ArcGeoJsonLayer() as any;
+
+  const view = makeView();
+  const ancestorMap = makeAncestorMap(view);
+
+  // Stub DOM traversal used by resolveAncestorMapAndView
+  el.closest = jest.fn().mockReturnValue(ancestorMap);
+
+  // Apply any extra props
+  Object.assign(el, props);
+
+  await el.connectedCallback();
+  return el;
+}
+
+// ── Test Suites ───────────────────────────────────────────────────────────────
+describe('ArcGeoJsonLayer – initialization', () => {
+  test('connectedCallback creates featureLayer and labelLayer', async () => {
+    const GraphicsLayer = require('@arcgis/core/layers/GraphicsLayer').default;
+    const el = await buildComponent();
+
+    expect(GraphicsLayer).toHaveBeenCalledTimes(2); // featureLayer + labelLayer
+    expect((el as any).featureLayer).toBeDefined();
+    expect((el as any).labelLayer).toBeDefined();
+  });
+
+  test('view is resolved from ancestor arc-map', async () => {
+    const el = await buildComponent();
+    expect((el as any).view).toBeDefined();
+  });
+
+  test('featureLayer and labelLayer are added to map', async () => {
+    const el = await buildComponent() as any;
+    expect(el.view.map.add).toHaveBeenCalledWith(el.featureLayer);
+    expect(el.view.map.add).toHaveBeenCalledWith(el.labelLayer);
+  });
+});
+
+describe('ArcGeoJsonLayer – GeoJSON rendering', () => {
+  const pointGeoJson = JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [-96, 41] },
+        properties: { name: 'Test Point' },
+      },
+    ],
+  });
+
+  test('renders point features from GeoJSON string', async () => {
+    const el = await buildComponent({ geojson: pointGeoJson } as any) as any;
+    expect(el.featureLayer.add).toHaveBeenCalled();
+  });
+
+  test('renders polygon features', async () => {
+    const polygonGeoJson = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[-96, 41], [-97, 42], [-95, 42], [-96, 41]]],
+          },
+          properties: {},
+        },
+      ],
+    });
+    const el = await buildComponent({ geojson: polygonGeoJson } as any) as any;
+    expect(el.featureLayer.add).toHaveBeenCalled();
+  });
+
+  test('renders polyline features', async () => {
+    const lineGeoJson = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [[-96, 41], [-97, 42]],
+          },
+          properties: {},
+        },
+      ],
+    });
+    const el = await buildComponent({ geojson: lineGeoJson } as any) as any;
+    expect(el.featureLayer.add).toHaveBeenCalled();
+  });
+
+  test('handles invalid GeoJSON gracefully', async () => {
+    const el = await buildComponent({ geojson: 'not-valid-json' } as any);
+    expect((el as any).featureLayer).toBeDefined(); // should not throw
+  });
+
+  test('handles FeatureCollection object (not string)', async () => {
+    const fc = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-96, 41] },
+          properties: {},
+        },
+      ],
+    };
+    const el = await buildComponent({ geojson: fc } as any) as any;
+    expect(el.featureLayer.add).toHaveBeenCalled();
+  });
+});
+
+describe('ArcGeoJsonLayer – updated() lifecycle', () => {
+  test('updateGeoJson called when geojson prop changes', async () => {
+    const el = await buildComponent() as any;
+    el.updateGeoJson = jest.fn();
+    el.simulateUpdate({ geojson: 'new-value' });
+    expect(el.updateGeoJson).toHaveBeenCalled();
+  });
+
+  test('updateInfoTemplate called when infoTemplate changes', async () => {
+    const el = await buildComponent() as any;
+    el.updateInfoTemplate = jest.fn();
+    el.simulateUpdate({ infoTemplate: '{}' });
+    expect(el.updateInfoTemplate).toHaveBeenCalled();
+  });
+
+  test('updateRenderer called when renderer changes', async () => {
+    const el = await buildComponent() as any;
+    el.updateRenderer = jest.fn();
+    el.simulateUpdate({ renderer: '{}' });
+    expect(el.updateRenderer).toHaveBeenCalled();
+  });
+
+  test('updateLabelJson called when labelJson changes', async () => {
+    const el = await buildComponent() as any;
+    el.updateLabelJson = jest.fn();
+    el.simulateUpdate({ labelJson: '{}' });
+    expect(el.updateLabelJson).toHaveBeenCalled();
+  });
+
+  test('refreshLabels called when labelColor changes', async () => {
+    const el = await buildComponent() as any;
+    el.refreshLabels = jest.fn();
+    el.simulateUpdate({ labelColor: '[255,0,0,255]' });
+    expect(el.refreshLabels).toHaveBeenCalled();
+  });
+
+  test('refreshLabels called when labelSize changes', async () => {
+    const el = await buildComponent() as any;
+    el.refreshLabels = jest.fn();
+    el.simulateUpdate({ labelSize: 14 });
+    expect(el.refreshLabels).toHaveBeenCalled();
+  });
+
+  test('updateEditing called when enableUserEdit changes', async () => {
+    const el = await buildComponent() as any;
+    el.updateEditing = jest.fn();
+    el.simulateUpdate({ enableUserEdit: true });
+    expect(el.updateEditing).toHaveBeenCalled();
+  });
+});
+
+describe('ArcGeoJsonLayer – editor / SketchViewModel', () => {
+  test('createEditor initialises SketchViewModel', async () => {
+    const SketchViewModel = require('@arcgis/core/widgets/Sketch/SketchViewModel').default;
+    const el = await buildComponent() as any;
+    expect(SketchViewModel).toHaveBeenCalled();
+    expect(el.graphicsEditor).toBeDefined();
+  });
+
+  test('startDrawing sets inDrawingMode = true', async () => {
+    const el = await buildComponent() as any;
+    el.featureLayer.graphics.getItemAt = jest.fn();
+    await el.startDrawing('POINT');
+    expect(el.inDrawingMode).toBe(true);
+  });
+
+  test('cancelDrawing sets inDrawingMode = false', async () => {
+    const el = await buildComponent() as any;
+    el.inDrawingMode = true;
+    await el.cancelDrawing();
+    expect(el.inDrawingMode).toBe(false);
+  });
+
+  test('updateEditing disables popupTemplates when enableUserEdit=true', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = { popupTemplate: {} };
+    el.featureLayer.graphics.forEach = jest.fn((cb: any) => cb(mockGraphic));
+    await el.updateEditing(true);
+    expect(mockGraphic.popupTemplate).toBeNull();
+  });
+
+  test('updateEditing restores popupTemplates when enableUserEdit=false', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = { popupTemplate: null, geometry: { type: 'point' }, attributes: {} };
+    el.featureLayer.graphics.forEach = jest.fn((cb: any) => cb(mockGraphic));
+    await el.updateEditing(false);
+    expect(mockGraphic.popupTemplate).not.toBeUndefined();
+  });
+});
+
+describe('ArcGeoJsonLayer – labels', () => {
+  test('refreshLabels clears and re-adds label graphics', async () => {
+    const pointGeoJson = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-96, 41] },
+          properties: { LABEL: 'UP' },
+        },
+      ],
+    });
+    const el = await buildComponent({ geojson: pointGeoJson } as any) as any;
+
+    const mockGraphic = {
+      geometry: { type: 'point', x: -96, y: 41 },
+      attributes: { LABEL: 'UP' },
+    };
+    el.featureLayer.graphics.forEach = jest.fn((cb: any) => cb(mockGraphic));
+
+    el.refreshLabels();
+
+    expect(el.labelLayer.removeAll).toHaveBeenCalled();
+    expect(el.labelLayer.add).toHaveBeenCalled();
+  });
+
+  test('refreshLabels skips graphics with no LABEL attribute', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = {
+      geometry: { type: 'point' },
+      attributes: {},
+    };
+    el.featureLayer.graphics.forEach = jest.fn((cb: any) => cb(mockGraphic));
+    el.labelLayer.removeAll.mockClear();
+    el.labelLayer.add.mockClear();
+
+    el.refreshLabels();
+
+    expect(el.labelLayer.add).not.toHaveBeenCalled();
+  });
+});
+
+describe('ArcGeoJsonLayer – popup', () => {
+  test('showGraphicPopup opens view popup', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = {
+      geometry: { type: 'point', x: -96, y: 41, spatialReference: { isWGS84: true } },
+      attributes: {},
+      popupTemplate: null,
+    };
+    el.enableUserEdit = false;
+    el.inDrawingMode = false;
+    el.showGraphicPopup(mockGraphic, { x: 100, y: 200 });
+    expect(el.view.openPopup).toHaveBeenCalled();
+  });
+
+  test('showGraphicPopup does nothing when enableUserEdit=true', async () => {
+    const el = await buildComponent() as any;
+    el.enableUserEdit = true;
+    el.showGraphicPopup({}, { x: 0, y: 0 });
+    expect(el.view.openPopup).not.toHaveBeenCalled();
+  });
+});
+
+describe('ArcGeoJsonLayer – public API', () => {
+  test('getLayerId returns featureLayer.id when set', async () => {
+    const el = await buildComponent() as any;
+    el.featureLayer.id = 'test-layer-id';
+    const id = await el.getLayerId();
+    expect(id).toBe('test-layer-id');
+  });
+
+  test('findFeatureByUniqueId returns correct graphic', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = { attributes: { id: 'abc' } };
+    el.uniqueIdPropertyName = 'id';
+    el.featureLayer.graphics.find = jest.fn((cb: any) => {
+      return cb(mockGraphic) ? mockGraphic : undefined;
+    });
+    const result = await el.findFeatureByUniqueId('abc');
+    expect(result).toBe(mockGraphic);
+  });
+
+  test('zoomTo calls view.goTo for a point feature', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = {
+      geometry: { type: 'point', x: -96, y: 41 },
+    };
+    el.findFeatureByUniqueId = jest.fn().mockResolvedValue(mockGraphic);
+    await el.zoomTo('abc');
+    expect(el.view.goTo).toHaveBeenCalled();
+  });
+
+  test('zoomTo calls view.goTo for a polygon feature', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = {
+      geometry: {
+        type: 'polygon',
+        extent: { expand: jest.fn().mockReturnValue({}) },
+        centroid: { x: -96, y: 41 },
+      },
+    };
+    el.findFeatureByUniqueId = jest.fn().mockResolvedValue(mockGraphic);
+    await el.zoomTo('poly-1');
+    expect(el.view.goTo).toHaveBeenCalled();
+  });
+
+  test('toFeatureCollectionFromLayer returns FeatureCollection', async () => {
+    const el = await buildComponent() as any;
+    const mockGraphic = {
+      geometry: { type: 'point', x: -96, y: 41, spatialReference: { isWGS84: true } },
+      attributes: { id: 1 },
+    };
+    el.featureLayer.graphics.toArray = jest.fn().mockReturnValue([mockGraphic]);
+    const fc = el.toFeatureCollectionFromLayer();
+    expect(fc.type).toBe('FeatureCollection');
+    expect(Array.isArray(fc.features)).toBe(true);
+  });
+});
+
+describe('ArcGeoJsonLayer – disconnectedCallback', () => {
+  test('removes layers from map on disconnect', async () => {
+    const el = await buildComponent() as any;
+    el.disconnectedCallback();
+    expect(el.view.map.remove).toHaveBeenCalledWith(el.featureLayer);
+    expect(el.view.map.remove).toHaveBeenCalledWith(el.labelLayer);
+  });
+
+  test('cancels graphicsEditor on disconnect', async () => {
+    const el = await buildComponent() as any;
+    el.disconnectedCallback();
+    expect(el.graphicsEditor.cancel).toHaveBeenCalled();
+  });
+});
+
+describe('ArcGeoJsonLayer – geometry conversion', () => {
+  test('getArcGISJson converts Point GeoJSON feature', async () => {
+    const el = await buildComponent() as any;
+    const fc = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-96, 41] },
+          properties: {},
+        },
+      ],
+    };
+    const result = el.getArcGISJson(JSON.stringify(fc));
+    expect(result).not.toBeNull();
+    expect(result.graphics.length).toBeGreaterThan(0);
+  });
+
+  test('getArcGISJson returns null for non-FeatureCollection', async () => {
+    const el = await buildComponent() as any;
+    const result = el.getArcGISJson(JSON.stringify({ type: 'Feature', geometry: null }));
+    expect(result).toBeNull();
+  });
+
+  test('parseJson returns parsedJson for valid JSON string', async () => {
+    const result = (ArcGeoJsonLayer as any).parseJson({ type: 'Point' });
+    expect(result.parsedJson).toBeDefined();
+  });
+
+  test('parseJson returns error for null', async () => {
+    const result = (ArcGeoJsonLayer as any).parseJson(null);
+    expect(result.error).toBeDefined();
+  });
+});
