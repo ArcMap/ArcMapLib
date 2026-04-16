@@ -1,3 +1,273 @@
+import JsonUtils from '../src/common/json-utils';
+
+// Mock ArcGIS modules
+jest.mock('@arcgis/core/PopupTemplate', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    title: props?.title,
+    content: props?.content,
+  })),
+}));
+
+jest.mock('@arcgis/core/layers/support/LabelClass', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({ ...props })),
+}));
+
+jest.mock('@arcgis/core/renderers/SimpleRenderer', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({ type: 'simple', ...props })),
+}));
+
+jest.mock('@arcgis/core/renderers/UniqueValueRenderer', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({ type: 'unique-value', ...props })),
+}));
+
+jest.mock('@arcgis/core/renderers/ClassBreaksRenderer', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({ type: 'class-breaks', ...props })),
+}));
+
+// ── getRandomColor ────────────────────────────────────────────────────────────
+describe('JsonUtils.getRandomColor', () => {
+  test('returns array of 4 numbers', () => {
+    const color = JsonUtils.getRandomColor();
+    expect(Array.isArray(color)).toBe(true);
+    expect(color).toHaveLength(4);
+  });
+
+  test('each value is between 0 and 255', () => {
+    const color = JsonUtils.getRandomColor();
+    color.forEach((v) => {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(255);
+    });
+  });
+
+  test('last value alpha is 255', () => {
+    const color = JsonUtils.getRandomColor();
+    expect(color[3]).toBe(255);
+  });
+});
+
+// ── getGeoJsonFor ─────────────────────────────────────────────────────────────
+describe('JsonUtils.getGeoJsonFor', () => {
+  test('returns parsedJson for valid JSON string', () => {
+    const result = JsonUtils.getGeoJsonFor('{"type":"Point"}');
+    expect(result.parsedJson).toEqual({ type: 'Point' });
+    expect(result.error).toBeUndefined();
+  });
+
+  test('returns parsedJson for object input', () => {
+    const obj = { type: 'FeatureCollection', features: [] };
+    const result = JsonUtils.getGeoJsonFor(obj);
+    expect(result.parsedJson).toEqual(obj);
+  });
+
+  test('returns error for invalid JSON string', () => {
+    const result = JsonUtils.getGeoJsonFor('not-valid-json{{{');
+    expect(result.error).toBeDefined();
+    expect(result.parsedJson).toBeUndefined();
+  });
+
+  test('returns parsedJson undefined for null', () => {
+    const result = JsonUtils.getGeoJsonFor(null);
+    expect(result.parsedJson).toBeUndefined();
+  });
+
+  test('returns parsedJson undefined for undefined', () => {
+    const result = JsonUtils.getGeoJsonFor(undefined);
+    expect(result.parsedJson).toBeUndefined();
+  });
+
+  test('returns parsedJson undefined for empty string', () => {
+    const result = JsonUtils.getGeoJsonFor('   ');
+    expect(result.parsedJson).toBeUndefined();
+  });
+});
+
+// ── getJsonFor ────────────────────────────────────────────────────────────────
+describe('JsonUtils.getJsonFor', () => {
+  test('returns parsedJson for valid string', () => {
+    const result = JsonUtils.getJsonFor('{"key":"value"}');
+    expect(result.parsedJson).toEqual({ key: 'value' });
+  });
+
+  test('returns error for invalid string', () => {
+    const result = JsonUtils.getJsonFor('{bad}');
+    expect(result.error).toBeDefined();
+  });
+
+  test('returns object as-is', () => {
+    const obj = { a: 1 };
+    const result = JsonUtils.getJsonFor(obj);
+    expect(result.parsedJson).toEqual(obj);
+  });
+});
+
+// ── clonePlain ────────────────────────────────────────────────────────────────
+describe('JsonUtils.clonePlain', () => {
+  test('deep clones an object', () => {
+    const original = { a: { b: 1 } };
+    const clone = JsonUtils.clonePlain(original);
+    expect(clone).toEqual(original);
+    expect(clone).not.toBe(original);
+  });
+
+  test('returns null as-is', () => {
+    expect(JsonUtils.clonePlain(null)).toBeNull();
+  });
+
+  test('returns undefined as-is', () => {
+    expect(JsonUtils.clonePlain(undefined)).toBeUndefined();
+  });
+});
+
+// ── resolveLabelColor ─────────────────────────────────────────────────────────
+describe('JsonUtils.resolveLabelColor', () => {
+  test('returns color array when given a valid number[] of 4', () => {
+    const result = JsonUtils.resolveLabelColor([255, 0, 0, 255]);
+    expect(result).toEqual([255, 0, 0, 255]);
+  });
+
+  test('returns color array when given a valid number[] of 3', () => {
+    const result = JsonUtils.resolveLabelColor([100, 150, 200]);
+    expect(result[0]).toBe(100);
+    expect(result[1]).toBe(150);
+    expect(result[2]).toBe(200);
+    expect(result[3]).toBe(255);
+  });
+
+  test('parses color from JSON string', () => {
+    const result = JsonUtils.resolveLabelColor('[255, 128, 0, 255]');
+    expect(result[0]).toBe(255);
+    expect(result[1]).toBe(128);
+  });
+
+  test('returns default [0,0,0,255] for invalid input', () => {
+    const result = JsonUtils.resolveLabelColor('not-a-color');
+    expect(result).toEqual([0, 0, 0, 255]);
+  });
+
+  test('returns default array for undefined', () => {
+    const result = JsonUtils.resolveLabelColor(undefined as any);
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+// ── resolveLabelSize ──────────────────────────────────────────────────────────
+describe('JsonUtils.resolveLabelSize', () => {
+  test('returns userSize when valid positive number', () => {
+    expect(JsonUtils.resolveLabelSize(14)).toBe(14);
+  });
+
+  test('returns default size for 0', () => {
+    expect(JsonUtils.resolveLabelSize(0)).toBe(JsonUtils.DEFAULT_LABEL_SIZE);
+  });
+
+  test('returns default size for negative number', () => {
+    expect(JsonUtils.resolveLabelSize(-5)).toBe(JsonUtils.DEFAULT_LABEL_SIZE);
+  });
+
+  test('returns default size for NaN', () => {
+    expect(JsonUtils.resolveLabelSize(NaN)).toBe(JsonUtils.DEFAULT_LABEL_SIZE);
+  });
+
+  test('returns default size for undefined', () => {
+    expect(JsonUtils.resolveLabelSize(undefined as any)).toBe(JsonUtils.DEFAULT_LABEL_SIZE);
+  });
+});
+
+// ── getJsonLabelFor ───────────────────────────────────────────────────────────
+describe('JsonUtils.getJsonLabelFor', () => {
+  test('returns array', () => {
+    const result = JsonUtils.getJsonLabelFor([255, 0, 0, 255], 12);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test('has labelExpressionInfo with $feature.LABEL', () => {
+    const result = JsonUtils.getJsonLabelFor([255, 0, 0, 255], 12);
+    expect(result[0]).toHaveProperty('labelExpressionInfo');
+    expect(result[0].labelExpressionInfo.expression).toBe('$feature.LABEL');
+  });
+
+  test('symbol type is text', () => {
+    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 10);
+    expect(result[0].symbol.type).toBe('text');
+  });
+
+  test('symbol font size matches input', () => {
+    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 16);
+    expect(result[0].symbol.font.size).toBe(16);
+  });
+
+  test('symbol has haloColor black', () => {
+    const result = JsonUtils.getJsonLabelFor([0, 0, 0, 255], 12);
+    expect(result[0].symbol.haloColor).toBe('black');
+  });
+});
+
+// ── getJsonSymbolFor ──────────────────────────────────────────────────────────
+describe('JsonUtils.getJsonSymbolFor', () => {
+  test('returns object with symbol property', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'esriGeometryPoint', [255, 0, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result).toHaveProperty('symbol');
+  });
+
+  test('point symbol type is esriSMS', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'point', [255, 0, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result.symbol.type).toBe('esriSMS');
+  });
+
+  test('multipoint symbol type is esriSMS', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'multipoint', [255, 0, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result.symbol.type).toBe('esriSMS');
+  });
+
+  test('polyline symbol type is esriSLS', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'polyline', [0, 0, 255, 255], 10, 2, 2
+    ) as any;
+    expect(result.symbol.type).toBe('esriSLS');
+  });
+
+  test('esriGeometryLine symbol type is esriSLS', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'esriGeometryLine', [0, 0, 255, 255], 10, 2, 2
+    ) as any;
+    expect(result.symbol.type).toBe('esriSLS');
+  });
+
+  test('polygon symbol type is esriSFS', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'polygon', [0, 255, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result.symbol.type).toBe('esriSFS');
+  });
+
+  test('wrapper type is simple', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'point', [255, 0, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result.type).toBe('simple');
+  });
+
+  test('wrapper label is LABEL', () => {
+    const result = JsonUtils.getJsonSymbolFor(
+      'point', [255, 0, 0, 255], 10, 2, 2
+    ) as any;
+    expect(result.label).toBe('LABEL');
+  });
+});
+
 // ── getSymbolJson ─────────────────────────────────────────────────────────────
 describe('JsonUtils.getSymbolJson', () => {
   test('returns object for point geometry', () => {
@@ -7,7 +277,7 @@ describe('JsonUtils.getSymbolJson', () => {
       10,
       JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
       JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
-    );
+    ) as any;
     expect(result).toBeDefined();
     expect(typeof result).toBe('object');
   });
@@ -19,7 +289,7 @@ describe('JsonUtils.getSymbolJson', () => {
       10,
       JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
       JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
-    );
+    ) as any;
     expect(result).toBeDefined();
   });
 
@@ -30,41 +300,330 @@ describe('JsonUtils.getSymbolJson', () => {
       10,
       JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH,
       JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH
-    );
+    ) as any;
     expect(result).toBeDefined();
   });
 
   test('reduces alpha to 100 for polygon geometry', () => {
     const color = [0, 128, 0, 255];
-    JsonUtils.getSymbolJson(
-      'esriGeometryPolygon',
-      color,
-      10,
-      2,
-      2
-    );
+    JsonUtils.getSymbolJson('esriGeometryPolygon', color, 10, 2, 2);
     expect(color[3]).toBe(100);
   });
 
   test('uses widthGeomLine for polyline symbolSize', () => {
     const result = JsonUtils.getSymbolJson(
-      'esriGeometryPolyline',
-      [0, 0, 0, 255],
-      10,
-      5,   // widthGeomLine
-      2
-    );
+      'esriGeometryPolyline', [0, 0, 0, 255], 10, 5, 2
+    ) as any;
     expect(result).toBeDefined();
   });
 
   test('uses widthGeomPolygon for polygon symbolSize', () => {
     const result = JsonUtils.getSymbolJson(
-      'esriGeometryPolygon',
-      [0, 0, 0, 100],
-      10,
-      2,
-      6    // widthGeomPolygon
-    );
+      'esriGeometryPolygon', [0, 0, 0, 100], 10, 2, 6
+    ) as any;
     expect(result).toBeDefined();
+  });
+});
+
+// ── getInfoTemplateJson ───────────────────────────────────────────────────────
+describe('JsonUtils.getInfoTemplateJson', () => {
+  test('returns null for empty string', () => {
+    expect(JsonUtils.getInfoTemplateJson('')).toBeNull();
+    expect(JsonUtils.getInfoTemplateJson('   ')).toBeNull();
+  });
+
+  test('returns parsed object for valid JSON string', () => {
+    const result = JsonUtils.getInfoTemplateJson(
+      '{"listItem":"Title","details":"Content"}'
+    );
+    expect(result).not.toBeNull();
+    expect(result?.listItem).toBe('Title');
+  });
+
+  test('returns object as-is for object input', () => {
+    const obj = { listItem: 'My Title', details: 'My Content' };
+    const result = JsonUtils.getInfoTemplateJson(obj);
+    expect(result).toEqual(obj);
+  });
+
+  test('returns null for invalid JSON', () => {
+    const result = JsonUtils.getInfoTemplateJson('{bad json}');
+    expect(result).toBeNull();
+  });
+});
+
+// ── buildPopupTemplateFromCurrent ─────────────────────────────────────────────
+describe('JsonUtils.buildPopupTemplateFromCurrent', () => {
+  const mockGraphic = {
+    attributes: { id: 1, name: 'Test Feature', OBJECTID: 1 },
+    geometry: { type: 'point' },
+  };
+
+  test('builds popup template with string listItem', () => {
+    const result = JsonUtils.buildPopupTemplateFromCurrent(
+      mockGraphic,
+      JSON.stringify({ listItem: 'Feature Title', details: 'Feature Details' }),
+      'id',
+      'Details'
+    );
+    expect(result).not.toBeNull();
+  });
+
+  test('builds popup template with function listItem', () => {
+    const infoTemplate = {
+      listItem: (g: any) => `Title: ${g.attributes.name}`,
+      details: 'Static content',
+    };
+    const result = JsonUtils.buildPopupTemplateFromCurrent(
+      mockGraphic,
+      infoTemplate,
+      'id',
+      'Details'
+    );
+    expect(result).not.toBeNull();
+  });
+
+  test('returns null when infoTemplate is empty string', () => {
+    const result = JsonUtils.buildPopupTemplateFromCurrent(
+      mockGraphic, '', 'id', 'Details'
+    );
+    expect(result).toBeNull();
+  });
+
+  test('uses fallbackTitle when uniqueId attribute is undefined', () => {
+    const graphicNoId = { attributes: {}, geometry: { type: 'point' } };
+    const result = JsonUtils.buildPopupTemplateFromCurrent(
+      graphicNoId,
+      { listItem: undefined, details: 'some content' },
+      'id',
+      'My Fallback'
+    );
+    expect(result).not.toBeNull();
+  });
+});
+
+// ── buildDefaultPopupContent ──────────────────────────────────────────────────
+describe('JsonUtils.buildDefaultPopupContent', () => {
+  test('builds HTML rows for each attribute', () => {
+    const result = JsonUtils.buildDefaultPopupContent({ name: 'Test', value: 42 });
+    expect(result).toContain('name');
+    expect(result).toContain('Test');
+    expect(result).toContain('value');
+    expect(result).toContain('42');
+  });
+
+  test('returns No Details Available for empty attributes', () => {
+    const result = JsonUtils.buildDefaultPopupContent({});
+    expect(result).toContain('No Details Available');
+  });
+});
+
+// ── resolveTemplateValue ──────────────────────────────────────────────────────
+describe('JsonUtils.resolveTemplateValue', () => {
+  const mockGraphic = { attributes: { name: 'UP Railroad' } };
+
+  test('returns string value directly', () => {
+    const result = JsonUtils.resolveTemplateValue('Static Title', mockGraphic as any);
+    expect(result).toBe('Static Title');
+  });
+
+  test('calls function and returns result', () => {
+    const fn = (g: any) => `Hello ${g.attributes.name}`;
+    const result = JsonUtils.resolveTemplateValue(fn, mockGraphic as any);
+    expect(result).toBe('Hello UP Railroad');
+  });
+
+  test('returns empty string when function throws', () => {
+    const fn = () => { throw new Error('oops'); };
+    const result = JsonUtils.resolveTemplateValue(fn as any, mockGraphic as any);
+    expect(result).toBe('');
+  });
+
+  test('returns empty string for undefined', () => {
+    const result = JsonUtils.resolveTemplateValue(undefined as any, mockGraphic as any);
+    expect(result).toBe('');
+  });
+});
+
+// ── getGeoLabelJson ───────────────────────────────────────────────────────────
+describe('JsonUtils.getGeoLabelJson', () => {
+  test('returns label from color/size when userLabel is empty string', () => {
+    const result = JsonUtils.getGeoLabelJson('', [255, 0, 0, 255], 12);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result[0]).toHaveProperty('labelExpressionInfo');
+  });
+
+  test('returns label from color/size when userLabel is whitespace', () => {
+    const result = JsonUtils.getGeoLabelJson('   ', [0, 0, 255, 255], 14);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('parses and returns custom label json array', () => {
+    const labelArr = [
+      { labelExpressionInfo: { expression: '$feature.NAME' }, symbol: { type: 'text' } }
+    ];
+    const result = JsonUtils.getGeoLabelJson(
+      JSON.stringify(labelArr), [0, 0, 0, 255], 12
+    );
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('parses and returns single custom label json object wrapped in array', () => {
+    const labelObj = {
+      labelExpressionInfo: { expression: '$feature.NAME' },
+      symbol: { type: 'text' }
+    };
+    const result = JsonUtils.getGeoLabelJson(
+      JSON.stringify(labelObj), [0, 0, 0, 255], 12
+    );
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('falls back to color/size for invalid label json', () => {
+    const result = JsonUtils.getGeoLabelJson('{bad json}', [0, 0, 0, 255], 12);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result[0]).toHaveProperty('labelExpressionInfo');
+  });
+});
+
+// ── normalizeLegacyLabelClass ─────────────────────────────────────────────────
+describe('JsonUtils.normalizeLegacyLabelClass', () => {
+  test('returns default label for null input', () => {
+    const result = JsonUtils.normalizeLegacyLabelClass(null, [0, 0, 0, 255], 12);
+    expect(result).toHaveProperty('labelExpressionInfo');
+  });
+
+  test('normalizes esriTS type symbol', () => {
+    const labelClass = {
+      labelExpressionInfo: { expression: '$feature.NAME' },
+      symbol: {
+        type: 'esriTS',
+        color: [255, 0, 0, 255],
+        font: { size: 14, family: 'Arial', weight: 'bold' },
+      },
+    };
+    const result = JsonUtils.normalizeLegacyLabelClass(
+      labelClass, [0, 0, 0, 255], 12
+    );
+    expect(result.symbol.type).toBe('text');
+  });
+
+  test('normalizes text type symbol', () => {
+    const labelClass = {
+      labelExpressionInfo: { expression: '$feature.NAME' },
+      symbol: { type: 'text', color: [0, 255, 0, 255], font: { size: 10 } },
+    };
+    const result = JsonUtils.normalizeLegacyLabelClass(
+      labelClass, [0, 0, 0, 255], 12
+    );
+    expect(result.symbol.type).toBe('text');
+  });
+
+  test('adds labelExpressionInfo if missing', () => {
+    const labelClass = { symbol: { type: 'text', color: [0, 0, 0, 255] } };
+    const result = JsonUtils.normalizeLegacyLabelClass(
+      labelClass, [0, 0, 0, 255], 12
+    );
+    expect(result.labelExpressionInfo).toBeDefined();
+    expect(result.labelExpressionInfo.expression).toBe('$feature.LABEL');
+  });
+});
+
+// ── normalizeLegacyLabelSymbol ────────────────────────────────────────────────
+describe('JsonUtils.normalizeLegacyLabelSymbol', () => {
+  test('returns default text symbol for null', () => {
+    const result = JsonUtils.normalizeLegacyLabelSymbol(null, [0, 0, 0, 255], 12);
+    expect(result.type).toBe('text');
+  });
+
+  test('normalizes esriTS to text type', () => {
+    const symbol = { type: 'esriTS', color: [255, 0, 0, 255], font: { size: 14 } };
+    const result = JsonUtils.normalizeLegacyLabelSymbol(
+      symbol, [0, 0, 0, 255], 12
+    );
+    expect(result.type).toBe('text');
+  });
+
+  test('normalizes text type with fallbacks', () => {
+    const symbol = { type: 'text' };
+    const result = JsonUtils.normalizeLegacyLabelSymbol(
+      symbol, [0, 0, 255, 255], 16
+    );
+    expect(result.type).toBe('text');
+    expect(result.font.size).toBeDefined();
+  });
+
+  test('uses user color override', () => {
+    const symbol = { type: 'text', color: null };
+    const result = JsonUtils.normalizeLegacyLabelSymbol(
+      symbol, [200, 100, 50, 255], 12
+    );
+    expect(Array.isArray(result.color)).toBe(true);
+  });
+});
+
+// ── updateLabelJson ───────────────────────────────────────────────────────────
+describe('JsonUtils.updateLabelJson', () => {
+  test('sets labelingInfo on featureLayer for valid label JSON array', () => {
+    const mockFeatureLayer = { labelingInfo: null };
+    const labelArr = [{ labelExpressionInfo: { expression: '$feature.NAME' } }];
+    JsonUtils.updateLabelJson(JSON.stringify(labelArr), mockFeatureLayer);
+    expect(mockFeatureLayer.labelingInfo).not.toBeNull();
+  });
+
+  test('does nothing for null label json', () => {
+    const mockFeatureLayer = { labelingInfo: null };
+    JsonUtils.updateLabelJson(null, mockFeatureLayer);
+    expect(mockFeatureLayer.labelingInfo).toBeNull();
+  });
+
+  test('handles single object label json', () => {
+    const mockFeatureLayer = { labelingInfo: null };
+    const labelObj = { labelExpressionInfo: { expression: '$feature.NAME' } };
+    JsonUtils.updateLabelJson(JSON.stringify(labelObj), mockFeatureLayer);
+    expect(mockFeatureLayer.labelingInfo).not.toBeNull();
+  });
+});
+
+// ── updateRenderer ────────────────────────────────────────────────────────────
+describe('JsonUtils.updateRenderer', () => {
+  test('sets simple renderer on featureLayer', () => {
+    const mockFeatureLayer = { renderer: null };
+    JsonUtils.updateRenderer(
+      JSON.stringify({ type: 'simple', symbol: {} }),
+      mockFeatureLayer, {}, {}
+    );
+    expect(mockFeatureLayer.renderer).not.toBeNull();
+  });
+
+  test('sets unique-value renderer on featureLayer', () => {
+    const mockFeatureLayer = { renderer: null };
+    JsonUtils.updateRenderer(
+      JSON.stringify({ type: 'unique-value', field1: 'type' }),
+      mockFeatureLayer, {}, {}
+    );
+    expect(mockFeatureLayer.renderer).not.toBeNull();
+  });
+
+  test('sets class-breaks renderer on featureLayer', () => {
+    const mockFeatureLayer = { renderer: null };
+    JsonUtils.updateRenderer(
+      JSON.stringify({ type: 'class-breaks', field: 'value' }),
+      mockFeatureLayer, {}, {}
+    );
+    expect(mockFeatureLayer.renderer).not.toBeNull();
+  });
+
+  test('sets default SimpleRenderer when newRenderer is null', () => {
+    const mockFeatureLayer = { renderer: null };
+    JsonUtils.updateRenderer(null, mockFeatureLayer, {}, { type: 'simple' });
+    expect(mockFeatureLayer.renderer).not.toBeNull();
+  });
+
+  test('logs warning for invalid renderer json', () => {
+    const mockFeatureLayer = { renderer: null };
+    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    JsonUtils.updateRenderer('{bad}', mockFeatureLayer, {}, {});
+    consoleSpy.mockRestore();
   });
 });
