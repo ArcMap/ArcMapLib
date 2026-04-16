@@ -1,51 +1,65 @@
 describe('ArcGeoJsonLayer – updated() lifecycle', () => {
   test('updateGeoJson called when geojson prop changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'updateGeoJson').mockResolvedValue(undefined);
+    const proto = Object.getPrototypeOf(el);
+    proto.updateGeoJson = jest.fn().mockResolvedValue(undefined);
     el.blockGeoJsonUpdate = false;
     el.updated(new Map([['geojson', 'old-value']]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.updateGeoJson).toHaveBeenCalled();
+    delete proto.updateGeoJson; // cleanup
   });
 
   test('updateInfoTemplate called when infoTemplate changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'updateInfoTemplate').mockImplementation(() => {});
+    const proto = Object.getPrototypeOf(el);
+    proto.updateInfoTemplate = jest.fn();
     el.updated(new Map([['infoTemplate', '{}']]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.updateInfoTemplate).toHaveBeenCalled();
+    delete proto.updateInfoTemplate;
   });
 
   test('updateRenderer called when renderer changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'updateRenderer').mockImplementation(() => {});
+    const proto = Object.getPrototypeOf(el);
+    proto.updateRenderer = jest.fn();
     el.updated(new Map([['renderer', '{}']]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.updateRenderer).toHaveBeenCalled();
+    delete proto.updateRenderer;
   });
 
   test('updateLabelJson called when labelJson changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'updateLabelJson').mockImplementation(() => {});
+    const proto = Object.getPrototypeOf(el);
+    proto.updateLabelJson = jest.fn();
     el.updated(new Map([['labelJson', '{}']]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.updateLabelJson).toHaveBeenCalled();
+    delete proto.updateLabelJson;
   });
 
   test('refreshLabels called when labelColor changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'refreshLabels').mockImplementation(() => {});
-    el.updated(new Map([['labelColor', '[255,0,0,255]']]));
-    expect(spy).toHaveBeenCalled();
+    const proto = Object.getPrototypeOf(el);
+    proto.refreshLabels = jest.fn();
+    el.updated(new Map([['labelColor', '[255,0,0]']]));
+    expect(proto.refreshLabels).toHaveBeenCalled();
+    delete proto.refreshLabels;
   });
 
   test('refreshLabels called when labelSize changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'refreshLabels').mockImplementation(() => {});
+    const proto = Object.getPrototypeOf(el);
+    proto.refreshLabels = jest.fn();
     el.updated(new Map([['labelSize', 14]]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.refreshLabels).toHaveBeenCalled();
+    delete proto.refreshLabels;
   });
 
   test('updateEditing called when enableUserEdit changes', async () => {
     const el = await buildComponent() as any;
-    const spy = jest.spyOn(el, 'updateEditing').mockResolvedValue(undefined);
+    const proto = Object.getPrototypeOf(el);
+    proto.updateEditing = jest.fn().mockResolvedValue(undefined);
     el.updated(new Map([['enableUserEdit', true]]));
-    expect(spy).toHaveBeenCalled();
+    expect(proto.updateEditing).toHaveBeenCalled();
+    delete proto.updateEditing;
   });
 });
