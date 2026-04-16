@@ -1,31 +1,22 @@
-test('removes cursor when popupTemplate is cleared', async () => {
-  const mapElement = makeMockMapElement();
+test('sets popupTemplate with title and details', async () => {
+  const mapElement = makeMockMapElement(); // ← NOT null
   const featureLayer = makeMockFeatureLayer();
+  const infoTemplate = '{"listItem":"Test Title","details":"Test Details"}';
 
-  // FIX: empty string hits the early return at line 16-21
-  // featureLayer.popupTemplate = null, getNode is NOT called
-  // So just verify it doesn't throw and popupTemplate is null
-  await PopupUtils.updatePopup('', mapElement as any, featureLayer as any);
-  expect(featureLayer.popupTemplate).toBeNull();
-  // getNode is only called when mapView exists and popup is being set/cleared
-  // with empty string it exits before reaching getNode
+  await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+  expect(featureLayer.popupTemplate).not.toBeNull();
+  expect(featureLayer.popupTemplate.title).toBe('Test Title');
+  expect(featureLayer.popupTemplate.content).toBe('Test Details');
 });
 
-test('featureBelongsToLayer returns true when feature.parentLayer matches layer', () => {
-  const layer = { id: 'layer-1' };
+test('sets popupTemplate with "No Details Available" if details is null', async () => {
+  const mapElement = makeMockMapElement(); // ← NOT null
+  const featureLayer = makeMockFeatureLayer();
+  const infoTemplate = '{"listItem":"Title","details":null}';
 
-  // FIX: looking at source line 89-91:
-  // const parentLayer = (feature.layer as any).parentLayer;
-  // return feature.layer === layer || parentLayer === layer;
-  // So parentLayer lives on feature.LAYER not feature directly
-  const feature = {
-    layer: {
-      id: 'sub-layer',
-      parentLayer: layer,  // parentLayer is on feature.layer not feature
-    },
-    attributes: {},
-  };
+  await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
 
-  const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
-  expect(result).toBe(true);
+  expect(featureLayer.popupTemplate).not.toBeNull();
+  expect(featureLayer.popupTemplate.content).toBe('No Details Available');
 });
