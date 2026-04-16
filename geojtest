@@ -1,20 +1,125 @@
-jest.mock('lit', () => {
-  class LitElement {
-    static properties: Record<string, any> = {};
-    connectedCallback() {}
-    disconnectedCallback() {}
-    requestUpdate() {}
-    createRenderRoot() { return this; }
-    render() { return null; }
-    updated(_changedProps: Map<string, unknown>) {}
-    simulateUpdate(changedProps: Record<string, unknown>) {
-      this.updated(new Map(Object.entries(changedProps)));
-    }
-  }
-  return { LitElement };
+jest.mock('@arcgis/core/layers/GraphicsLayer', () => {
+  const mockGraphicsLayerInstance = {
+    graphics: {
+      forEach: jest.fn(),
+      find: jest.fn(),
+      includes: jest.fn().mockReturnValue(false),
+      toArray: jest.fn().mockReturnValue([]),
+      getItemAt: jest.fn(),
+      length: 0,
+    },
+    add: jest.fn(),
+    remove: jest.fn(),
+    removeAll: jest.fn(),
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+  };
+
+  const MockGraphicsLayer = jest.fn().mockImplementation(() => mockGraphicsLayerInstance);
+
+  return {
+    __esModule: true,
+    default: MockGraphicsLayer,
+  };
 });
 
-jest.mock('lit/decorators.js', () => ({
-  customElement: () => () => {},
-  property: () => () => {},
+
+
+jest.mock('@arcgis/core/views/MapView', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({
+    map: { add: jest.fn(), remove: jest.fn() },
+    popup: { close: jest.fn(), visible: false },
+    hitTest: jest.fn().mockResolvedValue({ results: [] }),
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    goTo: jest.fn().mockResolvedValue(undefined),
+    openPopup: jest.fn(),
+  })),
 }));
+
+jest.mock('@arcgis/core/Graphic', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    geometry: props?.geometry ?? null,
+    attributes: props?.attributes ?? {},
+    symbol: props?.symbol ?? null,
+    popupTemplate: props?.popupTemplate ?? null,
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Point', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'point',
+    x: props?.x ?? 0,
+    y: props?.y ?? 0,
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Polyline', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'polyline',
+    paths: props?.paths ?? [],
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+  })),
+}));
+
+jest.mock('@arcgis/core/geometry/Polygon', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    type: 'polygon',
+    rings: props?.rings ?? [],
+    spatialReference: props?.spatialReference ?? { wkid: 4326 },
+    centroid: { x: 0, y: 0 },
+  })),
+}));
+
+jest.mock('@arcgis/core/core/PopupTemplate', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({})),
+}));
+
+jest.mock('@arcgis/core/widgets/Sketch/SketchViewModel', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({
+    state: 'idle',
+    on: jest.fn().mockReturnValue({ remove: jest.fn() }),
+    create: jest.fn(),
+    update: jest.fn(),
+    cancel: jest.fn(),
+  })),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleMarkerSymbol', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-marker' })),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleLineSymbol', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-line' })),
+}));
+
+jest.mock('@arcgis/core/symbols/SimpleFillSymbol', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({ type: 'simple-fill' })),
+}));
+
+jest.mock('@arcgis/core/symbols/TextSymbol', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({ type: 'text' })),
+}));
+
+jest.mock('@arcgis/core/geometry/support/webMercatorUtils', () => ({
+  __esModule: true,
+  webMercatorToGeographic: jest.fn((g: any) => g),
+}));
+
+jest.mock('@arcgis/core/renderers/support/jsonUtils', () => ({
+  __esModule: true,
+  fromJSON: jest.fn().mockReturnValue({
+    getSymbol: jest.fn().mockReturnValue(null),
+  }),
+}));
+
