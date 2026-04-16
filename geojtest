@@ -1,22 +1,211 @@
-test('sets popupTemplate with title and details', async () => {
-  const mapElement = makeMockMapElement(); // ← NOT null
-  const featureLayer = makeMockFeatureLayer();
-  const infoTemplate = '{"listItem":"Test Title","details":"Test Details"}';
+import PopupUtils from '../src/common/popup-utils';
 
-  await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+jest.mock('@arcgis/core/PopupTemplate', () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation((props: any) => ({
+    title: props?.title,
+    content: props?.content,
+  })),
+}));
 
-  expect(featureLayer.popupTemplate).not.toBeNull();
-  expect(featureLayer.popupTemplate.title).toBe('Test Title');
-  expect(featureLayer.popupTemplate.content).toBe('Test Details');
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function makeMockMapElement(popupVisible = false) {
+  const popup = {
+    visible: popupVisible,
+    features: [] as any[],
+    selectedFeatureIndex: 0,
+  };
+
+  const mapView = {
+    popup,
+  };
+
+  return {
+    getViewInstance: jest.fn().mockResolvedValue(mapView),
+  };
+}
+
+function makeMockFeatureLayer() {
+  return {
+    popupTemplate: null as any,
+    getNode: jest.fn().mockReturnValue({
+      style: {
+        setProperty: jest.fn(),
+        removeProperty: jest.fn(),
+      },
+    }),
+  };
+}
+
+// ── updatePopup ───────────────────────────────────────────────────────────────
+describe('PopupUtils > updatePopup', () => {
+  test('sets popupTemplate with title and details', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Test Title","details":"Test Details"}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.title).toBe('Test Title');
+    expect(featureLayer.popupTemplate.content).toBe('Test Details');
+  });
+
+  test('sets popupTemplate with "No Details Available" if details is null', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Title","details":null}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.content).toBe('No Details Available');
+  });
+
+  test('sets popupTemplate with "No Details Available" if details is undefined', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = '{"listItem":"Title"}';
+
+    await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.content).toBe('No Details Available');
+  });
+
+  test('clears popupTemplate when infoTemplate is empty string', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup('', mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).toBeNull();
+  });
+
+  test('clears popupTemplate when infoTemplate is whitespace', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup('   ', mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).toBeNull();
+  });
+
+  test('does nothing if featureLayer is null', async () => {
+    const mapElement = makeMockMapElement();
+
+    await expect(
+      PopupUtils.updatePopup('{"listItem":"Title"}', mapElement as any, null as any)
+    ).resolves.not.toThrow();
+  });
+
+  test('does nothing if mapElement is null', async () => {
+    const featureLayer = makeMockFeatureLayer();
+
+    await expect(
+      PopupUtils.updatePopup('{"listItem":"Title"}', null as any, featureLayer as any)
+    ).resolves.not.toThrow();
+  });
+
+  test('warns when mapView is not available', async () => {
+    const mapElement = {
+      getViewInstance: jest.fn().mockResolvedValue(null),
+    };
+    const featureLayer = makeMockFeatureLayer();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await PopupUtils.updatePopup(
+      '{"listItem":"Title","details":"Content"}',
+      mapElement as any,
+      featureLayer as any
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'MapView is not available, cannot set popup template'
+    );
+    warnSpy.mockRestore();
+  });
+
+  test('sets popupTemplate with object infoTemplate', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const infoTemplate = {
+      listItem: 'Dynamic Title',
+      details: 'Dynamic Content',
+    };
+
+    await PopupUtils.updatePopup(infoTemplate as any, mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).not.toBeNull();
+    expect(featureLayer.popupTemplate.title).toBe('Dynamic Title');
+    expect(featureLayer.popupTemplate.content).toBe('Dynamic Content');
+  });
+
+  test('returns early for invalid JSON without throwing', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await PopupUtils.updatePopup('{bad json}', mapElement as any, featureLayer as any);
+
+    warnSpy.mockRestore();
+    expect(featureLayer.popupTemplate).toBeNull();
+  });
+
+  test('sets cursor pointer on layerNode when popup template is set', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup(
+      '{"listItem":"Title","details":"Content"}',
+      mapElement as any,
+      featureLayer as any
+    );
+
+    expect(featureLayer.getNode).toHaveBeenCalled();
+    expect(featureLayer.getNode().style.setProperty).toHaveBeenCalledWith('cursor', 'pointer');
+  });
+
+  test('clears cursor when popupTemplate is cleared', async () => {
+    const mapElement = makeMockMapElement();
+    const featureLayer = makeMockFeatureLayer();
+
+    await PopupUtils.updatePopup('', mapElement as any, featureLayer as any);
+
+    expect(featureLayer.popupTemplate).toBeNull();
+  });
 });
 
-test('sets popupTemplate with "No Details Available" if details is null', async () => {
-  const mapElement = makeMockMapElement(); // ← NOT null
-  const featureLayer = makeMockFeatureLayer();
-  const infoTemplate = '{"listItem":"Title","details":null}';
+// ── featureBelongsToLayer ─────────────────────────────────────────────────────
+describe('PopupUtils > featureBelongsToLayer', () => {
+  test('returns true when feature.layer matches layer', () => {
+    const layer = { id: 'layer-1' };
+    const feature = { layer, attributes: {} };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(true);
+  });
 
-  await PopupUtils.updatePopup(infoTemplate, mapElement as any, featureLayer as any);
+  test('returns true when feature.layer.parentLayer matches layer', () => {
+    const layer = { id: 'layer-1' };
+    const feature = {
+      layer: {
+        id: 'sub-layer',
+        parentLayer: layer,
+      },
+      attributes: {},
+    };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(true);
+  });
 
-  expect(featureLayer.popupTemplate).not.toBeNull();
-  expect(featureLayer.popupTemplate.content).toBe('No Details Available');
+  test('returns false when neither layer nor parentLayer matches', () => {
+    const layer = { id: 'layer-1' };
+    const otherLayer = { id: 'other-layer' };
+    const feature = {
+      layer: { id: 'sub-layer', parentLayer: otherLayer },
+      attributes: {},
+    };
+    const result = (PopupUtils as any).featureBelongsToLayer(feature, layer);
+    expect(result).toBe(false);
+  });
 });
