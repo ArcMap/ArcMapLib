@@ -1,28 +1,21 @@
-import typescript from '@rollup/plugin-typescript';
-import { nodeResolve } from '@rollup/plugin-node-resolve';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-export default {
-  input: resolve(__dirname, 'src/index.ts'),
-  output: {
-    dir: './dist',
-    format: 'es',
-    chunkFileNames: 'chunks/[hash].js',
-  },
-  plugins: [
-    nodeResolve(),
-    typescript(),
-  ],
-  external: (id) => {
-    // Only external - loaded via loadScript in index.ts
-    if (id.startsWith('@arcgis/map-components')) return true;
-    if (id.startsWith('@esri/calcite-components')) return true;
-    if (id.startsWith('@up-elements')) return true;
-    return false;
-    // @arcgis/core gets BUNDLED into chunks automatically
-  },
-};
+// rollup.config.js
+external: (id) => {
+  if (id.startsWith('@arcgis/core')) return true;      // ← ADD THIS
+  if (id.startsWith('@arcgis/map-components')) return true;
+  if (id.startsWith('@esri/calcite-components')) return true;
+  if (id.startsWith('@up-elements')) return true;
+  return false;
+},
+output: {
+  dir: './dist',
+  format: 'es',
+  chunkFileNames: 'chunks/[hash].js',
+  paths: (id) => {
+    if (id.startsWith('@arcgis/core/')) {
+      const path = id.replace('@arcgis/core/', '');
+      const withExt = path.endsWith('.js') ? path : path + '.js';
+      return 'https://js.arcgis.com/5.0/@arcgis/core/' + withExt;
+    }
+    return id;
+  }
+}
