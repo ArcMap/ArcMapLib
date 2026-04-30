@@ -1,20 +1,50 @@
-output: {
-  dir: './dist',
-  format: 'es',
-  chunkFileNames: 'chunks/[hash].js',
-  paths: (id) => {
-    if (id.startsWith('@arcgis/core/')) {
-      const path = id.replace('@arcgis/core/', '');
-      const withExt = path.endsWith('.js') ? path : path + '.js';
-      return 'https://js.arcgis.com/5.0/@arcgis/core/' + withExt;
+import typescript from '@rollup/plugin-typescript';
+import { nodeResolve } from '@rollup/plugin-node-resolve';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+export default {
+  input: resolve(__dirname, 'src/index.ts'),
+  output: {
+    dir: './dist',
+    format: 'es',
+    chunkFileNames: 'chunks/[hash].js',
+    paths: (id) => {
+      if (id.startsWith('@arcgis/core/')) {
+        const path = id.replace('@arcgis/core/', '');
+        const withExt = path.endsWith('.js') ? path : path + '.js';
+        return 'https://js.arcgis.com/5.0/@arcgis/core/' + withExt;
+      }
+      if (id.startsWith('@arcgis/map-components/')) {
+        const path = id.replace('@arcgis/map-components/', '');
+        const withExt = path.endsWith('.js') ? path : path + '.js';
+        return 'https://js.arcgis.com/map-components/5.0/' + withExt;
+      }
+      if (id.startsWith('@esri/calcite-components/')) {
+        const path = id.replace('@esri/calcite-components/', '');
+        const withExt = path.endsWith('.js') ? path : path + '.js';
+        return 'https://js.arcgis.com/calcite-components/2.0/' + withExt;
+      }
+      return id;
     }
-    return id;
-  }
-},
-external: (id) => {
-  if (id.includes('@arcgis/core')) return true;
-  if (id.includes('@arcgis/map-components')) return true;
-  if (id.includes('@esri/calcite-components')) return true;
-  if (id.includes('@up-elements')) return true;
-  return false;
-},
+  },
+  external: (id) => {
+    if (id.includes('@arcgis/core')) return true;
+    if (id.includes('@arcgis/map-components')) return true;
+    if (id.includes('@esri/calcite-components')) return true;
+    if (id.includes('@up-elements')) return true;
+    return false;
+  },
+  plugins: [
+    nodeResolve(),
+    typescript(),
+  ],
+  onwarn(warning, warn) {
+    // Suppress known external warnings
+    if (warning.code === 'UNRESOLVED_IMPORT') return;
+    warn(warning);
+  },
+};
