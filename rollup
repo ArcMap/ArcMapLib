@@ -1,21 +1,14 @@
-// rollup.config.js
+onwarn(warning, warn) {
+  // This will show us which @arcgis imports are NOT being externalized
+  if (warning.code === 'UNRESOLVED_IMPORT') {
+    console.log('NOT EXTERNAL:', warning.source);
+  }
+  warn(warning);
+},
 external: (id) => {
-  if (id.startsWith('@arcgis/core')) return true;      // ← ADD THIS
-  if (id.startsWith('@arcgis/map-components')) return true;
-  if (id.startsWith('@esri/calcite-components')) return true;
-  if (id.startsWith('@up-elements')) return true;
+  if (id.includes('@arcgis/core')) return true;  // broader match
+  if (id.includes('@arcgis/map-components')) return true;
+  if (id.includes('@esri/calcite-components')) return true;
+  if (id.includes('@up-elements')) return true;
   return false;
 },
-output: {
-  dir: './dist',
-  format: 'es',
-  chunkFileNames: 'chunks/[hash].js',
-  paths: (id) => {
-    if (id.startsWith('@arcgis/core/')) {
-      const path = id.replace('@arcgis/core/', '');
-      const withExt = path.endsWith('.js') ? path : path + '.js';
-      return 'https://js.arcgis.com/5.0/@arcgis/core/' + withExt;
-    }
-    return id;
-  }
-}
