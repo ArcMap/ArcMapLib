@@ -1,0 +1,55 @@
+import typescript from '@rollup/plugin-typescript';
+import { nodeResolve } from '@rollup/plugin-node-resolve';
+import replace from '@rollup/plugin-replace';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ARCGIS_CDN = 'https://js.arcgis.com/5.0/@arcgis/core/';
+
+export default {
+  input: resolve(__dirname, 'src/index.ts'),
+  output: {
+    file: './dist/index.js',
+    format: 'es',
+  },
+  plugins: [
+    nodeResolve(),
+    typescript(),
+  ],
+  external: (id) => {
+    // Rewrite @arcgis/core/* to CDN URLs
+    if (id.startsWith('@arcgis/core/')) {
+      return true;
+    }
+    if (id.startsWith('@arcgis/map-components')) return true;
+    if (id.startsWith('@esri/calcite-components')) return true;
+    return false;
+  },
+  output: {
+    file: './dist/index.js',
+    format: 'es',
+    paths: (id) => {
+      // This is the key - rewrite import paths in output
+      if (id.startsWith('@arcgis/core/')) {
+        return id.replace(
+          '@arcgis/core/',
+          'https://js.arcgis.com/5.0/@arcgis/core/'
+        ) + '.js';
+      }
+      if (id.startsWith('@arcgis/map-components/')) {
+        return id.replace(
+          '@arcgis/map-components/',
+          'https://js.arcgis.com/map-components/5.0/'
+        );
+      }
+      if (id.startsWith('@esri/calcite-components/')) {
+        return id.replace(
+          '@esri/calcite-components/',
+          'https://js.arcgis.com/calcite-components/2.0/'
+        );
+      }
+      return id;
+    }
+  },
+};
