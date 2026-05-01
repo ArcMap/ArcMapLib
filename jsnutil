@@ -519,3 +519,28 @@ export default class JsonUtils {
     return JsonUtils.DEFAULT_LABEL_SIZE;
   }
 }
+
+static buildPopupTemplateFromCurrent({
+  graphic,
+  infoTemplate,
+  uniqueIdPropertyName = 'id',
+  fallbackTitle = 'Details'
+}: any): PopupTemplate | null {
+  const info = JsonUtils.getInfoTemplateJson(infoTemplate);
+  if (!info) return null;
+
+  const attributes = graphic.attributes ?? {};
+
+  const title = info.listItem
+    ? JsonUtils.resolveTemplateValue(info.listItem, graphic)
+    : attributes[uniqueIdPropertyName] !== undefined
+    ? `${attributes[uniqueIdPropertyName]}`
+    : fallbackTitle;
+
+  const content = info.details
+    ? JsonUtils.resolveTemplateValue(info.details, graphic)
+    : JsonUtils.buildDefaultPopupContent(attributes);
+
+  return new PopupTemplate({ title, content });
+}
+
