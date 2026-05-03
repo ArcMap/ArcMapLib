@@ -1027,3 +1027,100 @@ declare global {
     'arc-geojson-layer': ArcGeojsonLayer;
   }
 }
+
+
+
+
+static normalizeSymbolInRenderer(renderer: any): any {
+  if (!renderer) return renderer;
+
+  const r = JsonUtils.clonePlain(renderer);
+
+  // Normalize defaultSymbol if present
+  if (r.defaultSymbol) {
+    r.defaultSymbol = JsonUtils.normalizePlainSymbol(r.defaultSymbol);
+  }
+
+  // Normalize symbols inside uniqueValueInfos
+  if (Array.isArray(r.uniqueValueInfos)) {
+    r.uniqueValueInfos = r.uniqueValueInfos.map((info: any) => ({
+      ...info,
+      symbol: info.symbol
+        ? JsonUtils.normalizePlainSymbol(info.symbol)
+        : info.symbol
+    }));
+  }
+
+  // Normalize symbols inside classBreakInfos
+  if (Array.isArray(r.classBreakInfos)) {
+    r.classBreakInfos = r.classBreakInfos.map((info: any) => ({
+      ...info,
+      symbol: info.symbol
+        ? JsonUtils.normalizePlainSymbol(info.symbol)
+        : info.symbol
+    }));
+  }
+
+  return r;
+}
+
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
+
+  // Already an SDK instance — leave it alone
+  if (typeof symbol.clone === 'function') return symbol;
+
+  const type = symbol.type || '';
+  const style = symbol.style || '';
+
+  // Map esri REST type → canonical type for fromJSON
+  const typeMap: Record<string, string> = {
+    'esriSMS': 'esriSMS',
+    'simple-marker': 'esriSMS',
+    'esriSLS': 'esriSLS',
+    'simple-line': 'esriSLS',
+    'esriSFS': 'esriSFS',
+    'simple-fill': 'esriSFS',
+    'esriTS': 'esriTS',
+    'text': 'esriTS'
+  };
+
+  // Map simple style strings → esri REST style strings
+  const styleMap: Record<string, string> = {
+    'circle': 'esriSMSCircle',
+    'square': 'esriSMSSquare',
+    'diamond': 'esriSMSDiamond',
+    'triangle': 'esriSMSTriangle',
+    'x': 'esriSMSX',
+    'cross': 'esriSMSCross',
+    'solid': 'esriSLSSolid',
+    'dash': 'esriSLSDash',
+    'dot': 'esriSLSDot',
+  };
+
+  const normalizedType = typeMap[type] || type;
+  const normalizedStyle = styleMap[style] || style;
+
+  // Normalize outline recursively if present
+  const normalizedOutline = symbol.outline
+    ? JsonUtils.normalizePlainSymbol({
+        ...symbol.outline,
+        type: symbol.outline.type || 'esriSLS'
+      })
+    : undefined;
+
+  const normalizedSymbol = {
+    ...symbol,
+    type: normalizedType,
+    style: normalizedStyle,
+    ...(normalizedOutline ? { outline: normalizedOutline } : {})
+  };
+
+  // Use symbolJsonUtils.fromJSON to get a proper SDK instance
+  try {
+    return symbolJsonUtils.fromJSON(normalizedSymbol);
+  } catch {
+    return symbol; // fallback to original if fromJSON fails
+  }
+}
+
