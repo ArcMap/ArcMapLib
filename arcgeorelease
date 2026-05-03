@@ -1,3 +1,61 @@
+updateRenderer(newRenderer: any): void {
+  this.renderer = newRenderer;
+  if (!this.featureLayer) return;
+
+  const parsed = ArcGeojsonLayer.parseJson(newRenderer);
+  if (!parsed.parsedJson) {
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      if (graphic.geometry) {
+        graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+      }
+    });
+    return;
+  }
+
+  const rendererConfig = parsed.parsedJson;
+
+  // Normalize all symbols in the renderer config FIRST
+  // then build renderer manually so SDK never sees raw type strings
+  this.featureLayer.graphics.forEach((graphic: Graphic) => {
+    if (!graphic.geometry) return;
+
+    // Try to find matching symbol from uniqueValueInfos
+    if (
+      Array.isArray(rendererConfig.uniqueValueInfos) &&
+      rendererConfig.uniqueValueInfos.length
+    ) {
+      const fields = [
+        rendererConfig.field1,
+        rendererConfig.field2,
+        rendererConfig.field3
+      ].filter(Boolean);
+
+      const match = rendererConfig.uniqueValueInfos.find((info: any) => {
+        const values = (info.value ?? '').toString().split(',');
+        return fields.every((field: string, i: number) =>
+          graphic.attributes?.[field]?.toString() === values[i]?.trim()
+        );
+      });
+
+      if (match?.symbol) {
+        graphic.symbol = JsonUtils.normalizePlainSymbol(match.symbol);
+        return;
+      }
+    }
+
+    // Fall back to defaultSymbol
+    if (rendererConfig.defaultSymbol) {
+      graphic.symbol = JsonUtils.normalizePlainSymbol(rendererConfig.defaultSymbol);
+      return;
+    }
+
+    // Final fallback: library default
+    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+  });
+}
+
+
+
 import { LitElement } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
