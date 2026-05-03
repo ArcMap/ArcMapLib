@@ -1124,3 +1124,41 @@ static normalizePlainSymbol(symbol: any): any {
   }
 }
 
+
+updateRenderer(newRenderer: any): void {
+  this.renderer = newRenderer;
+  if (!this.featureLayer) return;
+
+  const parsed = ArcGeojsonLayer.parseJson(newRenderer);
+  if (!parsed.parsedJson) {
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      if (graphic.geometry) {
+        graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+      }
+    });
+    return;
+  }
+
+  // Normalize any plain symbol objects inside the renderer
+  const normalizedRenderer = JsonUtils.normalizeSymbolInRenderer(parsed.parsedJson);
+
+  let rendererInstance: any;
+  try {
+    rendererInstance = rendererJsonUtils.fromJSON(normalizedRenderer);
+  } catch {
+    rendererInstance = undefined;
+  }
+
+  this.featureLayer.graphics.forEach((graphic: Graphic) => {
+    if (rendererInstance?.getSymbol) {
+      try {
+        graphic.symbol = rendererInstance.getSymbol(graphic);
+        return;
+      } catch { }
+    }
+    if (graphic.geometry) {
+      graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+    }
+  });
+}
+
