@@ -544,3 +544,49 @@ static buildPopupTemplateFromCurrent({
   return new PopupTemplate({ title, content });
 }
 
+
+static getJsonSymbolFor(
+  geomType: string,
+  color: number[],
+  markerSize: number
+): object {
+
+  const canonical = JsonUtils.normalizeGeomType(geomType);
+
+  switch (canonical) {
+    case 'point': {
+      return new SimpleMarkerSymbol({
+        style: 'circle',        // SDK string, not esriSMSCircle
+        color: color as any,
+        size: markerSize,
+        outline: new SimpleLineSymbol({
+          style: 'solid',       // SDK string, not esriSLSSolid
+          color: [0, 0, 0, 200] as any,
+          width: 1
+        })
+      });
+    }
+
+    case 'polyline': {
+      return new SimpleLineSymbol({
+        style: 'solid',
+        color: color as any,
+        width: markerSize
+      });
+    }
+
+    case 'polygon':
+    default: {
+      return new SimpleFillSymbol({
+        style: 'solid',
+        color: [color[0], color[1], color[2], 100] as any,
+        outline: new SimpleLineSymbol({
+          style: 'solid',
+          color: [110, 110, 110, 255] as any,
+          width: 2
+        })
+      });
+    }
+  }
+}
+
