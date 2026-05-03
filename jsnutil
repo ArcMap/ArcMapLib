@@ -1,3 +1,61 @@
+
+this.featureLayer.graphics.forEach((graphic: Graphic) => {
+  if (!graphic.geometry) return;
+
+  const geomType = graphic.geometry.type; // 'point', 'polygon', 'polyline'
+
+  if (Array.isArray(rendererConfig.uniqueValueInfos) &&
+      rendererConfig.uniqueValueInfos.length) {
+
+    // Match by checking if value ends with geometry type
+    const match = rendererConfig.uniqueValueInfos.find((info: any) => {
+      const val = (info.value ?? '').toString().toLowerCase();
+      // Check if value ends with geomtype
+      // e.g. "test|aditya|adityapolygon" contains "polygon"
+      // e.g. "test|aditya|aditya" — point match via symbol type
+      const symbolType = (info.symbol?.type ?? '').toLowerCase();
+      
+      if (geomType === 'polygon') {
+        return val.endsWith('polygon') || 
+               symbolType === 'esrisfs' || 
+               symbolType === 'simplefill';
+      }
+      if (geomType === 'polyline') {
+        return val.endsWith('polyline') || 
+               val.endsWith('line') ||
+               symbolType === 'esrisls' || 
+               symbolType === 'simpleline';
+      }
+      if (geomType === 'point') {
+        return symbolType === 'esrismscirlce' ||
+               symbolType === 'esrisms' ||
+               symbolType === 'simplemarker' ||
+               (!val.endsWith('polygon') && !val.endsWith('polyline'));
+      }
+      return false;
+    });
+
+    if (match?.symbol) {
+      console.log('matched symbol for', geomType, ':', match.symbol);
+      graphic.symbol = JsonUtils.normalizePlainSymbol(match.symbol);
+      return;
+    }
+  }
+
+  // Fall back to defaultSymbol
+  if (rendererConfig.defaultSymbol) {
+    graphic.symbol = JsonUtils.normalizePlainSymbol(rendererConfig.defaultSymbol);
+    return;
+  }
+
+  graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+});
+
+
+
+
+
+
 static normalizePlainSymbol(symbol: any): any {
   if (!symbol) return symbol;
 
