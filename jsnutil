@@ -1,5 +1,178 @@
 static normalizePlainSymbol(symbol: any): any {
   if (!symbol) return symbol;
+
+  // Already an SDK instance — leave it alone
+  if (typeof symbol.clone === 'function') return symbol;
+
+  const rawType = (symbol.type || '').trim();
+  const type = rawType.toLowerCase().replace(/[\s-_]/g, '');
+  const style = (symbol.style || '').toLowerCase().replace(/[\s-_]/g, '');
+
+  console.log('Normalizing symbol, type:', type, 'style:', style);
+
+  // -----------------------------------------------------------------------
+  // Line style map — covers all Esri REST and simple SDK strings
+  // -----------------------------------------------------------------------
+  const lineStyleMap: Record<string, string> = {
+    'solid': 'solid',
+    'esrislssolid': 'solid',
+    'dash': 'dash',
+    'esrislsdash': 'dash',
+    'dot': 'dot',
+    'esrislsdot': 'dot',
+    'dashdot': 'dash-dot',
+    'esrislsdashdot': 'dash-dot',
+    'longdash': 'long-dash',
+    'esrislslongdash': 'long-dash',
+    'longdashdot': 'long-dash-dot',
+    'esrislslongdashdot': 'long-dash-dot',
+    'shortdash': 'short-dash',
+    'esrislsshortdash': 'short-dash',
+    'shortdashdot': 'short-dash-dot',
+    'esrislsshortdashdot': 'short-dash-dot',
+    'shortdot': 'short-dot',
+    'esrislsshortdot': 'short-dot',
+    'none': 'none',
+    'esrislsnull': 'none'
+  };
+
+  // -----------------------------------------------------------------------
+  // Marker style map — covers all Esri REST and simple SDK strings
+  // -----------------------------------------------------------------------
+  const markerStyleMap: Record<string, string> = {
+    'circle': 'circle',
+    'esrismscircle': 'circle',
+    'esrismscirlce': 'circle',   // common typo variant
+    'square': 'square',
+    'esrismssquare': 'square',
+    'diamond': 'diamond',
+    'esrismsdiamond': 'diamond',
+    'triangle': 'triangle',
+    'esrismstriangle': 'triangle',
+    'x': 'x',
+    'esrismsx': 'x',
+    'cross': 'cross',
+    'esrismscross': 'cross',
+    'path': 'path',
+    'esrismspath': 'path'
+  };
+
+  // -----------------------------------------------------------------------
+  // Type detection
+  // -----------------------------------------------------------------------
+  const isPoint =
+    type === 'esrisms' ||
+    type === 'esrismscircle' ||
+    type === 'esrismscirlce' ||
+    type === 'simplemarker' ||
+    type === 'simplemarkersymbol' ||
+    type === 'point';
+
+  const isLine =
+    type === 'esrisls' ||
+    type === 'esrislssolid' ||
+    type === 'simpleline' ||
+    type === 'simplelinesymbol' ||
+    type === 'polyline' ||
+    type === 'line';
+
+  const isFill =
+    type === 'esrisfs' ||
+    type === 'esrisfssound' ||
+    type === 'esrisfssolid' ||
+    type === 'simplefill' ||
+    type === 'simplefillsymbol' ||
+    type === 'polygon';
+
+  // -----------------------------------------------------------------------
+  // Build outline if present — always a SimpleLineSymbol
+  // -----------------------------------------------------------------------
+  const buildOutline = (outlineObj: any): SimpleLineSymbol => {
+    const outlineStyle = outlineObj?.style
+      ? (lineStyleMap[
+          (outlineObj.style || '').toLowerCase().replace(/[\s-_]/g, '')
+        ] ?? 'solid')
+      : 'solid';
+
+    return new SimpleLineSymbol({
+      color: outlineObj?.color ?? [0, 0, 0, 255],
+      width: outlineObj?.width ?? 1,
+      style: outlineStyle as any
+    });
+  };
+
+  // -----------------------------------------------------------------------
+  // Point symbol
+  // -----------------------------------------------------------------------
+  if (isPoint) {
+    const normalizedStyle = (markerStyleMap[style] ?? 'circle') as any;
+    return new SimpleMarkerSymbol({
+      color: symbol.color,
+      size: symbol.size,
+      style: normalizedStyle,
+      outline: symbol.outline
+        ? buildOutline(symbol.outline)
+        : new SimpleLineSymbol({
+            color: [0, 0, 0, 255],
+            width: 1,
+            style: 'solid'
+          })
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Line symbol
+  // -----------------------------------------------------------------------
+  if (isLine) {
+    const normalizedStyle = (lineStyleMap[style] ?? 'solid') as any;
+    return new SimpleLineSymbol({
+      color: symbol.color,
+      width: symbol.width ?? 1,
+      style: normalizedStyle
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Fill symbol
+  // -----------------------------------------------------------------------
+  if (isFill) {
+    return new SimpleFillSymbol({
+      color: symbol.color,
+      style: 'solid',
+      outline: symbol.outline
+        ? buildOutline(symbol.outline)
+        : new SimpleLineSymbol({
+            color: [110, 110, 110, 255],
+            width: 1,
+            style: 'solid'
+          })
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Unknown type — return as-is
+  // -----------------------------------------------------------------------
+  console.warn('normalizePlainSymbol: unknown symbol type:', rawType);
+  return symbol;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
   if (typeof symbol.clone === 'function') return symbol;
 
   // Normalize type — strip spaces, lowercase, but keep full string for matching
