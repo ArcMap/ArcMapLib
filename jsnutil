@@ -1,3 +1,88 @@
+static parseJson<T = any>(value: any): JsonParseResult<T> {
+  // Gracefully handle null/undefined instead of throwing
+  if (value === null || value === undefined) {
+    return { error: new Error('Value is null or undefined') };
+  }
+  if (typeof value === 'string') {
+    try {
+      return { parsedJson: JSON.parse(value) as T };
+    } catch (e: any) {
+      return { error: e instanceof Error ? e : new Error(String(e)) };
+    }
+  }
+  return { parsedJson: value as T };
+}
+
+
+
+updateRenderer(newRenderer: any): void {
+  // Only overwrite stored renderer if something real is passed
+  if (newRenderer !== undefined && newRenderer !== null) {
+    this.renderer = newRenderer;
+  }
+
+  if (!this.featureLayer) return;
+
+  // Always use stored renderer - never undefined
+  const rendererToUse = this.renderer;
+  
+  if (!rendererToUse) {
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      if (graphic.geometry) {
+        graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+      }
+    });
+    return;
+  }
+
+  const parsed = ArcGeojsonLayer.parseJson(rendererToUse);
+
+  if (!parsed.parsedJson) {
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      if (graphic.geometry) {
+        graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+      }
+    });
+    return;
+  }
+
+  const rendererConfig = parsed.parsedJson;
+
+  this.featureLayer.graphics.forEach((graphic: Graphic) => {
+    if (!graphic.geometry) return;
+
+    if (Array.isArray(rendererConfig.uniqueValueInfos) &&
+        rendererConfig.uniqueValueInfos.length) {
+      const fields = [
+        rendererConfig.field1,
+        rendererConfig.field2,
+        rendererConfig.field3
+      ].filter(Boolean);
+
+      const match = rendererConfig.uniqueValueInfos.find((info: any) => {
+        const values = (info.value ?? '').toString().split(',');
+        return fields.every((field: string, i: number) =>
+          graphic.attributes?.[field]?.toString() === values[i]?.trim()
+        );
+      });
+
+      if (match?.symbol) {
+        graphic.symbol = JsonUtils.normalizePlainSymbol(match.symbol);
+        return;
+      }
+    }
+
+    if (rendererConfig.defaultSymbol) {
+      graphic.symbol = JsonUtils.normalizePlainSymbol(rendererConfig.defaultSymbol);
+      return;
+    }
+
+    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+  });
+}
+
+
+
 static normalizePlainSymbol(symbol: any): any {
   if (!symbol) return symbol;
 
