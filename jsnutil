@@ -1,3 +1,94 @@
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
+
+  // Already an SDK instance — leave it alone
+  if (typeof symbol.clone === 'function') return symbol;
+
+  const type = (symbol.type || '').toLowerCase().replace(/\s/g, '');
+  const style = (symbol.style || '').toLowerCase();
+
+  // Normalize outline first — outline is ALWAYS a line regardless of type
+  let normalizedOutline: any = undefined;
+  if (symbol.outline) {
+    normalizedOutline = new SimpleLineSymbol({
+      color: symbol.outline.color ?? [0, 0, 0, 255],
+      width: symbol.outline.width ?? 1,
+      style: 'solid'  // always solid for outline
+    });
+  }
+
+  // Point symbol types
+  const isPoint = [
+    'esrismscirlce', 'esrisms', 'simple-marker',
+    'simplemarker', 'simplemarkersymbol', 'point'
+  ].includes(type);
+
+  // Line symbol types  
+  const isLine = [
+    'esrisls', 'simple-line', 'simpleline',
+    'simplelinesymbol', 'polyline', 'line'
+  ].includes(type);
+
+  // Fill symbol types
+  const isFill = [
+    'esrisfs', 'simple-fill', 'simplefill',
+    'simplefillsymbol', 'polygon'
+  ].includes(type);
+
+  // Normalize style string for point
+  const styleMap: Record<string, string> = {
+    'circle': 'circle',
+    'esrismscircle': 'circle',
+    'square': 'square',
+    'esrismssquare': 'square',
+    'diamond': 'diamond',
+    'esrismsdiamond': 'diamond',
+    'triangle': 'triangle',
+    'esrismstriangle': 'triangle',
+    'x': 'x',
+    'cross': 'cross'
+  };
+
+  const normalizedStyle = styleMap[style] ?? 'circle';
+
+  if (isPoint) {
+    return new SimpleMarkerSymbol({
+      color: symbol.color,
+      size: symbol.size ?? 10,
+      style: normalizedStyle,
+      outline: normalizedOutline ?? new SimpleLineSymbol({
+        color: [0, 0, 0, 255],
+        width: 1,
+        style: 'solid'
+      })
+    });
+  }
+
+  if (isLine) {
+    return new SimpleLineSymbol({
+      color: symbol.color,
+      width: symbol.width ?? 1,
+      style: 'solid'
+    });
+  }
+
+  if (isFill) {
+    return new SimpleFillSymbol({
+      color: symbol.color,
+      style: 'solid',
+      outline: normalizedOutline ?? new SimpleLineSymbol({
+        color: [110, 110, 110, 255],
+        width: 1,
+        style: 'solid'
+      })
+    });
+  }
+
+  // Unknown type — return as-is
+  return symbol;
+}
+
+
 import { InfoTemplateDetails } from '../external-api';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
 import GeoJSONLayer from '@arcgis/core/layers/GeoJSONLayer';
