@@ -590,3 +590,49 @@ static getJsonSymbolFor(
   }
 }
 
+
+
+static getJsonSymbolFor(
+  geomType: string,
+  color: number[],
+  markerSize: number
+): any {
+  const canonical = JsonUtils.normalizeGeomType(geomType);
+
+  switch (canonical) {
+    case 'point': {
+      return new SimpleMarkerSymbol({
+        style: 'circle',
+        color: color as any,
+        size: markerSize,
+        outline: {          // plain object - SDK handles it internally
+          color: [0, 0, 0, 200],
+          width: 1,
+          style: 'solid'
+        }
+      });
+    }
+
+    case 'polyline': {
+      return new SimpleLineSymbol({
+        style: 'solid',
+        color: color as any,
+        width: markerSize
+      });
+    }
+
+    case 'polygon':
+    default: {
+      return new SimpleFillSymbol({
+        style: 'solid',
+        color: [color[0], color[1], color[2], 100] as any,
+        outline: {          // plain object - SDK handles it internally
+          color: [110, 110, 110, 255],
+          width: 2,
+          style: 'solid'
+        }
+      });
+    }
+  }
+}
+
