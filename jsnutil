@@ -1,3 +1,106 @@
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
+  if (typeof symbol.clone === 'function') return symbol;
+
+  // Normalize type — strip spaces, lowercase, but keep full string for matching
+  const rawType = (symbol.type || '').trim();
+  const type = rawType.toLowerCase().replace(/\s/g, '');
+  const style = (symbol.style || '').toLowerCase();
+
+  // Normalize outline
+  let normalizedOutline: any = undefined;
+  if (symbol.outline) {
+    normalizedOutline = new SimpleLineSymbol({
+      color: symbol.outline.color ?? [0, 0, 0, 255],
+      width: symbol.outline.width ?? 1,
+      style: 'solid'
+    });
+  }
+
+  // Point detection — check ALL possible variations
+  const isPoint =
+    type === 'esrisms' ||
+    type === 'esrismscircle' ||
+    type === 'esrismscirlce' ||     // handles typo variant
+    type === 'simple-marker' ||
+    type === 'simplemarker' ||
+    type === 'simplemarkersymbol' ||
+    type === 'point';
+
+  // Line detection
+  const isLine =
+    type === 'esrisls' ||
+    type === 'simple-line' ||
+    type === 'simpleline' ||
+    type === 'simplelinesymbol' ||
+    type === 'polyline' ||
+    type === 'line';
+
+  // Fill detection
+  const isFill =
+    type === 'esrisfs' ||
+    type === 'simple-fill' ||
+    type === 'simplefill' ||
+    type === 'simplefillsymbol' ||
+    type === 'polygon';
+
+  // Style map for point markers
+  const styleMap: Record<string, any> = {
+    'circle': 'circle',
+    'esrismscircle': 'circle',
+    'esrismscirlce': 'circle',    // typo variant
+    'square': 'square',
+    'esrismssquare': 'square',
+    'diamond': 'diamond',
+    'esrismsdiamond': 'diamond',
+    'triangle': 'triangle',
+    'esrismstriangle': 'triangle',
+    'x': 'x',
+    'cross': 'cross'
+  };
+
+  const normalizedStyle = (styleMap[style] ?? 'circle') as any;
+
+  if (isPoint) {
+    return new SimpleMarkerSymbol({
+      color: symbol.color,
+      size: symbol.size,          // preserve exact size - no fallback
+      style: normalizedStyle,
+      outline: normalizedOutline ?? new SimpleLineSymbol({
+        color: [0, 0, 0, 255],
+        width: 1,
+        style: 'solid'
+      })
+    });
+  }
+
+  if (isLine) {
+    return new SimpleLineSymbol({
+      color: symbol.color,
+      width: symbol.width,        // preserve exact width
+      style: 'solid'
+    });
+  }
+
+  if (isFill) {
+    return new SimpleFillSymbol({
+      color: symbol.color,
+      style: 'solid',
+      outline: normalizedOutline ?? new SimpleLineSymbol({
+        color: [110, 110, 110, 255],
+        width: 1,
+        style: 'solid'
+      })
+    });
+  }
+
+  return symbol;
+}
+
+
+
+
+
 static parseJson<T = any>(value: any): JsonParseResult<T> {
   // Gracefully handle null/undefined instead of throwing
   if (value === null || value === undefined) {
