@@ -1,38 +1,32 @@
-async updateGeojson(
-  newGeojson: string | FeatureCollection
-): Promise<void> {
-  // Guard 1: Skip our own internal update (Symbol tag)
-  if (this.isInternalGeojson(newGeojson)) return;
-
-  // Guard 2: Skip during active drawing or removing
-  if (this.inDrawingMode || this.removingItem) return;
-
-  // Guard 3: Skip during active editing
-  if (this.enableUserEdit) return;
-
-  // REMOVED Guard 4 — was blocking legitimate Angular clear operations
-  // on other geojson layers causing them to stay visible permanently
-
-  if (!this.featureLayer) {
-    await this.createLayer(newGeojson);
-    return;
+async updateEditing(_newUserEnableEdit: boolean): Promise<void> {
+  if (this.graphicsEditor?.state === 'active') {
+    try { this.graphicsEditor.cancel(); } catch { }
   }
 
-  const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
-  if (!parsed.parsedJson) return;
+  if (_newUserEnableEdit) {
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      if (g.geometry) {
+        const sym = this.getSymbolForGraphic(g);
+        console.log('[arc-geojson-layer] updateEditing symbol:',
+          JSON.stringify(sym));
+        console.log('[arc-geojson-layer] updateEditing symbol type:',
+          sym?.constructor?.name, sym?.type, sym?.color, sym?.style);
+        g.symbol = sym;
+      }
+      g.popupTemplate = null as unknown as never;
+    });
 
-  // Process the update
-  this.featureLayer.removeAll();
-  this.labelLayer?.removeAll();
+    // ← FIX: force renderer re-application so newly drawn
+    //   graphic gets its symbol even if renderer binding
+    //   hasn't changed since last Angular push
+    this.updateRenderer(this.renderer);
 
-  const fsInfo = this.getUpGISJson(newGeojson);
-  if (!fsInfo) return;
-
-  for (const graphic of fsInfo.graphics) {
-    this.featureLayer.add(graphic);
+  } else {
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      if (g.geometry) g.symbol = this.getSymbolForGraphic(g);
+      g.popupTemplate = this.buildPopupTemplateFromCurrent(g);
+    });
   }
 
-  this.updateRenderer(this.renderer);
-  this.refreshLabels();
-  this.updateInfoTemplate(this.infoTemplate);
+  this.enableInfoPopupWindow(!_newUserEnableEdit && !this.inDrawingMode);
 }
