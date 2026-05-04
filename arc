@@ -1,93 +1,95 @@
-private async createEditor(): Promise<void> {
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    defaultUpdateOptions: {
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      multipleSelectionEnabled: false,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      toggleToolOnClick: false
-    },
-    updateOnGraphicClick: false
+private addToGeojson(newGraphic: Graphic): void {
+  if (!newGraphic.attributes) newGraphic.attributes = {};
+
+  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    newGraphic.attributes[this.uniqueIdPropertyName] = Date.now();
+  }
+  if (newGraphic.attributes.OBJECTID === undefined) {
+    newGraphic.attributes.OBJECTID = Date.now();
+  }
+
+  newGraphic.symbol = this.getSymbolForGraphic(newGraphic);
+
+  newGraphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
+    graphic: newGraphic,
+    infoTemplate: this.infoTemplate,
+    uniqueIdPropertyName: this.uniqueIdPropertyName,
+    fallbackTitle: this.name || 'Details'
   });
 
-  this.graphicsEditor.on('create', (evt: any) => {
-    console.log('create event state:', evt.state,
-      'graphic:', evt.graphic?.geometry?.type);
+  if (!this.featureLayer.graphics.includes(newGraphic)) {
+    this.featureLayer.add(newGraphic);
+  }
 
-    if (evt.state === 'complete' && evt.graphic) {
-      console.log('DRAWING COMPLETE');
-      this.inDrawingMode = false;
-      this.blockGeoJsonUpdate = false;
-      this.addToGeojson(evt.graphic);
-      this.enableInfoPopupWindow(false);
-      return;
-    }
+  this._internalUpdateId++;
+  const currentId = this._internalUpdateId;
 
-    if (evt.state === 'cancel') {
-      console.log('DRAWING CANCELLED');
-      this.inDrawingMode = false;
-      this.blockGeoJsonUpdate = false;
-      return;
-    }
+  // Store the drawn graphic reference so we can restore it
+  const drawnGraphic = newGraphic;
 
-    // Handle 'active' state — drawing is in progress
-    // Make sure block stays active
-    if (evt.state === 'active' || evt.state === 'start') {
-      console.log('DRAWING ACTIVE - keeping block');
-      this.inDrawingMode = true;
-      this.blockGeoJsonUpdate = true;
-    }
-  });
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
 
-  this.graphicsEditor.on('update', (evt: any) => {
-    if (evt.state === 'start') {
-      this.graphicMoved = false;
-    }
-    if (evt.toolEventInfo?.type === 'move-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'reshape-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'scale-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'rotate-start') this.graphicMoved = true;
+  // Emit event so Angular/NgRx can process
+  this.emitLayerEvent(
+    'userDrawItemAdded',
+    this.graphicToGeoJsonFeature(newGraphic)
+  );
 
-    if (evt.state === 'complete' && evt.graphics?.length) {
-      for (const graphic of evt.graphics) {
-        this.updateGeojsonWithChanges(graphic);
+  this.refreshLabels();
+
+  // Wait longer for NgRx to finish its full cycle
+  // NgRx can take multiple render cycles to settle
+  setTimeout(() => {
+    if (this._internalUpdateId === currentId) {
+      // Before unblocking, make sure our graphic is still on the layer
+      // If Angular cleared it, restore it
+      if (!this.featureLayer.graphics.includes(drawnGraphic)) {
+        console.log('restoring cleared graphic after NgRx cycle');
+        this.featureLayer.add(drawnGraphic);
       }
-      this.enableInfoPopupWindow(true);
+      this.blockGeoJsonUpdate = false;
     }
-
-    if (evt.state === 'cancel') {
-      this.enableInfoPopupWindow(true);
-    }
-  });
+  }, 2000); // increased from 500ms to 2000ms
 }
 
 
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.featureLayer || !this.view) return;
-  if (!this.graphicsEditor) {
-    console.error('arc-geojson-layer: graphicsEditor not ready');
+async updateGeojson(
+  newGeojson: string | FeatureCollection
+): Promise<void> {
+  if (this.blockGeoJsonUpdate) return;
+  if (this.enableUserEdit || this.inDrawingMode || this.removingItem) return;
+
+  if (!this.featureLayer) {
+    await this.createLayer(newGeojson);
     return;
   }
 
-  const existingType = this.determineExistingGeometryType();
-  if (
-    existingType &&
-    !this.validGeometryType(drawGeometryType, existingType)
-  ) return;
+  // Parse incoming geojson
+  const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
+  if (!parsed.parsedJson) return;
 
-  console.log('startDrawing called with:', drawGeometryType);
+  // If incoming is empty but we have graphics — Angular is echoing
+  // our drawn state back as empty. Skip it.
+  const incomingCount = parsed.parsedJson.features?.length ?? 0;
+  const currentCount = this.featureLayer.graphics.length;
 
-  this.inDrawingMode = true;
-  this.blockGeoJsonUpdate = true;
+  if (incomingCount === 0 && currentCount > 0) {
+    console.log('updateGeojson: skipping empty echo, we have', currentCount, 'graphics');
+    return;
+  }
 
-  this.enableInfoPopupWindow(false);
+  this.featureLayer.removeAll();
+  this.labelLayer?.removeAll();
 
-  const tool = this.toSketchCreateTool(drawGeometryType);
-  console.log('creating sketch tool:', tool);
+  const fsInfo = this.getUpGISJson(newGeojson);
+  if (!fsInfo) return;
 
-  this.graphicsEditor.create(tool);
+  for (const graphic of fsInfo.graphics) {
+    this.featureLayer.add(graphic);
+  }
 
-  console.log('graphicsEditor state after create:', this.graphicsEditor.state);
+  this.updateRenderer(this.renderer);
+  this.refreshLabels();
+  this.updateInfoTemplate(this.infoTemplate);
 }
