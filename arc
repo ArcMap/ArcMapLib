@@ -1,58 +1,44 @@
-private addToGeojson(newGraphic: Graphic): void {
-  if (!newGraphic.attributes) newGraphic.attributes = {};
+async updateGeojson(
+  newGeojson: string | FeatureCollection
+): Promise<void> {
+  if (this.blockGeoJsonUpdate) return;
+  if (this.enableUserEdit || this.inDrawingMode || this.removingItem) return;
 
-  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    newGraphic.attributes[this.uniqueIdPropertyName] = Date.now();
-  }
-  if (newGraphic.attributes.OBJECTID === undefined) {
-    newGraphic.attributes.OBJECTID = Date.now();
+  if (!this.featureLayer) {
+    await this.createLayer(newGeojson);
+    return;
   }
 
-  // Force symbol based on geometry type directly
-  // Do NOT use getSymbolForGraphic here — use getDefaultSymbolForGeometry
-  // to guarantee a valid symbol regardless of renderer state
-  if (newGraphic.geometry) {
-    const forcedSymbol = this.getDefaultSymbolForGeometry(
-      newGraphic.geometry
+  // Parse incoming geojson
+  const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
+  if (!parsed.parsedJson) return;
+
+  const incomingCount = parsed.parsedJson.features?.length ?? 0;
+  const currentCount = this.featureLayer.graphics.length;
+
+  // If incoming is LESS than what we have — Angular is echoing
+  // a stale/cleared state. Skip it to preserve drawn graphics.
+  if (incomingCount < currentCount) {
+    console.log(
+      'updateGeojson: skipping — incoming',
+      incomingCount,
+      'less than current',
+      currentCount
     );
-    console.log('forced symbol:', forcedSymbol);
-    newGraphic.symbol = forcedSymbol;
+    return;
   }
 
-  // THEN try to apply renderer symbol on top if available
-  const rendererSymbol = this.getSymbolForGraphic(newGraphic);
-  console.log('renderer symbol:', rendererSymbol);
-  if (rendererSymbol) {
-    newGraphic.symbol = rendererSymbol;
-  }
-  // If renderer symbol is null/undefined — keep the forced default symbol
+  this.featureLayer.removeAll();
+  this.labelLayer?.removeAll();
 
-  newGraphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
-    graphic: newGraphic,
-    infoTemplate: this.infoTemplate,
-    uniqueIdPropertyName: this.uniqueIdPropertyName,
-    fallbackTitle: this.name || 'Details'
-  });
+  const fsInfo = this.getUpGISJson(newGeojson);
+  if (!fsInfo) return;
 
-  if (!this.featureLayer.graphics.includes(newGraphic)) {
-    this.featureLayer.add(newGraphic);
+  for (const graphic of fsInfo.graphics) {
+    this.featureLayer.add(graphic);
   }
 
-  this._internalUpdateId++;
-  const currentId = this._internalUpdateId;
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-
-  setTimeout(() => {
-    if (this._internalUpdateId === currentId) {
-      this.blockGeoJsonUpdate = false;
-    }
-  }, 2000);
-
+  this.updateRenderer(this.renderer);
   this.refreshLabels();
-  this.emitLayerEvent(
-    'userDrawItemAdded',
-    this.graphicToGeoJsonFeature(newGraphic)
-  );
+  this.updateInfoTemplate(this.infoTemplate);
 }
