@@ -1,240 +1,46 @@
-// ---------------------------------------------------------------------------
-// normalizePlainSymbol
-// ---------------------------------------------------------------------------
-// DIFFERENCE FROM STENCIL:
-// Stencil used FeatureLayer.renderer which handled symbol normalization
-// internally via fromJSON(). With GraphicsLayer we must normalize manually.
-//
-// This function converts ANY plain symbol object into a proper ArcGIS SDK
-// symbol instance that can be assigned directly to graphic.symbol.
-//
-// Handles ALL of these input formats:
-// 1. Old Esri REST strings: esriSFS, esriSLS, esriSMS, esriSMSCircle etc.
-// 2. New ArcGIS SDK strings: simple-fill, simple-line, simple-marker etc.
-// 3. Already-normalized SDK instances (pass-through)
-// 4. Outline symbols nested inside fill/marker symbols
-// 5. All dash/dot line styles: esriSLSDash, esriSLSDot, esriSLSDashDot etc.
-// 6. All marker styles: esriSMSCircle, esriSMSSquare, esriSMSDiamond etc.
-// ---------------------------------------------------------------------------
-static normalizePlainSymbol(symbol: any): any {
-  if (!symbol) return symbol;
+async updateEditing(_newUserEnableEdit: boolean): Promise<void> {
+  if (this.graphicsEditor?.state === 'active') {
+    try { this.graphicsEditor.cancel(); } catch { }
+  }
 
-  // Already an SDK instance (has clone method) — return as-is
-  if (typeof symbol.clone === 'function') return symbol;
-
-  const rawType = (symbol.type || '').trim();
-  const normalizedType = rawType.toLowerCase().replace(/[\s\-_]/g, '');
-  const rawStyle = (symbol.style || '').trim();
-  const normalizedStyle = rawStyle.toLowerCase().replace(/[\s\-_]/g, '');
-
-  // -------------------------------------------------------------------------
-  // Line style map — covers ALL Esri REST and SDK strings
-  // -------------------------------------------------------------------------
-  const lineStyleMap: Record<string, string> = {
-    // solid
-    'solid': 'solid',
-    'esrislssolid': 'solid',
-    // dash
-    'dash': 'dash',
-    'esrislsdash': 'dash',
-    // dot
-    'dot': 'dot',
-    'esrislsdot': 'dot',
-    // dash-dot
-    'dashdot': 'dash-dot',
-    'esrislsdashdot': 'dash-dot',
-    'dashdotdot': 'dash-dot',
-    'esrislsdashdotdot': 'dash-dot',
-    // long-dash
-    'longdash': 'long-dash',
-    'esrislslongdash': 'long-dash',
-    'longdashdot': 'long-dash-dot',
-    'esrislslongdashdot': 'long-dash-dot',
-    // short-dash
-    'shortdash': 'short-dash',
-    'esrislsshortdash': 'short-dash',
-    'shortdashdot': 'short-dash-dot',
-    'esrislsshortdashdot': 'short-dash-dot',
-    'shortdashdotdot': 'short-dash-dot-dot',
-    'esrislsshortdashdotdot': 'short-dash-dot-dot',
-    // short-dot
-    'shortdot': 'short-dot',
-    'esrislsshortdot': 'short-dot',
-    // none / null
-    'none': 'none',
-    'esrislsnull': 'none',
-    'null': 'none'
-  };
-
-  // -------------------------------------------------------------------------
-  // Marker style map — covers ALL Esri REST and SDK strings including typos
-  // -------------------------------------------------------------------------
-  const markerStyleMap: Record<string, string> = {
-    // circle — also handles common typo 'esrismsCirlce'
-    'circle': 'circle',
-    'esrismscircle': 'circle',
-    'esrismscirlce': 'circle',   // common typo in old Stencil code
-    // square
-    'square': 'square',
-    'esrismssquare': 'square',
-    // diamond
-    'diamond': 'diamond',
-    'esrismsdiamond': 'diamond',
-    // triangle
-    'triangle': 'triangle',
-    'esrismstriangle': 'triangle',
-    // cross
-    'cross': 'cross',
-    'esrismscross': 'cross',
-    // x
-    'x': 'x',
-    'esrismsx': 'x',
-    // path
-    'path': 'path',
-    'esrismspath': 'path'
-  };
-
-  // -------------------------------------------------------------------------
-  // Fill style map
-  // -------------------------------------------------------------------------
-  const fillStyleMap: Record<string, string> = {
-    'solid': 'solid',
-    'esrisfssolid': 'solid',
-    'null': 'none',
-    'esrisfsnull': 'none',
-    'none': 'none',
-    'horizontal': 'horizontal',
-    'esrisfshorizontal': 'horizontal',
-    'vertical': 'vertical',
-    'esrisfsvertical': 'vertical',
-    'forwarddiagonal': 'forward-diagonal',
-    'esrisfsforwarddiagonal': 'forward-diagonal',
-    'backwarddiagonal': 'backward-diagonal',
-    'esrisfsbackwarddiagonal': 'backward-diagonal',
-    'cross': 'cross',
-    'esrisfscross': 'cross',
-    'diagonalcross': 'diagonal-cross',
-    'esrisfsdiagonalcross': 'diagonal-cross'
-  };
-
-  // -------------------------------------------------------------------------
-  // Type detection — handles BOTH old Esri REST and new SDK strings
-  // -------------------------------------------------------------------------
-
-  // Point / Marker
-  const isPoint =
-    normalizedType === 'esrisms' ||
-    normalizedType === 'esrismscircle' ||
-    normalizedType === 'esrismscirlce' ||   // typo
-    normalizedType === 'simplemarker' ||
-    normalizedType === 'simplemarkersymbol' ||
-    normalizedType === 'point' ||
-    normalizedType === 'marker';
-
-  // Line
-  const isLine =
-    normalizedType === 'esrisls' ||
-    normalizedType === 'esrislssolid' ||
-    normalizedType === 'simpleline' ||
-    normalizedType === 'simplelinesymbol' ||
-    normalizedType === 'polyline' ||
-    normalizedType === 'line';
-
-  // Fill / Polygon
-  const isFill =
-    normalizedType === 'esrisfs' ||
-    normalizedType === 'esrisfssolid' ||
-    normalizedType === 'simplefill' ||
-    normalizedType === 'simplefillsymbol' ||
-    normalizedType === 'polygon' ||
-    normalizedType === 'fill';
-
-  // -------------------------------------------------------------------------
-  // buildOutline — always returns a SimpleLineSymbol
-  // Used for outlines inside fill symbols and marker symbols
-  // -------------------------------------------------------------------------
-  const buildOutline = (outlineObj: any): SimpleLineSymbol => {
-    if (!outlineObj) {
-      return new SimpleLineSymbol({
-        color: [0, 0, 0, 255],
-        width: 1,
-        style: 'solid'
-      });
-    }
-
-    const outlineRawStyle = (outlineObj.style || 'solid').trim();
-    const outlineNormStyle = outlineRawStyle.toLowerCase()
-      .replace(/[\s\-_]/g, '');
-    const mappedStyle = lineStyleMap[outlineNormStyle] ?? 'solid';
-
-    // Handle nested outline that itself has a type (some old Esri JSON has this)
-    // We ignore the nested type and just use SimpleLineSymbol always
-    return new SimpleLineSymbol({
-      color: outlineObj.color ?? [0, 0, 0, 255],
-      width: outlineObj.width ?? 1,
-      style: mappedStyle as any
+  if (_newUserEnableEdit) {
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      if (g.geometry) {
+        const sym = this.getSymbolForGraphic(g);
+        console.log('[arc-geojson-layer] updateEditing symbol:', 
+          JSON.stringify(sym));
+        console.log('[arc-geojson-layer] updateEditing symbol type:', 
+          sym?.constructor?.name, sym?.type, sym?.color, sym?.style);
+        g.symbol = sym;
+      }
+      g.popupTemplate = null as unknown as never;
     });
-  };
-
-  // -------------------------------------------------------------------------
-  // Build Point / Marker symbol
-  // -------------------------------------------------------------------------
-  if (isPoint) {
-    const markerStyle = markerStyleMap[normalizedStyle] ?? 'circle';
-    return new SimpleMarkerSymbol({
-      style: markerStyle as any,
-      color: symbol.color,
-      size: symbol.size ?? 10,
-      angle: symbol.angle ?? 0,
-      xoffset: symbol.xoffset ?? 0,
-      yoffset: symbol.yoffset ?? 0,
-      outline: symbol.outline
-        ? buildOutline(symbol.outline)
-        : new SimpleLineSymbol({
-            color: [0, 0, 0, 255],
-            width: 1,
-            style: 'solid'
-          })
+  } else {
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      if (g.geometry) g.symbol = this.getSymbolForGraphic(g);
+      g.popupTemplate = this.buildPopupTemplateFromCurrent(g);
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Build Line symbol
-  // -------------------------------------------------------------------------
-  if (isLine) {
-    const lineStyle = lineStyleMap[normalizedStyle] ?? 'solid';
-    return new SimpleLineSymbol({
-      style: lineStyle as any,
-      color: symbol.color,
-      width: symbol.width ?? 1
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Build Fill symbol
-  // -------------------------------------------------------------------------
-  if (isFill) {
-    const fillStyle = fillStyleMap[normalizedStyle] ?? 'solid';
-    return new SimpleFillSymbol({
-      style: fillStyle as any,
-      color: symbol.color,
-      outline: symbol.outline
-        ? buildOutline(symbol.outline)
-        : new SimpleLineSymbol({
-            color: [110, 110, 110, 255],
-            width: 1,
-            style: 'solid'
-          })
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Unknown type — log warning and return as-is
-  // -------------------------------------------------------------------------
-  console.warn(
-    '[JsonUtils] normalizePlainSymbol: unknown symbol type:',
-    rawType,
-    '— returning as-is. Add handling for this type if needed.'
-  );
-  return symbol;
+  this.enableInfoPopupWindow(!_newUserEnableEdit && !this.inDrawingMode);
 }
+
+
+
+newGraphic.symbol = this.getDefaultSymbolForGeometry(newGraphic.geometry);
+const rendererSym = this.getSymbolForGraphic(newGraphic);
+if (rendererSym) newGraphic.symbol = rendererSym;
+
+// ADD THIS:
+console.log('[arc-geojson-layer] addToGeojson final symbol:', 
+  newGraphic.symbol?.constructor?.name,
+  'type:', (newGraphic.symbol as any)?.type,
+  'color:', (newGraphic.symbol as any)?.color,
+  'style:', (newGraphic.symbol as any)?.style,
+  'visible:', this.featureLayer?.visible
+);
+console.log('[arc-geojson-layer] featureLayer visible:', 
+  this.featureLayer?.visible,
+  'listMode:', this.featureLayer?.listMode
+);
+
