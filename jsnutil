@@ -11,14 +11,33 @@ import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
 import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
 import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
 
+// ---------------------------------------------------------------------------
+// DIFFERENCE FROM STENCIL:
+// Old Stencil json-utils used ArcGIS 3.x / 4.x REST JSON notation
+// (esriSMS, esriSLS, esriSFS etc.) and relied on fromJSON() or FeatureLayer
+// to interpret them. ArcGIS SDK 5.x no longer supports these strings
+// when assigning symbols directly — it uses SDK class constructors instead.
+//
+// This file supports BOTH old (esriSMS/esriSLS/esriSFS) AND new (circle/solid)
+// notation so existing Angular apps using the old library work without changes.
+// All old Stencil public methods are preserved with the same signatures.
+// ---------------------------------------------------------------------------
+
 export default class JsonUtils {
+
+  // SAME AS STENCIL — same defaults
   static readonly DEFAULT_SYMBOL_COLOR: number[] = [0, 0, 255, 255];
   static readonly DEFAULT_SYMBOL_MARKER_SIZE = 12;
   static readonly DEFAULT_SYMBOL_LINE_WIDTH = 2;
   static readonly DEFAULT_SYMBOL_POLYGON_WIDTH = 2;
   static readonly DEFAULT_LABEL_SIZE = 10;
-  static readonly DEFAULT_LABEL_COLOR = JsonUtils.getRandomColor();
+  // DIFFERENCE: Stencil had DEFAULT_LABEL_COLOR as private static.
+  // Made public so it can be used externally if needed.
+  static readonly DEFAULT_LABEL_COLOR: number[] = JsonUtils.getRandomColor();
 
+  // -------------------------------------------------------------------------
+  // getRandomColor — SAME AS STENCIL
+  // -------------------------------------------------------------------------
   static getRandomColor(): number[] {
     const r = Math.floor(Math.random() * 256);
     const g = Math.floor(Math.random() * 256);
@@ -26,28 +45,64 @@ export default class JsonUtils {
     return [r, g, b, 255];
   }
 
-  // ---------------------------------------------------------------------------
-  // Normalize geometry type string — accepts legacy Esri strings and simple
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // getJsonFeatCollFor — PRESERVED FROM STENCIL
+  // Used to build a FeatureLayer collection JSON from a Graphic.
+  // Still needed for backward compatibility with Angular consumers.
+  // -------------------------------------------------------------------------
+  static getJsonFeatCollFor(graphic: any, label: string): any {
+    return {
+      layerDefinition: {
+        geometryType: 'esriGeometryPoint',
+        spatialReference: { wkid: 4326 },
+        fields: [{
+          name: 'OBJECTID',
+          type: 'esriFieldTypeOID',
+          alias: 'OBJECTID',
+          label,
+        }],
+      },
+      featureSet: {
+        features: [graphic],
+        geometryType: 'esriGeometryPoint',
+      },
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // getEsriGeomTypeFor — PRESERVED FROM STENCIL
+  // Geometry type sniffing via paths/rings/points properties.
+  // Still used by Angular consumers who pass ArcGIS JSON geometry objects.
+  // -------------------------------------------------------------------------
+  static getEsriGeomTypeFor(jsonEsriGeom: any): string {
+    if (!jsonEsriGeom) return 'esriGeometryPoint';
+    if (jsonEsriGeom.paths) return 'esriGeometryPolyline';
+    if (jsonEsriGeom.rings) return 'esriGeometryPolygon';
+    if (jsonEsriGeom.points) return 'esriGeometryMultipoint';
+    return 'esriGeometryPoint';
+  }
+
+  // -------------------------------------------------------------------------
+  // normalizeGeomType — NEW, not in Stencil
+  // Normalizes both old Esri REST geometry type strings AND new simple strings
+  // to a canonical value used internally.
+  // -------------------------------------------------------------------------
   private static normalizeGeomType(geomType: string): string {
     const t = (geomType || '').trim();
     switch (t) {
       case 'esriGeometryPoint':
       case 'esriGeometryMultipoint':
-        return 'point';
-      case 'esriGeometryPolyline':
-      case 'esriGeometryLine':
-        return 'polyline';
-      case 'esriGeometryPolygon':
-        return 'polygon';
       case 'point':
       case 'multipoint':
         return 'point';
+      case 'esriGeometryPolyline':
+      case 'esriGeometryLine':
       case 'polyline':
       case 'line':
       case 'LineString':
       case 'MultiLineString':
         return 'polyline';
+      case 'esriGeometryPolygon':
       case 'polygon':
       case 'Polygon':
       case 'MultiPolygon':
@@ -57,10 +112,15 @@ export default class JsonUtils {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // getJsonSymbolFor — returns SDK instance directly
-  // Accepts both legacy Esri strings and simple strings
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // getJsonSymbolFor — UPDATED FROM STENCIL
+  // STENCIL: returned plain JSON objects with esriSMS/esriSLS/esriSFS strings.
+  //          Worked in ArcGIS 4.x via fromJSON() on FeatureLayer renderer.
+  // NOW: Returns actual SDK symbol instances (SimpleMarkerSymbol etc.)
+  //      because ArcGIS 5.x GraphicsLayer requires real instances.
+  //      Accepts BOTH old Esri REST geometry strings AND new simple strings.
+  //      Result is compatible with direct graphic.symbol assignment.
+  // -------------------------------------------------------------------------
   static getJsonSymbolFor(
     geomType: string,
     color: number[],
@@ -69,27 +129,28 @@ export default class JsonUtils {
     const canonical = JsonUtils.normalizeGeomType(geomType);
 
     switch (canonical) {
-      case 'point': {
+      case 'point':
         return new SimpleMarkerSymbol({
           style: 'circle',
           color: color as any,
           size: markerSize,
+          // outline as plain object — SimpleMarkerSymbol constructor accepts this
           outline: {
             color: [0, 0, 0, 200],
             width: 1,
             style: 'solid'
           } as any
         });
-      }
-      case 'polyline': {
+
+      case 'polyline':
         return new SimpleLineSymbol({
           style: 'solid',
           color: color as any,
           width: markerSize
         });
-      }
+
       case 'polygon':
-      default: {
+      default:
         return new SimpleFillSymbol({
           style: 'solid',
           color: [color[0], color[1], color[2], 100] as any,
@@ -99,108 +160,111 @@ export default class JsonUtils {
             style: 'solid'
           } as any
         });
-      }
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // normalizePlainSymbol — converts any plain symbol object to SDK instance
-  // Handles legacy Esri REST strings, simple strings, typos, all variants
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // getSymbolJson — PRESERVED FROM STENCIL
+  // STENCIL signature: getSymbolJson(geomType, defaultColor, defaultSymbolMarkerSize,
+  //                    widthGeomLine, widthGeomPolygon)
+  // This method was in the old Stencil code and some Angular consumers may
+  // call it directly. Preserved with same signature, updated implementation.
+  // -------------------------------------------------------------------------
+  static getSymbolJson(
+    geomType: string,
+    defaultColor: number[],
+    defaultSymbolMarkerSize: number,
+    widthGeomLine: number,
+    widthGeomPolygon: number
+  ): any {
+    let symbolColor = defaultColor;
+    let symbolSize = defaultSymbolMarkerSize;
+
+    const canonical = JsonUtils.normalizeGeomType(geomType);
+
+    // For lines use line width, for polygons use polygon width
+    // and reduce alpha to make fill semi-transparent (same as Stencil)
+    switch (canonical) {
+      case 'polyline':
+        symbolSize = widthGeomLine;
+        break;
+      case 'polygon':
+        symbolSize = widthGeomPolygon;
+        symbolColor = [...symbolColor.slice(0, 3), 100] as number[];
+        break;
+    }
+
+    return JsonUtils.getJsonSymbolFor(geomType, symbolColor, symbolSize);
+  }
+
+  // -------------------------------------------------------------------------
+  // normalizePlainSymbol — NEW, not in Stencil
+  // DIFFERENCE FROM STENCIL:
+  // The Stencil version never needed this because FeatureLayer.renderer
+  // handled symbol normalization internally via fromJSON().
+  // With GraphicsLayer we must normalize manually.
+  // Converts ANY plain symbol object (old esriSMS/esriSLS or new simple-marker)
+  // into a proper SDK symbol instance that can be assigned to graphic.symbol.
+  // This lets Angular apps pass old-style renderer configs unchanged.
+  // -------------------------------------------------------------------------
   static normalizePlainSymbol(symbol: any): any {
     if (!symbol) return symbol;
 
-    // Already an SDK instance — leave it alone
+    // Already an SDK instance (has clone method) — leave it alone
     if (typeof symbol.clone === 'function') return symbol;
 
     const rawType = (symbol.type || '').trim();
     const type = rawType.toLowerCase().replace(/[\s-_]/g, '');
     const style = (symbol.style || '').toLowerCase().replace(/[\s-_]/g, '');
 
-    // -------------------------------------------------------------------------
     // Line style map — covers all Esri REST and simple SDK strings
-    // -------------------------------------------------------------------------
     const lineStyleMap: Record<string, string> = {
-      'solid': 'solid',
-      'esrislssolid': 'solid',
-      'dash': 'dash',
-      'esrislsdash': 'dash',
-      'dot': 'dot',
-      'esrislsdot': 'dot',
-      'dashdot': 'dash-dot',
-      'esrislsdashdot': 'dash-dot',
-      'longdash': 'long-dash',
-      'esrislslongdash': 'long-dash',
-      'longdashdot': 'long-dash-dot',
-      'esrislslongdashdot': 'long-dash-dot',
-      'shortdash': 'short-dash',
-      'esrislsshortdash': 'short-dash',
-      'shortdashdot': 'short-dash-dot',
-      'esrislsshortdashdot': 'short-dash-dot',
-      'shortdot': 'short-dot',
-      'esrislsshortdot': 'short-dot',
-      'none': 'none',
-      'esrislsnull': 'none'
+      'solid': 'solid', 'esrislssolid': 'solid',
+      'dash': 'dash', 'esrislsdash': 'dash',
+      'dot': 'dot', 'esrislsdot': 'dot',
+      'dashdot': 'dash-dot', 'esrislsdashdot': 'dash-dot',
+      'longdash': 'long-dash', 'esrislslongdash': 'long-dash',
+      'shortdash': 'short-dash', 'esrislsshortdash': 'short-dash',
+      'shortdot': 'short-dot', 'esrislsshortdot': 'short-dot',
+      'none': 'none', 'esrislsnull': 'none'
     };
 
-    // -------------------------------------------------------------------------
     // Marker style map — covers all Esri REST and simple SDK strings + typos
-    // -------------------------------------------------------------------------
     const markerStyleMap: Record<string, string> = {
-      'circle': 'circle',
-      'esrismscircle': 'circle',
-      'esrismscirlce': 'circle',    // common typo variant
-      'square': 'square',
-      'esrismssquare': 'square',
-      'diamond': 'diamond',
-      'esrismsdiamond': 'diamond',
-      'triangle': 'triangle',
-      'esrismstriangle': 'triangle',
-      'x': 'x',
-      'esrismsx': 'x',
-      'cross': 'cross',
-      'esrismscross': 'cross',
-      'path': 'path',
-      'esrismspath': 'path'
+      'circle': 'circle', 'esrismscircle': 'circle',
+      'esrismscirlce': 'circle',  // common typo in old code
+      'square': 'square', 'esrismssquare': 'square',
+      'diamond': 'diamond', 'esrismsdiamond': 'diamond',
+      'triangle': 'triangle', 'esrismstriangle': 'triangle',
+      'x': 'x', 'esrismsx': 'x',
+      'cross': 'cross', 'esrismscross': 'cross',
+      'path': 'path', 'esrismspath': 'path'
     };
 
-    // -------------------------------------------------------------------------
-    // Type detection
-    // -------------------------------------------------------------------------
+    // Type detection — covers both old Esri REST and new SDK strings
     const isPoint =
-      type === 'esrisms' ||
-      type === 'esrismscircle' ||
-      type === 'esrismscirlce' ||
-      type === 'simplemarker' ||
-      type === 'simplemarkersymbol' ||
-      type === 'point';
+      type === 'esrisms' || type === 'esrismscircle' ||
+      type === 'esrismscirlce' || type === 'simplemarker' ||
+      type === 'simplemarkersymbol' || type === 'point';
 
     const isLine =
-      type === 'esrisls' ||
-      type === 'esrislssolid' ||
-      type === 'simpleline' ||
-      type === 'simplelinesymbol' ||
-      type === 'polyline' ||
-      type === 'line';
+      type === 'esrisls' || type === 'esrislssolid' ||
+      type === 'simpleline' || type === 'simplelinesymbol' ||
+      type === 'polyline' || type === 'line';
 
     const isFill =
-      type === 'esrisfs' ||
-      type === 'esrisfssolid' ||
-      type === 'esrisfssound' ||
-      type === 'simplefill' ||
-      type === 'simplefillsymbol' ||
-      type === 'polygon';
+      type === 'esrisfs' || type === 'esrisfssolid' ||
+      type === 'esrisfssound' || type === 'simplefill' ||
+      type === 'simplefillsymbol' || type === 'polygon';
 
-    // -------------------------------------------------------------------------
-    // Build outline helper — outline is ALWAYS a SimpleLineSymbol
-    // -------------------------------------------------------------------------
+    // Build outline — always a SimpleLineSymbol regardless of what
+    // the old Esri REST JSON put in the outline.type field
     const buildOutline = (outlineObj: any): SimpleLineSymbol => {
       const outlineStyle = outlineObj?.style
         ? (lineStyleMap[
             (outlineObj.style || '').toLowerCase().replace(/[\s-_]/g, '')
           ] ?? 'solid')
         : 'solid';
-
       return new SimpleLineSymbol({
         color: outlineObj?.color ?? [0, 0, 0, 255],
         width: outlineObj?.width ?? 1,
@@ -208,131 +272,168 @@ export default class JsonUtils {
       });
     };
 
-    // -------------------------------------------------------------------------
-    // Point symbol
-    // -------------------------------------------------------------------------
     if (isPoint) {
-      const normalizedStyle = (markerStyleMap[style] ?? 'circle') as any;
       return new SimpleMarkerSymbol({
         color: symbol.color,
         size: symbol.size,
-        style: normalizedStyle,
+        style: (markerStyleMap[style] ?? 'circle') as any,
         outline: symbol.outline
           ? buildOutline(symbol.outline)
-          : new SimpleLineSymbol({
-              color: [0, 0, 0, 255],
-              width: 1,
-              style: 'solid'
-            })
+          : new SimpleLineSymbol({ color: [0, 0, 0, 255], width: 1, style: 'solid' })
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Line symbol
-    // -------------------------------------------------------------------------
     if (isLine) {
-      const normalizedStyle = (lineStyleMap[style] ?? 'solid') as any;
       return new SimpleLineSymbol({
         color: symbol.color,
         width: symbol.width ?? 1,
-        style: normalizedStyle
+        style: (lineStyleMap[style] ?? 'solid') as any
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Fill symbol
-    // -------------------------------------------------------------------------
     if (isFill) {
       return new SimpleFillSymbol({
         color: symbol.color,
         style: 'solid',
         outline: symbol.outline
           ? buildOutline(symbol.outline)
-          : new SimpleLineSymbol({
-              color: [110, 110, 110, 255],
-              width: 1,
-              style: 'solid'
-            })
+          : new SimpleLineSymbol({ color: [110, 110, 110, 255], width: 1, style: 'solid' })
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Unknown type — return as-is
-    // -------------------------------------------------------------------------
     console.warn('normalizePlainSymbol: unknown symbol type:', rawType);
     return symbol;
   }
 
-  // ---------------------------------------------------------------------------
-  // normalizeSymbolInRenderer — normalize all symbols inside a renderer config
-  // ---------------------------------------------------------------------------
-  static normalizeSymbolInRenderer(renderer: any): any {
-    if (!renderer) return renderer;
-
-    const r = JsonUtils.clonePlain(renderer);
-
-    if (r.defaultSymbol) {
-      r.defaultSymbol = JsonUtils.normalizePlainSymbol(r.defaultSymbol);
-    }
-
-    if (Array.isArray(r.uniqueValueInfos)) {
-      r.uniqueValueInfos = r.uniqueValueInfos.map((info: any) => ({
-        ...info,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-    }
-
-    if (Array.isArray(r.classBreakInfos)) {
-      r.classBreakInfos = r.classBreakInfos.map((info: any) => ({
-        ...info,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-    }
-
-    return r;
-  }
-
-  // ---------------------------------------------------------------------------
-  // updateLabelJson
-  // ---------------------------------------------------------------------------
-  static updateLabelJson(
-    newLabelJsonArg: string | object | object[] | undefined,
-    featureLayer: FeatureLayer | GeoJSONLayer
-  ) {
-    if (newLabelJsonArg) {
-      const jsonParseResult = JsonUtils.getJsonFor(newLabelJsonArg);
-
-      if (jsonParseResult.error) {
-        console.warn(
-          'Could not parse new value for label json, staying on previous value',
-          jsonParseResult.error
-        );
-        return;
+  // -------------------------------------------------------------------------
+  // getJsonFor — SAME AS STENCIL
+  // Safe JSON parse wrapper. Returns parsedJson for objects, parses strings.
+  // -------------------------------------------------------------------------
+  static getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+    if (typeof jsonObj === 'string') {
+      try {
+        return { parsedJson: JSON.parse(jsonObj) };
+      } catch (e) {
+        return { error: e as Error };
       }
-
-      const parsedJson = jsonParseResult.parsedJson;
-      const parsedArray =
-        parsedJson instanceof Array ? parsedJson : [parsedJson];
-      const labelClasses: LabelClass[] = parsedArray.map(
-        (individualLabelJson: any) => new LabelClass(individualLabelJson)
-      );
-      featureLayer.labelingInfo = labelClasses;
     }
+    return { parsedJson: jsonObj };
   }
 
-  // ---------------------------------------------------------------------------
-  // updateRenderer
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // getGeoJsonFor — UPDATED FROM STENCIL
+  // STENCIL: was called getJsonFor with same behavior.
+  // NOW: Added null/undefined/empty string guards for safety.
+  // -------------------------------------------------------------------------
+  static getGeoJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
+    if (jsonObj === undefined || jsonObj === null) {
+      return { parsedJson: undefined };
+    }
+    if (typeof jsonObj === 'string') {
+      if (jsonObj.trim() === '') return { parsedJson: undefined };
+      try {
+        return { parsedJson: JSON.parse(jsonObj) };
+      } catch (error) {
+        return { error: error as Error };
+      }
+    }
+    return { parsedJson: jsonObj };
+  }
+
+  // -------------------------------------------------------------------------
+  // getJsonLabelFor — SAME AS STENCIL
+  // Returns ArcGIS label class JSON array with $feature.LABEL expression.
+  // DIFFERENCE: Added type: 'text' to symbol for ArcGIS 5.x compatibility.
+  // -------------------------------------------------------------------------
+  static getJsonLabelFor(color: number[] | string, fontSize: number): object {
+    return [{
+      labelExpressionInfo: { expression: '$feature.LABEL' },
+      symbol: {
+        type: 'text',  // ADDED: required in ArcGIS 5.x
+        font: { size: fontSize, family: 'sans-serif', weight: 'bolder' },
+        color,
+        haloColor: 'black',
+        haloSize: 1,
+        xoffset: 3,
+        yoffset: 3,
+      },
+    }];
+  }
+
+  // -------------------------------------------------------------------------
+  // getLabelJson — SAME AS STENCIL
+  // 3-way label resolution: custom JSON → color+size → default
+  // -------------------------------------------------------------------------
+  static getLabelJson(userLabel: any, userColor: any, userSize: any): any {
+    const labelJson = JsonUtils.getJsonFor(userLabel);
+    if (labelJson.error || !labelJson.parsedJson) {
+      if (labelJson.error) {
+        console.warn(
+          'Could not parse label json, falling back to color & size properties',
+          labelJson.error
+        );
+      }
+      let labelColor = JsonUtils.DEFAULT_LABEL_COLOR;
+      const colorJson = JsonUtils.getJsonFor(userColor);
+      if (colorJson.error) {
+        console.error('Could not parse label color', colorJson.error);
+      } else {
+        labelColor = colorJson.parsedJson;
+      }
+      let labelSize = JsonUtils.DEFAULT_LABEL_SIZE;
+      if (!isNaN(userSize) && userSize > 0) {
+        labelSize = userSize;
+      } else if (typeof userSize !== 'undefined') {
+        console.warn('bad label size: ' + userSize + ', using default: ' + labelSize);
+        console.warn('label size must be a positive number');
+      }
+      return JsonUtils.getJsonLabelFor(labelColor, labelSize);
+    }
+    return labelJson.parsedJson;
+  }
+
+  // -------------------------------------------------------------------------
+  // updateLabelJson — UPDATED FROM STENCIL
+  // STENCIL signature: updateLabelJson(arg, featureLayer: FeatureLayer)
+  // NOW: Accepts FeatureLayer | GeoJSONLayer for broader compatibility.
+  // Logic is identical to Stencil version.
+  // -------------------------------------------------------------------------
+  static updateLabelJson(
+    newLabelJsonArg: string | object | object[] | undefined | null,
+    featureLayer: FeatureLayer | GeoJSONLayer
+  ): void {
+    if (!newLabelJsonArg) return;
+
+    const jsonParseResult = JsonUtils.getJsonFor(newLabelJsonArg);
+    if (jsonParseResult.error) {
+      console.warn(
+        'Could not parse new value for label json, staying on previous value',
+        jsonParseResult.error
+      );
+      return;
+    }
+
+    const parsedJson = jsonParseResult.parsedJson;
+    const parsedArray = parsedJson instanceof Array ? parsedJson : [parsedJson];
+    const labelClasses: LabelClass[] = parsedArray.map(
+      (individualLabelJson: any) => new LabelClass(individualLabelJson)
+    );
+    featureLayer.labelingInfo = labelClasses;
+  }
+
+  // -------------------------------------------------------------------------
+  // updateRenderer — UPDATED FROM STENCIL
+  // STENCIL: Called featureLayer.refresh() after setting renderer.
+  //          ArcGIS 5.x removed .refresh() — layer updates automatically.
+  // NOW: Same logic, refresh() calls removed.
+  // Also accepts GeoJSONLayer in addition to FeatureLayer.
+  // -------------------------------------------------------------------------
   static updateRenderer(
     newRenderer: any,
     featureLayer: FeatureLayer | GeoJSONLayer,
     rendererTypeToModule: any,
     symbolJson: any
-  ) {
+  ): void {
     if (newRenderer) {
       const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
       if (rendererParseResult.error) {
@@ -344,92 +445,56 @@ export default class JsonUtils {
       }
 
       const parsedRendererConfig = rendererParseResult.parsedJson;
-      const rendererModuleName =
-        rendererTypeToModule[parsedRendererConfig.type];
+      const rendererModuleName = rendererTypeToModule[parsedRendererConfig.type];
 
       if (rendererModuleName === undefined) {
         console.error(
-          'Unrecognized renderer type',
-          parsedRendererConfig.type,
-          'Must be one of',
-          Object.keys(rendererTypeToModule)
+          'Unrecognized renderer type', parsedRendererConfig.type,
+          'Must be one of', Object.keys(rendererTypeToModule)
         );
         return;
       }
 
-      let rendererInstance;
-      if (parsedRendererConfig.type === 'simple') {
-        rendererInstance = new SimpleRenderer(parsedRendererConfig);
-      } else if (parsedRendererConfig.type === 'unique-value') {
-        rendererInstance = new UniqueValueRenderer(parsedRendererConfig);
-      } else if (parsedRendererConfig.type === 'class-breaks') {
-        rendererInstance = new ClassBreaksRenderer(parsedRendererConfig);
-      } else {
-        console.error(
-          'Unrecognized renderer type',
-          parsedRendererConfig.type
-        );
-        return;
+      let renderer;
+      switch (rendererModuleName) {
+        case 'simple':
+          renderer = new SimpleRenderer(parsedRendererConfig);
+          break;
+        case 'unique-value':
+          renderer = new UniqueValueRenderer(parsedRendererConfig);
+          break;
+        case 'class-breaks':
+          renderer = new ClassBreaksRenderer(parsedRendererConfig);
+          break;
+        default:
+          renderer = new SimpleRenderer(parsedRendererConfig);
       }
 
-      featureLayer.renderer = rendererInstance;
-    } else {
-      const renderer = new SimpleRenderer(symbolJson);
       featureLayer.renderer = renderer;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // getJsonFor
-  // ---------------------------------------------------------------------------
-  static getJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
-    if (typeof jsonObj === 'string') {
-      try {
-        const tempJson = JSON.parse(jsonObj);
-        return { parsedJson: tempJson };
-      } catch (e) {
-        return { error: e as Error };
-      }
+      // DIFFERENCE FROM STENCIL: featureLayer.refresh() removed —
+      // ArcGIS SDK 5.x layers update automatically when renderer changes
     } else {
-      return { parsedJson: jsonObj };
+      featureLayer.renderer = new SimpleRenderer(symbolJson);
+      // DIFFERENCE FROM STENCIL: featureLayer.refresh() removed
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // getGeoJsonFor
-  // ---------------------------------------------------------------------------
-  static getGeoJsonFor(jsonObj: any): { error?: Error; parsedJson?: any } {
-    if (jsonObj === undefined || jsonObj === null) {
-      return { parsedJson: undefined };
-    }
-
-    if (typeof jsonObj === 'string') {
-      if (jsonObj.trim() === '') {
-        return { parsedJson: undefined };
-      }
-      try {
-        return { parsedJson: JSON.parse(jsonObj) };
-      } catch (error) {
-        return { error: error as Error };
-      }
-    }
-
-    return { parsedJson: jsonObj };
-  }
-
-  // ---------------------------------------------------------------------------
-  // clonePlain
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // clonePlain — NEW, not in Stencil
+  // Deep clone via JSON round-trip. Used for safe object manipulation.
+  // -------------------------------------------------------------------------
   static clonePlain<T>(value: T): T {
-    if (value === undefined || value === null) {
-      return value;
-    }
+    if (value === undefined || value === null) return value;
     return JSON.parse(JSON.stringify(value)) as T;
   }
 
-  // ---------------------------------------------------------------------------
-  // buildPopupTemplateFromCurrent — fixed to use getInfoTemplateJson directly
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // buildPopupTemplateFromCurrent — NEW, not in Stencil
+  // DIFFERENCE FROM STENCIL:
+  // Stencil used PopupUtils.updatePopup() as a separate utility file.
+  // We consolidated popup building into JsonUtils for simplicity.
+  // Builds a PopupTemplate from InfoTemplateDetails (listItem + details).
+  // -------------------------------------------------------------------------
   static buildPopupTemplateFromCurrent({
     graphic,
     infoTemplate,
@@ -454,33 +519,26 @@ export default class JsonUtils {
     return new PopupTemplate({ title, content });
   }
 
-  // ---------------------------------------------------------------------------
-  // getInfoTemplateJson
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // getInfoTemplateJson — NEW, not in Stencil
+  // -------------------------------------------------------------------------
   static getInfoTemplateJson(value: any): InfoTemplateDetails | null {
-    if (typeof value === 'string' && value.trim() === '') {
-      return null;
-    }
-
+    if (typeof value === 'string' && value.trim() === '') return null;
     const parsed = JsonUtils.getGeoJsonFor(value);
-    if (parsed.error || !parsed.parsedJson) {
-      return null;
-    }
-
+    if (parsed.error || !parsed.parsedJson) return null;
     return parsed.parsedJson as InfoTemplateDetails;
   }
 
-  // ---------------------------------------------------------------------------
-  // resolveTemplateValue
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // resolveTemplateValue — NEW, not in Stencil
+  // -------------------------------------------------------------------------
   static resolveTemplateValue(
     value: string | ((graphic: Graphic) => string),
     graphic: Graphic
   ): string {
     if (typeof value === 'function') {
-      try {
-        return value(graphic);
-      } catch (error) {
+      try { return value(graphic); }
+      catch (error) {
         console.warn('failed resolving template function', error);
         return '';
       }
@@ -488,225 +546,26 @@ export default class JsonUtils {
     return value ?? '';
   }
 
-  // ---------------------------------------------------------------------------
-  // buildDefaultPopupContent
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // buildDefaultPopupContent — NEW, not in Stencil
+  // Fallback popup content when no infoTemplate is provided.
+  // -------------------------------------------------------------------------
   static buildDefaultPopupContent(
     attributes: Record<string, any>
   ): string {
     const rows = Object.entries(attributes)
-      .map(
-        ([key, value]) =>
-          `<div><strong>${key}:</strong> ${String(value)}</div>`
+      .map(([key, value]) =>
+        `<div><strong>${key}:</strong> ${String(value)}</div>`
       )
       .join('');
     return rows || '<div>No Details Available</div>';
   }
 
-  // ---------------------------------------------------------------------------
-  // getGeoLabelJson
-  // ---------------------------------------------------------------------------
-  static getGeoLabelJson(
-    userLabel: string | object | object[],
-    userColor: string | number[],
-    userSize: number
-  ): any {
-    if (typeof userLabel === 'string' && userLabel.trim() === '') {
-      return JsonUtils.getJsonLabelFor(
-        JsonUtils.resolveLabelColor(userColor),
-        JsonUtils.resolveLabelSize(userSize)
-      );
-    }
-
-    const labelJson = JsonUtils.getGeoJsonFor(userLabel);
-    if (labelJson.error || !labelJson.parsedJson) {
-      console.warn(
-        'Could not parse label json, falling back to color & size properties',
-        labelJson.error
-      );
-      return JsonUtils.getJsonLabelFor(
-        JsonUtils.resolveLabelColor(userColor),
-        JsonUtils.resolveLabelSize(userSize)
-      );
-    }
-
-    const parsed = JsonUtils.clonePlain(labelJson.parsedJson);
-
-    if (Array.isArray(parsed)) {
-      return parsed.map((item: any) =>
-        JsonUtils.normalizeLegacyLabelClass(item, userColor, userSize)
-      );
-    }
-
-    return JsonUtils.normalizeLegacyLabelClass(parsed, userColor, userSize);
-  }
-
-  // ---------------------------------------------------------------------------
-  // getLabelJson
-  // ---------------------------------------------------------------------------
-  static getLabelJson(
-    userLabel: any,
-    userColor: any,
-    userSize: any
-  ): any {
-    const labelJson = JsonUtils.getJsonFor(userLabel);
-    if (labelJson.error || !labelJson.parsedJson) {
-      console.warn(
-        'Could not parse label json, falling back to color & size properties',
-        labelJson.error
-      );
-      return JsonUtils.getJsonLabelFor(
-        JsonUtils.resolveLabelColor(userColor),
-        JsonUtils.resolveLabelSize(userSize)
-      );
-    }
-
-    let labelColor = JsonUtils.DEFAULT_LABEL_COLOR;
-    const colorJson = JsonUtils.getJsonFor(userColor);
-    if (colorJson.error) {
-      console.error('Could not parse label color', colorJson.error);
-    } else {
-      labelColor = colorJson.parsedJson;
-    }
-
-    let labelSize = JsonUtils.DEFAULT_LABEL_SIZE;
-    if (!isNaN(userSize) && userSize > 0) {
-      labelSize = userSize;
-    } else if (typeof userSize !== 'undefined') {
-      console.warn(
-        'bad label size: ' + userSize + ', using default: ' + labelSize
-      );
-      console.warn('label size must be a positive number');
-    }
-
-    return JsonUtils.getJsonLabelFor(labelColor, labelSize);
-  }
-
-  // ---------------------------------------------------------------------------
-  // normalizeLegacyLabelClass
-  // ---------------------------------------------------------------------------
-  static normalizeLegacyLabelClass(
-    labelClass: any,
-    userColor: string | number[],
-    userSize: number
-  ): any {
-    const safe = JsonUtils.clonePlain(labelClass);
-
-    if (!safe || typeof safe !== 'object') {
-      return JsonUtils.getJsonLabelFor(
-        JsonUtils.resolveLabelColor(userColor),
-        JsonUtils.resolveLabelSize(userSize)
-      );
-    }
-
-    safe.symbol = JsonUtils.normalizeLegacySymbol(
-      safe.symbol,
-      userColor,
-      userSize
-    );
-
-    if (!safe.labelExpressionInfo) {
-      safe.labelExpressionInfo = {
-        expression: '$feature.LABEL'
-      };
-    }
-
-    return safe;
-  }
-
-  // ---------------------------------------------------------------------------
-  // normalizeLegacySymbol — for label symbols
-  // ---------------------------------------------------------------------------
-  private static normalizeLegacySymbol(
-    symbol: any,
-    userColor: string | number[],
-    userSize: number
-  ): any {
-    const safe = JsonUtils.clonePlain(symbol);
-
-    if (!safe || typeof safe !== 'object') {
-      return {
-        type: 'text',
-        color: JsonUtils.resolveLabelColor(userColor),
-        haloColor: 'black',
-        haloSize: 1,
-        xoffset: 3,
-        yoffset: 3,
-        font: {
-          size: JsonUtils.resolveLabelSize(userSize),
-          family: 'sans-serif',
-          weight: 'bold'
-        }
-      };
-    }
-
-    if (safe.type === 'esriTS') {
-      return {
-        type: 'text',
-        text: safe.text ?? '',
-        color: safe.color ?? JsonUtils.resolveLabelColor(userColor),
-        haloColor: safe.haloColor ?? 'black',
-        haloSize: safe.haloSize ?? 1,
-        xoffset: safe.xoffset ?? 0,
-        yoffset: safe.yoffset ?? 0,
-        angle: safe.angle ?? 0,
-        font: {
-          size: safe.font?.size ?? JsonUtils.resolveLabelSize(userSize),
-          family: safe.font?.family ?? 'sans-serif',
-          weight: safe.font?.weight ?? 'bold'
-        }
-      };
-    }
-
-    if (safe.type === 'text') {
-      return {
-        ...safe,
-        color: safe.color ?? JsonUtils.resolveLabelColor(userColor),
-        haloColor: safe.haloColor ?? safe.halocolor ?? 'black',
-        haloSize: safe.haloSize ?? safe.halosize ?? 1,
-        xoffset: safe.xoffset ?? 0,
-        yoffset: safe.yoffset ?? 0,
-        font: {
-          size: safe.font?.size ?? JsonUtils.resolveLabelSize(userSize),
-          family: safe.font?.family ?? 'sans-serif',
-          weight: safe.font?.weight ?? 'bold'
-        }
-      };
-    }
-
-    return safe;
-  }
-
-  // ---------------------------------------------------------------------------
-  // getJsonLabelFor
-  // ---------------------------------------------------------------------------
-  static getJsonLabelFor(
-    color: string | number[],
-    fontSize: number
-  ): object {
-    return [
-      {
-        labelExpressionInfo: { expression: '$feature.LABEL' },
-        symbol: {
-          type: 'text',
-          font: {
-            size: fontSize,
-            family: 'sans-serif',
-            weight: 'bolder'
-          },
-          color,
-          haloColor: 'black',
-          haloSize: 1,
-          xoffset: 3,
-          yoffset: 3
-        }
-      }
-    ];
-  }
-
-  // ---------------------------------------------------------------------------
-  // resolveLabelColor
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // resolveLabelColor — NEW, not in Stencil
+  // Normalises any color value to a number[] RGBA array.
+  // Handles: number[], JSON string array, CSS color strings (with fallback).
+  // -------------------------------------------------------------------------
   static resolveLabelColor(userColor: string | number[]): number[] {
     if (Array.isArray(userColor) && userColor.length >= 3) {
       return [
@@ -716,28 +575,24 @@ export default class JsonUtils {
         userColor.length > 3 ? Number(userColor[3]) || 255 : 255
       ];
     }
-
     const colorJson = JsonUtils.getGeoJsonFor(userColor);
     if (Array.isArray(colorJson.parsedJson)) {
-      const parsedColor = colorJson.parsedJson as number[];
+      const pc = colorJson.parsedJson as number[];
       return [
-        Number(parsedColor[0]) || 0,
-        Number(parsedColor[1]) || 0,
-        Number(parsedColor[2]) || 0,
-        parsedColor.length > 3 ? Number(parsedColor[3]) || 255 : 255
+        Number(pc[0]) || 0,
+        Number(pc[1]) || 0,
+        Number(pc[2]) || 0,
+        pc.length > 3 ? Number(pc[3]) || 255 : 255
       ];
     }
-
     return [0, 0, 0, 255];
   }
 
-  // ---------------------------------------------------------------------------
-  // resolveLabelSize
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // resolveLabelSize — NEW, not in Stencil
+  // -------------------------------------------------------------------------
   static resolveLabelSize(userSize: number): number {
-    if (!Number.isNaN(userSize) && userSize > 0) {
-      return userSize;
-    }
+    if (!Number.isNaN(userSize) && userSize > 0) return userSize;
     return JsonUtils.DEFAULT_LABEL_SIZE;
   }
 }
