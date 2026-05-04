@@ -1,95 +1,107 @@
-private addToGeojson(newGraphic: Graphic): void {
-  if (!newGraphic.attributes) newGraphic.attributes = {};
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!this.featureLayer || !this.view) return;
 
-  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    newGraphic.attributes[this.uniqueIdPropertyName] = Date.now();
+  console.log('startDrawing called with:', drawGeometryType);
+
+  const existingType = this.determineExistingGeometryType();
+  if (
+    existingType &&
+    !this.validGeometryType(drawGeometryType, existingType)
+  ) return;
+
+  // Cancel any existing editor
+  if (this.graphicsEditor) {
+    try { this.graphicsEditor.cancel(); } catch { }
+    try { this.graphicsEditor.destroy(); } catch { }
   }
-  if (newGraphic.attributes.OBJECTID === undefined) {
-    newGraphic.attributes.OBJECTID = Date.now();
-  }
 
-  newGraphic.symbol = this.getSymbolForGraphic(newGraphic);
-
-  newGraphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
-    graphic: newGraphic,
-    infoTemplate: this.infoTemplate,
-    uniqueIdPropertyName: this.uniqueIdPropertyName,
-    fallbackTitle: this.name || 'Details'
+  // Recreate SketchViewModel fresh each time
+  this.graphicsEditor = new SketchViewModel({
+    view: this.view,
+    layer: this.featureLayer,
+    defaultUpdateOptions: {
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      multipleSelectionEnabled: false,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      toggleToolOnClick: false
+    },
+    updateOnGraphicClick: false
   });
 
-  if (!this.featureLayer.graphics.includes(newGraphic)) {
-    this.featureLayer.add(newGraphic);
-  }
+  this.graphicsEditor.on('create', (evt: any) => {
+    console.log('create event state:', evt.state,
+      'graphic:', evt.graphic?.geometry?.type);
 
-  this._internalUpdateId++;
-  const currentId = this._internalUpdateId;
-
-  // Store the drawn graphic reference so we can restore it
-  const drawnGraphic = newGraphic;
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-
-  // Emit event so Angular/NgRx can process
-  this.emitLayerEvent(
-    'userDrawItemAdded',
-    this.graphicToGeoJsonFeature(newGraphic)
-  );
-
-  this.refreshLabels();
-
-  // Wait longer for NgRx to finish its full cycle
-  // NgRx can take multiple render cycles to settle
-  setTimeout(() => {
-    if (this._internalUpdateId === currentId) {
-      // Before unblocking, make sure our graphic is still on the layer
-      // If Angular cleared it, restore it
-      if (!this.featureLayer.graphics.includes(drawnGraphic)) {
-        console.log('restoring cleared graphic after NgRx cycle');
-        this.featureLayer.add(drawnGraphic);
-      }
+    if (evt.state === 'complete' && evt.graphic) {
+      console.log('DRAWING COMPLETE');
+      this.inDrawingMode = false;
       this.blockGeoJsonUpdate = false;
+      this.addToGeojson(evt.graphic);
+      this.enableInfoPopupWindow(false);
+
+      setTimeout(() => {
+        console.log('500ms after complete - graphics count:',
+          this.featureLayer?.graphics?.length);
+        console.log('blockGeoJsonUpdate:', this.blockGeoJsonUpdate);
+      }, 500);
+
+      setTimeout(() => {
+        console.log('2000ms after complete - graphics count:',
+          this.featureLayer?.graphics?.length);
+      }, 2000);
+
+      return;
     }
-  }, 2000); // increased from 500ms to 2000ms
-}
 
+    if (evt.state === 'cancel') {
+      console.log('DRAWING CANCELLED');
+      this.inDrawingMode = false;
+      this.blockGeoJsonUpdate = false;
+      return;
+    }
 
-async updateGeojson(
-  newGeojson: string | FeatureCollection
-): Promise<void> {
-  if (this.blockGeoJsonUpdate) return;
-  if (this.enableUserEdit || this.inDrawingMode || this.removingItem) return;
+    if (evt.state === 'active' || evt.state === 'start') {
+      console.log('DRAWING ACTIVE - keeping block');
+      this.inDrawingMode = true;
+      this.blockGeoJsonUpdate = true;
+    }
+  });
 
-  if (!this.featureLayer) {
-    await this.createLayer(newGeojson);
-    return;
-  }
+  this.graphicsEditor.on('update', (evt: any) => {
+    if (evt.state === 'start') {
+      this.graphicMoved = false;
+    }
+    if (evt.toolEventInfo?.type === 'move-start') this.graphicMoved = true;
+    if (evt.toolEventInfo?.type === 'reshape-start') this.graphicMoved = true;
+    if (evt.toolEventInfo?.type === 'scale-start') this.graphicMoved = true;
+    if (evt.toolEventInfo?.type === 'rotate-start') this.graphicMoved = true;
 
-  // Parse incoming geojson
-  const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
-  if (!parsed.parsedJson) return;
+    if (evt.state === 'complete' && evt.graphics?.length) {
+      for (const graphic of evt.graphics) {
+        this.updateGeojsonWithChanges(graphic);
+      }
+      this.enableInfoPopupWindow(true);
+    }
 
-  // If incoming is empty but we have graphics — Angular is echoing
-  // our drawn state back as empty. Skip it.
-  const incomingCount = parsed.parsedJson.features?.length ?? 0;
-  const currentCount = this.featureLayer.graphics.length;
+    if (evt.state === 'cancel') {
+      this.enableInfoPopupWindow(true);
+    }
+  });
 
-  if (incomingCount === 0 && currentCount > 0) {
-    console.log('updateGeojson: skipping empty echo, we have', currentCount, 'graphics');
-    return;
-  }
+  // Set flags BEFORE create
+  this.inDrawingMode = true;
+  this.blockGeoJsonUpdate = true;
+  this.enableInfoPopupWindow(false);
 
-  this.featureLayer.removeAll();
-  this.labelLayer?.removeAll();
+  const tool = this.toSketchCreateTool(drawGeometryType);
+  console.log('creating sketch tool:', tool);
 
-  const fsInfo = this.getUpGISJson(newGeojson);
-  if (!fsInfo) return;
+  // Small delay to ensure view is ready
+  await new Promise(resolve => setTimeout(resolve, 100));
 
-  for (const graphic of fsInfo.graphics) {
-    this.featureLayer.add(graphic);
-  }
+  this.graphicsEditor.create(tool);
 
-  this.updateRenderer(this.renderer);
-  this.refreshLabels();
-  this.updateInfoTemplate(this.infoTemplate);
+  console.log('graphicsEditor state after create:',
+    this.graphicsEditor.state);
 }
