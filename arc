@@ -1,107 +1,58 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.featureLayer || !this.view) return;
+private addToGeojson(newGraphic: Graphic): void {
+  if (!newGraphic.attributes) newGraphic.attributes = {};
 
-  console.log('startDrawing called with:', drawGeometryType);
-
-  const existingType = this.determineExistingGeometryType();
-  if (
-    existingType &&
-    !this.validGeometryType(drawGeometryType, existingType)
-  ) return;
-
-  // Cancel any existing editor
-  if (this.graphicsEditor) {
-    try { this.graphicsEditor.cancel(); } catch { }
-    try { this.graphicsEditor.destroy(); } catch { }
+  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    newGraphic.attributes[this.uniqueIdPropertyName] = Date.now();
+  }
+  if (newGraphic.attributes.OBJECTID === undefined) {
+    newGraphic.attributes.OBJECTID = Date.now();
   }
 
-  // Recreate SketchViewModel fresh each time
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    defaultUpdateOptions: {
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      multipleSelectionEnabled: false,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      toggleToolOnClick: false
-    },
-    updateOnGraphicClick: false
+  // Force symbol based on geometry type directly
+  // Do NOT use getSymbolForGraphic here — use getDefaultSymbolForGeometry
+  // to guarantee a valid symbol regardless of renderer state
+  if (newGraphic.geometry) {
+    const forcedSymbol = this.getDefaultSymbolForGeometry(
+      newGraphic.geometry
+    );
+    console.log('forced symbol:', forcedSymbol);
+    newGraphic.symbol = forcedSymbol;
+  }
+
+  // THEN try to apply renderer symbol on top if available
+  const rendererSymbol = this.getSymbolForGraphic(newGraphic);
+  console.log('renderer symbol:', rendererSymbol);
+  if (rendererSymbol) {
+    newGraphic.symbol = rendererSymbol;
+  }
+  // If renderer symbol is null/undefined — keep the forced default symbol
+
+  newGraphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
+    graphic: newGraphic,
+    infoTemplate: this.infoTemplate,
+    uniqueIdPropertyName: this.uniqueIdPropertyName,
+    fallbackTitle: this.name || 'Details'
   });
 
-  this.graphicsEditor.on('create', (evt: any) => {
-    console.log('create event state:', evt.state,
-      'graphic:', evt.graphic?.geometry?.type);
+  if (!this.featureLayer.graphics.includes(newGraphic)) {
+    this.featureLayer.add(newGraphic);
+  }
 
-    if (evt.state === 'complete' && evt.graphic) {
-      console.log('DRAWING COMPLETE');
-      this.inDrawingMode = false;
-      this.blockGeoJsonUpdate = false;
-      this.addToGeojson(evt.graphic);
-      this.enableInfoPopupWindow(false);
+  this._internalUpdateId++;
+  const currentId = this._internalUpdateId;
 
-      setTimeout(() => {
-        console.log('500ms after complete - graphics count:',
-          this.featureLayer?.graphics?.length);
-        console.log('blockGeoJsonUpdate:', this.blockGeoJsonUpdate);
-      }, 500);
-
-      setTimeout(() => {
-        console.log('2000ms after complete - graphics count:',
-          this.featureLayer?.graphics?.length);
-      }, 2000);
-
-      return;
-    }
-
-    if (evt.state === 'cancel') {
-      console.log('DRAWING CANCELLED');
-      this.inDrawingMode = false;
-      this.blockGeoJsonUpdate = false;
-      return;
-    }
-
-    if (evt.state === 'active' || evt.state === 'start') {
-      console.log('DRAWING ACTIVE - keeping block');
-      this.inDrawingMode = true;
-      this.blockGeoJsonUpdate = true;
-    }
-  });
-
-  this.graphicsEditor.on('update', (evt: any) => {
-    if (evt.state === 'start') {
-      this.graphicMoved = false;
-    }
-    if (evt.toolEventInfo?.type === 'move-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'reshape-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'scale-start') this.graphicMoved = true;
-    if (evt.toolEventInfo?.type === 'rotate-start') this.graphicMoved = true;
-
-    if (evt.state === 'complete' && evt.graphics?.length) {
-      for (const graphic of evt.graphics) {
-        this.updateGeojsonWithChanges(graphic);
-      }
-      this.enableInfoPopupWindow(true);
-    }
-
-    if (evt.state === 'cancel') {
-      this.enableInfoPopupWindow(true);
-    }
-  });
-
-  // Set flags BEFORE create
-  this.inDrawingMode = true;
   this.blockGeoJsonUpdate = true;
-  this.enableInfoPopupWindow(false);
+  this.geojson = this.toFeatureCollectionFromLayer();
 
-  const tool = this.toSketchCreateTool(drawGeometryType);
-  console.log('creating sketch tool:', tool);
+  setTimeout(() => {
+    if (this._internalUpdateId === currentId) {
+      this.blockGeoJsonUpdate = false;
+    }
+  }, 2000);
 
-  // Small delay to ensure view is ready
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  this.graphicsEditor.create(tool);
-
-  console.log('graphicsEditor state after create:',
-    this.graphicsEditor.state);
+  this.refreshLabels();
+  this.emitLayerEvent(
+    'userDrawItemAdded',
+    this.graphicToGeoJsonFeature(newGraphic)
+  );
 }
