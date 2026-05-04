@@ -1,22 +1,17 @@
 import { execSync } from 'child_process';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-// -------------------------------------------------------------------------
-// CONFIGURE THESE TWO PATHS FOR YOUR SETUP
-// -------------------------------------------------------------------------
+// Go up one level to library root (since this file is in scripts/)
+const LIBRARY_ROOT = resolve(__dirname, '..');
 
-// Path to your Angular project folder
 const ANGULAR_PATH = 'C:/path/to/your/angular-project';
-
-// Name of the packed tgz file (check your library package.json for name+version)
 const TGZ_NAME = 'your-library-name-1.0.0.tgz';
 
-// -------------------------------------------------------------------------
-
-const run = (cmd, cwd = __dirname) => {
+const run = (cmd, cwd = LIBRARY_ROOT) => {
   console.log(`\n▶ ${cmd}`);
   execSync(cmd, { cwd, stdio: 'inherit' });
 };
@@ -30,12 +25,12 @@ try {
 
   console.log('\n📥 Step 3: Installing in Angular project...');
   run(
-    `npm install ${resolve(__dirname, TGZ_NAME)} --no-save`,
+    `npm install ${resolve(LIBRARY_ROOT, TGZ_NAME)} --no-save`,
     ANGULAR_PATH
   );
 
-  console.log('\n✅ Done! Go to your Angular project and refresh the browser.\n');
+  console.log('\n✅ Done! Refresh your browser.\n');
 } catch (error) {
-  console.error('\n❌ Error during dev-update:', error.message);
+  console.error('\n❌ Error:', error.message);
   process.exit(1);
 }
