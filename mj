@@ -1,36 +1,240 @@
-import { execSync } from 'child_process';
-import { resolve, dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+// ---------------------------------------------------------------------------
+// normalizePlainSymbol
+// ---------------------------------------------------------------------------
+// DIFFERENCE FROM STENCIL:
+// Stencil used FeatureLayer.renderer which handled symbol normalization
+// internally via fromJSON(). With GraphicsLayer we must normalize manually.
+//
+// This function converts ANY plain symbol object into a proper ArcGIS SDK
+// symbol instance that can be assigned directly to graphic.symbol.
+//
+// Handles ALL of these input formats:
+// 1. Old Esri REST strings: esriSFS, esriSLS, esriSMS, esriSMSCircle etc.
+// 2. New ArcGIS SDK strings: simple-fill, simple-line, simple-marker etc.
+// 3. Already-normalized SDK instances (pass-through)
+// 4. Outline symbols nested inside fill/marker symbols
+// 5. All dash/dot line styles: esriSLSDash, esriSLSDot, esriSLSDashDot etc.
+// 6. All marker styles: esriSMSCircle, esriSMSSquare, esriSMSDiamond etc.
+// ---------------------------------------------------------------------------
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+  // Already an SDK instance (has clone method) — return as-is
+  if (typeof symbol.clone === 'function') return symbol;
 
-// Go up one level to library root (since this file is in scripts/)
-const LIBRARY_ROOT = resolve(__dirname, '..');
+  const rawType = (symbol.type || '').trim();
+  const normalizedType = rawType.toLowerCase().replace(/[\s\-_]/g, '');
+  const rawStyle = (symbol.style || '').trim();
+  const normalizedStyle = rawStyle.toLowerCase().replace(/[\s\-_]/g, '');
 
-const ANGULAR_PATH = 'C:/path/to/your/angular-project';
-const TGZ_NAME = 'your-library-name-1.0.0.tgz';
+  // -------------------------------------------------------------------------
+  // Line style map — covers ALL Esri REST and SDK strings
+  // -------------------------------------------------------------------------
+  const lineStyleMap: Record<string, string> = {
+    // solid
+    'solid': 'solid',
+    'esrislssolid': 'solid',
+    // dash
+    'dash': 'dash',
+    'esrislsdash': 'dash',
+    // dot
+    'dot': 'dot',
+    'esrislsdot': 'dot',
+    // dash-dot
+    'dashdot': 'dash-dot',
+    'esrislsdashdot': 'dash-dot',
+    'dashdotdot': 'dash-dot',
+    'esrislsdashdotdot': 'dash-dot',
+    // long-dash
+    'longdash': 'long-dash',
+    'esrislslongdash': 'long-dash',
+    'longdashdot': 'long-dash-dot',
+    'esrislslongdashdot': 'long-dash-dot',
+    // short-dash
+    'shortdash': 'short-dash',
+    'esrislsshortdash': 'short-dash',
+    'shortdashdot': 'short-dash-dot',
+    'esrislsshortdashdot': 'short-dash-dot',
+    'shortdashdotdot': 'short-dash-dot-dot',
+    'esrislsshortdashdotdot': 'short-dash-dot-dot',
+    // short-dot
+    'shortdot': 'short-dot',
+    'esrislsshortdot': 'short-dot',
+    // none / null
+    'none': 'none',
+    'esrislsnull': 'none',
+    'null': 'none'
+  };
 
-const run = (cmd, cwd = LIBRARY_ROOT) => {
-  console.log(`\n▶ ${cmd}`);
-  execSync(cmd, { cwd, stdio: 'inherit' });
-};
+  // -------------------------------------------------------------------------
+  // Marker style map — covers ALL Esri REST and SDK strings including typos
+  // -------------------------------------------------------------------------
+  const markerStyleMap: Record<string, string> = {
+    // circle — also handles common typo 'esrismsCirlce'
+    'circle': 'circle',
+    'esrismscircle': 'circle',
+    'esrismscirlce': 'circle',   // common typo in old Stencil code
+    // square
+    'square': 'square',
+    'esrismssquare': 'square',
+    // diamond
+    'diamond': 'diamond',
+    'esrismsdiamond': 'diamond',
+    // triangle
+    'triangle': 'triangle',
+    'esrismstriangle': 'triangle',
+    // cross
+    'cross': 'cross',
+    'esrismscross': 'cross',
+    // x
+    'x': 'x',
+    'esrismsx': 'x',
+    // path
+    'path': 'path',
+    'esrismspath': 'path'
+  };
 
-try {
-  console.log('\n🔨 Step 1: Building library...');
-  run('npm run build');
+  // -------------------------------------------------------------------------
+  // Fill style map
+  // -------------------------------------------------------------------------
+  const fillStyleMap: Record<string, string> = {
+    'solid': 'solid',
+    'esrisfssolid': 'solid',
+    'null': 'none',
+    'esrisfsnull': 'none',
+    'none': 'none',
+    'horizontal': 'horizontal',
+    'esrisfshorizontal': 'horizontal',
+    'vertical': 'vertical',
+    'esrisfsvertical': 'vertical',
+    'forwarddiagonal': 'forward-diagonal',
+    'esrisfsforwarddiagonal': 'forward-diagonal',
+    'backwarddiagonal': 'backward-diagonal',
+    'esrisfsbackwarddiagonal': 'backward-diagonal',
+    'cross': 'cross',
+    'esrisfscross': 'cross',
+    'diagonalcross': 'diagonal-cross',
+    'esrisfsdiagonalcross': 'diagonal-cross'
+  };
 
-  console.log('\n📦 Step 2: Packing library...');
-  run('npm pack');
+  // -------------------------------------------------------------------------
+  // Type detection — handles BOTH old Esri REST and new SDK strings
+  // -------------------------------------------------------------------------
 
-  console.log('\n📥 Step 3: Installing in Angular project...');
-  run(
-    `npm install ${resolve(LIBRARY_ROOT, TGZ_NAME)} --no-save`,
-    ANGULAR_PATH
+  // Point / Marker
+  const isPoint =
+    normalizedType === 'esrisms' ||
+    normalizedType === 'esrismscircle' ||
+    normalizedType === 'esrismscirlce' ||   // typo
+    normalizedType === 'simplemarker' ||
+    normalizedType === 'simplemarkersymbol' ||
+    normalizedType === 'point' ||
+    normalizedType === 'marker';
+
+  // Line
+  const isLine =
+    normalizedType === 'esrisls' ||
+    normalizedType === 'esrislssolid' ||
+    normalizedType === 'simpleline' ||
+    normalizedType === 'simplelinesymbol' ||
+    normalizedType === 'polyline' ||
+    normalizedType === 'line';
+
+  // Fill / Polygon
+  const isFill =
+    normalizedType === 'esrisfs' ||
+    normalizedType === 'esrisfssolid' ||
+    normalizedType === 'simplefill' ||
+    normalizedType === 'simplefillsymbol' ||
+    normalizedType === 'polygon' ||
+    normalizedType === 'fill';
+
+  // -------------------------------------------------------------------------
+  // buildOutline — always returns a SimpleLineSymbol
+  // Used for outlines inside fill symbols and marker symbols
+  // -------------------------------------------------------------------------
+  const buildOutline = (outlineObj: any): SimpleLineSymbol => {
+    if (!outlineObj) {
+      return new SimpleLineSymbol({
+        color: [0, 0, 0, 255],
+        width: 1,
+        style: 'solid'
+      });
+    }
+
+    const outlineRawStyle = (outlineObj.style || 'solid').trim();
+    const outlineNormStyle = outlineRawStyle.toLowerCase()
+      .replace(/[\s\-_]/g, '');
+    const mappedStyle = lineStyleMap[outlineNormStyle] ?? 'solid';
+
+    // Handle nested outline that itself has a type (some old Esri JSON has this)
+    // We ignore the nested type and just use SimpleLineSymbol always
+    return new SimpleLineSymbol({
+      color: outlineObj.color ?? [0, 0, 0, 255],
+      width: outlineObj.width ?? 1,
+      style: mappedStyle as any
+    });
+  };
+
+  // -------------------------------------------------------------------------
+  // Build Point / Marker symbol
+  // -------------------------------------------------------------------------
+  if (isPoint) {
+    const markerStyle = markerStyleMap[normalizedStyle] ?? 'circle';
+    return new SimpleMarkerSymbol({
+      style: markerStyle as any,
+      color: symbol.color,
+      size: symbol.size ?? 10,
+      angle: symbol.angle ?? 0,
+      xoffset: symbol.xoffset ?? 0,
+      yoffset: symbol.yoffset ?? 0,
+      outline: symbol.outline
+        ? buildOutline(symbol.outline)
+        : new SimpleLineSymbol({
+            color: [0, 0, 0, 255],
+            width: 1,
+            style: 'solid'
+          })
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Build Line symbol
+  // -------------------------------------------------------------------------
+  if (isLine) {
+    const lineStyle = lineStyleMap[normalizedStyle] ?? 'solid';
+    return new SimpleLineSymbol({
+      style: lineStyle as any,
+      color: symbol.color,
+      width: symbol.width ?? 1
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Build Fill symbol
+  // -------------------------------------------------------------------------
+  if (isFill) {
+    const fillStyle = fillStyleMap[normalizedStyle] ?? 'solid';
+    return new SimpleFillSymbol({
+      style: fillStyle as any,
+      color: symbol.color,
+      outline: symbol.outline
+        ? buildOutline(symbol.outline)
+        : new SimpleLineSymbol({
+            color: [110, 110, 110, 255],
+            width: 1,
+            style: 'solid'
+          })
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Unknown type — log warning and return as-is
+  // -------------------------------------------------------------------------
+  console.warn(
+    '[JsonUtils] normalizePlainSymbol: unknown symbol type:',
+    rawType,
+    '— returning as-is. Add handling for this type if needed.'
   );
-
-  console.log('\n✅ Done! Refresh your browser.\n');
-} catch (error) {
-  console.error('\n❌ Error:', error.message);
-  process.exit(1);
+  return symbol;
 }
