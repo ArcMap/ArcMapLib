@@ -63,6 +63,16 @@ enum DrawGeometryTypes {
 @customElement('arc-geojson-layer')
 export class ArcGeojsonLayer extends LitElement {
 
+  // Ready promise — mirrors Stencil's componentOnReady() pattern
+  private _resolveReady!: () => void;
+  private _readyPromise: Promise<void> = new Promise(
+    resolve => (this._resolveReady = resolve)
+  );
+
+  async componentOnReady(): Promise<void> {
+    return this._readyPromise;
+  }
+
   private graphicsEditor!: SketchViewModel;
   private ancestorMap!: any;
   private readonly DEFAULT_SYMBOL_COLOR: number[] = ArcGeojsonLayer.getRandomColor();
@@ -154,9 +164,17 @@ export class ArcGeojsonLayer extends LitElement {
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
-    await this.resolveAncestorMapAndView();
-    this.createLayer(this.geojson);
-    this.bindViewEvents();
+    try {
+      await this.resolveAncestorMapAndView();
+      await this.createLayer(this.geojson);
+      this.bindViewEvents();
+      // Signal ready — Angular can now call startDrawing etc.
+      this._resolveReady();
+    } catch (e) {
+      console.error('arc-geojson-layer connectedCallback error:', e);
+      // Still resolve so Angular doesn't hang forever
+      this._resolveReady();
+    }
   }
 
   disconnectedCallback(): void {
@@ -175,6 +193,11 @@ export class ArcGeojsonLayer extends LitElement {
       if (this.featureLayer) this.view.map.remove(this.featureLayer);
       if (this.labelLayer) this.view.map.remove(this.labelLayer);
     }
+
+    // Reset ready promise for reconnection
+    this._readyPromise = new Promise(
+      resolve => (this._resolveReady = resolve)
+    );
   }
 
   protected updated(changedProps: Map<string, unknown>): void {
@@ -218,7 +241,9 @@ export class ArcGeojsonLayer extends LitElement {
     this.ancestorMap = this.closest('arc-map') as any;
 
     if (!this.ancestorMap) {
-      throw new Error('arc-geojson-layer must be a descendant of an <arc-map> element');
+      throw new Error(
+        'arc-geojson-layer must be a descendant of an <arc-map> element'
+      );
     }
 
     if (typeof this.ancestorMap.componentOnReady === 'function') {
@@ -232,16 +257,23 @@ export class ArcGeojsonLayer extends LitElement {
     this.view = await this.ancestorMap.getViewInstance();
 
     if (!this.view) {
-      throw new Error('ancestor arc-map getViewInstance() returned undefined');
+      throw new Error(
+        'ancestor arc-map getViewInstance() returned undefined'
+      );
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Layer creation
+  // Layer creation — async so createEditor is properly awaited
   // ---------------------------------------------------------------------------
 
-  private createLayer(geojson: string | FeatureCollection): void {
-    const parsedGeojson = geojson ?? { type: 'FeatureCollection', features: [] };
+  private async createLayer(
+    geojson: string | FeatureCollection
+  ): Promise<void> {
+    const parsedGeojson = geojson ?? {
+      type: 'FeatureCollection',
+      features: []
+    };
 
     this.featureLayer = new GraphicsLayer({
       id: `${this.id || 'arc-geojson-layer'}-graphics`,
@@ -269,7 +301,9 @@ export class ArcGeojsonLayer extends LitElement {
     this.refreshLabels();
     this.updateInfoTemplate(this.infoTemplate);
     this.updateLayerClass(this.layerClass);
-    this.createEditor();
+
+    // Must await so graphicsEditor exists before componentOnReady resolves
+    await this.createEditor();
 
     this.blockGeoJsonUpdate = true;
     this.geojson = this.toFeatureCollectionFromLayer();
@@ -438,15 +472,14 @@ export class ArcGeojsonLayer extends LitElement {
   // GeoJSON update
   // ---------------------------------------------------------------------------
 
-  async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
-    // If block is active — skip entirely
-    // This handles both direct blockGeoJsonUpdate flag
-    // AND the async NgRx echo from Angular
+  async updateGeojson(
+    newGeojson: string | FeatureCollection
+  ): Promise<void> {
     if (this.blockGeoJsonUpdate) return;
     if (this.enableUserEdit || this.inDrawingMode || this.removingItem) return;
 
     if (!this.featureLayer) {
-      this.createLayer(newGeojson);
+      await this.createLayer(newGeojson);
       return;
     }
 
@@ -509,7 +542,6 @@ export class ArcGeojsonLayer extends LitElement {
   // ---------------------------------------------------------------------------
 
   updateRenderer(newRenderer: any): void {
-    // Only overwrite stored renderer if something real is passed
     if (newRenderer !== undefined && newRenderer !== null) {
       this.renderer = newRenderer;
     }
@@ -520,7 +552,9 @@ export class ArcGeojsonLayer extends LitElement {
     if (!rendererToUse) {
       this.featureLayer.graphics.forEach((graphic: Graphic) => {
         if (graphic.geometry) {
-          graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+          graphic.symbol = this.getDefaultSymbolForGeometry(
+            graphic.geometry
+          );
         }
       });
       return;
@@ -530,7 +564,9 @@ export class ArcGeojsonLayer extends LitElement {
     if (!parsed.parsedJson) {
       this.featureLayer.graphics.forEach((graphic: Graphic) => {
         if (graphic.geometry) {
-          graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+          graphic.symbol = this.getDefaultSymbolForGeometry(
+            graphic.geometry
+          );
         }
       });
       return;
@@ -543,25 +579,31 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
-  // Drawing
+  // Drawing — public methods Angular calls
   // ---------------------------------------------------------------------------
 
   async startDrawing(drawGeometryType: string): Promise<void> {
     if (!this.featureLayer || !this.view) return;
+    if (!this.graphicsEditor) {
+      console.error('arc-geojson-layer: graphicsEditor not ready');
+      return;
+    }
 
     const existingType = this.determineExistingGeometryType();
     if (
       existingType &&
       !this.validGeometryType(drawGeometryType, existingType)
-    )
-      return;
+    ) return;
 
     this.inDrawingMode = true;
     this.enableInfoPopupWindow(false);
-    this.graphicsEditor.create(this.toSketchCreateTool(drawGeometryType));
+    this.graphicsEditor.create(
+      this.toSketchCreateTool(drawGeometryType)
+    );
   }
 
   async cancelDrawing(): Promise<void> {
+    if (!this.graphicsEditor) return;
     this.inDrawingMode = false;
     this.graphicsEditor.cancel();
     this.enableInfoPopupWindow(true);
@@ -616,7 +658,8 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   enableInfoPopupWindow(enable: boolean): void {
-    const enablePopup = enable && !this.enableUserEdit && !this.inDrawingMode;
+    const enablePopup =
+      enable && !this.enableUserEdit && !this.inDrawingMode;
     if (!enablePopup && this.view?.popup?.visible) {
       this.view.popup.close();
     }
@@ -624,6 +667,7 @@ export class ArcGeojsonLayer extends LitElement {
 
   async activateGraphicsEditor(graphic: Graphic): Promise<void> {
     if (!this.enableUserEdit) return;
+    if (!this.graphicsEditor) return;
 
     this.enableInfoPopupWindow(false);
 
@@ -651,12 +695,12 @@ export class ArcGeojsonLayer extends LitElement {
       if (parsed.parsedJson) {
         const config = parsed.parsedJson;
 
-        // Simple renderer — one symbol for all graphics
+        // Simple renderer
         if (config.type === 'simple' && config.symbol) {
           return JsonUtils.normalizePlainSymbol(config.symbol);
         }
 
-        // UniqueValue renderer — match by geometry type
+        // UniqueValue renderer
         if (
           Array.isArray(config.uniqueValueInfos) &&
           config.uniqueValueInfos.length
@@ -686,7 +730,6 @@ export class ArcGeojsonLayer extends LitElement {
                 symType === 'simplelinesymbol'
               );
             }
-            // Point
             return (
               symType === 'esrisms' ||
               symType === 'esrismscirlce' ||
@@ -702,14 +745,12 @@ export class ArcGeojsonLayer extends LitElement {
           }
         }
 
-        // defaultSymbol inside renderer
         if (config.defaultSymbol) {
           return JsonUtils.normalizePlainSymbol(config.defaultSymbol);
         }
       }
     }
 
-    // No renderer — geometry default
     return this.getDefaultSymbolForGeometry(graphic.geometry);
   }
 
@@ -721,20 +762,26 @@ export class ArcGeojsonLayer extends LitElement {
     geojson: string | object
   ): { graphics: Graphic[]; geometryType?: string } | null {
     const result = ArcGeojsonLayer.parseJson<FeatureCollection>(geojson);
-    if (!result.parsedJson || result.parsedJson.type !== 'FeatureCollection')
+    if (
+      !result.parsedJson ||
+      result.parsedJson.type !== 'FeatureCollection'
+    )
       return null;
 
     const graphics: Graphic[] = [];
     let geometryType: string | undefined;
 
-    result.parsedJson.features.forEach((feature: Feature, index: number) => {
-      const graphic = this.geojsonFeatureToGraphic(feature, index);
-      if (graphic) {
-        if (!graphic.geometry) return;
-        if (geometryType === undefined) geometryType = graphic.geometry.type;
-        graphics.push(graphic);
+    result.parsedJson.features.forEach(
+      (feature: Feature, index: number) => {
+        const graphic = this.geojsonFeatureToGraphic(feature, index);
+        if (graphic) {
+          if (!graphic.geometry) return;
+          if (geometryType === undefined)
+            geometryType = graphic.geometry.type;
+          graphics.push(graphic);
+        }
       }
-    });
+    );
 
     return { graphics, geometryType };
   }
@@ -757,7 +804,6 @@ export class ArcGeojsonLayer extends LitElement {
       symbol: this.getDefaultSymbolForGeometry(geometry)
     });
 
-    // Apply renderer symbol after graphic is constructed
     graphic.symbol = this.getSymbolForGraphic(graphic);
 
     graphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
@@ -862,7 +908,7 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
-  // addToGeojson — with setTimeout to block NgRx echo
+  // addToGeojson — setTimeout blocks NgRx echo
   // ---------------------------------------------------------------------------
 
   private addToGeojson(newGraphic: Graphic): void {
@@ -875,7 +921,6 @@ export class ArcGeojsonLayer extends LitElement {
       newGraphic.attributes.OBJECTID = Date.now();
     }
 
-    // Use getSymbolForGraphic — respects renderer if set
     newGraphic.symbol = this.getSymbolForGraphic(newGraphic);
 
     newGraphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
@@ -889,15 +934,12 @@ export class ArcGeojsonLayer extends LitElement {
       this.featureLayer.add(newGraphic);
     }
 
-    // Increment update id and capture current value
     this._internalUpdateId++;
     const currentId = this._internalUpdateId;
 
-    // Block geojson updates
     this.blockGeoJsonUpdate = true;
     this.geojson = this.toFeatureCollectionFromLayer();
 
-    // Keep block active long enough for Angular NgRx echo to arrive and be blocked
     setTimeout(() => {
       if (this._internalUpdateId === currentId) {
         this.blockGeoJsonUpdate = false;
@@ -912,7 +954,7 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
-  // removeFromGeojson — with setTimeout to block NgRx echo
+  // removeFromGeojson — setTimeout blocks NgRx echo
   // ---------------------------------------------------------------------------
 
   private removeFromGeojson(graphicToRemove: Graphic): void {
@@ -938,16 +980,17 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
-  // updateGeojsonWithChanges — with setTimeout to block NgRx echo
+  // updateGeojsonWithChanges — setTimeout blocks NgRx echo
   // ---------------------------------------------------------------------------
 
   private updateGeojsonWithChanges(graphicToUpdate: Graphic): void {
-    graphicToUpdate.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
-      graphic: graphicToUpdate,
-      infoTemplate: this.infoTemplate,
-      uniqueIdPropertyName: this.uniqueIdPropertyName,
-      fallbackTitle: this.name || 'Details'
-    });
+    graphicToUpdate.popupTemplate =
+      JsonUtils.buildPopupTemplateFromCurrent({
+        graphic: graphicToUpdate,
+        infoTemplate: this.infoTemplate,
+        uniqueIdPropertyName: this.uniqueIdPropertyName,
+        fallbackTitle: this.name || 'Details'
+      });
 
     this._internalUpdateId++;
     const currentId = this._internalUpdateId;
@@ -1046,7 +1089,8 @@ export class ArcGeojsonLayer extends LitElement {
         new Graphic({
           geometry: labelPoint,
           attributes: {
-            __labelFor: graphic.attributes?.[this.uniqueIdPropertyName]
+            __labelFor:
+              graphic.attributes?.[this.uniqueIdPropertyName]
           },
           symbol: new TextSymbol({
             text: String(label),
