@@ -24,25 +24,7 @@ import type {
 import JsonUtils from '../common/json-utils';
 import { InfoTemplateDetails } from '../external-api';
 
-// ---------------------------------------------------------------------------
-// DIFFERENCE FROM STENCIL:
-// In Stencil, @Watch('geojson') fired SYNCHRONOUSLY in the same call stack.
-// So blockGeoJsonUpdate = true → this.geojson = x → @Watch fires → checks
-// blockGeoJsonUpdate → true → returns → blockGeoJsonUpdate = false worked fine.
-//
-// In LitElement, updated() fires ASYNCHRONOUSLY after the render microtask.
-// By the time updated() fires, blockGeoJsonUpdate is already false again.
-//
-// FIX: We use a JavaScript Symbol to tag FeatureCollections we set internally.
-// The Symbol is non-enumerable so JSON.stringify (used by NgRx) strips it.
-// When Angular echoes the value back through NgRx, the tag is gone.
-// We can then reliably tell our own updates apart from Angular's updates.
-// ---------------------------------------------------------------------------
 const INTERNAL_GEOJSON_TAG = Symbol('arc-geojson-internal');
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 type LayerMouseEvent = {
   coordinates: { latitude: number; longitude: number };
@@ -53,7 +35,6 @@ type JsonParseResult<T = any> =
   | { parsedJson: T; error?: never }
   | { error: Error; parsedJson?: never };
 
-// SAME AS STENCIL — draw geometry types enum preserved exactly
 enum DrawGeometryTypes {
   FREEHAND_POLYLINE = 'FREEHAND_POLYLINE',
   LINE = 'LINE',
@@ -74,21 +55,9 @@ enum DrawGeometryTypes {
   UP_ARROW = 'UP_ARROW'
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 @customElement('arc-geojson-layer')
 export class ArcGeojsonLayer extends LitElement {
 
-  // -------------------------------------------------------------------------
-  // DIFFERENCE FROM STENCIL:
-  // Stencil components expose componentOnReady() automatically.
-  // LitElement does not have this. Angular projects that used the Stencil
-  // version call `await element.componentOnReady()` before calling
-  // startDrawing() or other methods. We must implement it manually
-  // using a Promise that resolves when connectedCallback finishes.
-  // -------------------------------------------------------------------------
   private _resolveReady!: () => void;
   private _readyPromise: Promise<void> = new Promise(
     resolve => (this._resolveReady = resolve)
@@ -97,15 +66,8 @@ export class ArcGeojsonLayer extends LitElement {
     return this._readyPromise;
   }
 
-  // -------------------------------------------------------------------------
-  // Private fields — same as Stencil private vars
-  // -------------------------------------------------------------------------
   private graphicsEditor!: SketchViewModel;
   private ancestorMap!: any;
-
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used a static DEFAULT_SYMBOL_COLOR on the class.
-  // We use a per-instance random color so multiple layers get different colors.
   private readonly DEFAULT_SYMBOL_COLOR: number[] =
     ArcGeojsonLayer.getRandomColor();
 
@@ -116,18 +78,11 @@ export class ArcGeojsonLayer extends LitElement {
   private labelLayer!: GraphicsLayer;
   private view!: MapView;
 
-  // SAME AS STENCIL — these flags exist in the Stencil version too
   private inDrawingMode = false;
   private removingItem = false;
   private graphicMoved = false;
   private hoveredGraphicUid: string | number | undefined;
   private eventHandles: Array<{ remove: () => void }> = [];
-
-  // -------------------------------------------------------------------------
-  // Properties — all same as Stencil @Prop() declarations
-  // DIFFERENCE: @Prop() → @property()
-  //             reflect: true → same behavior with attribute option
-  // -------------------------------------------------------------------------
 
   @property({ type: Boolean, attribute: 'enable-user-edit' })
   enableUserEdit = false;
@@ -186,44 +141,23 @@ export class ArcGeojsonLayer extends LitElement {
   @property({ attribute: 'unique-id-property-name' })
   uniqueIdPropertyName = 'id';
 
-  // -------------------------------------------------------------------------
-  // LitElement overrides
-  // DIFFERENCE FROM STENCIL:
-  // Stencil renders into a shadow DOM slot automatically.
-  // We return `this` as renderRoot so the component has no shadow DOM,
-  // matching the Stencil behavior of rendering directly into the element.
-  // render() returns null because this component has no visual template —
-  // it only creates ArcGIS layers programmatically, same as Stencil.
-  // -------------------------------------------------------------------------
   protected createRenderRoot(): this { return this; }
   render() { return null; }
 
-  // -------------------------------------------------------------------------
-  // Lifecycle
-  // DIFFERENCE FROM STENCIL:
-  // Stencil: componentDidLoad() — fires once after first render
-  // LitElement: connectedCallback() — fires when element added to DOM
-  // We await map resolution and layer creation here, then resolve the
-  // componentOnReady() promise so Angular knows the component is ready.
-  // -------------------------------------------------------------------------
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
     try {
       await this.resolveAncestorMapAndView();
       await this.createLayer(this.geojson);
       this.bindViewEvents();
-      // Signal ready — Angular can now safely call startDrawing() etc.
       this._resolveReady();
+      console.log('[arc-geojson-layer] componentOnReady resolved');
     } catch (e) {
-      console.error('arc-geojson-layer connectedCallback error:', e);
-      // Always resolve so Angular does not hang on componentOnReady()
+      console.error('[arc-geojson-layer] connectedCallback error:', e);
       this._resolveReady();
     }
   }
 
-  // DIFFERENCE FROM STENCIL:
-  // Stencil: disconnectedCallback() / componentDidUnload()
-  // LitElement: disconnectedCallback() — same concept, different name
   disconnectedCallback(): void {
     super.disconnectedCallback();
     for (const h of this.eventHandles) { if (h) h.remove(); }
@@ -235,16 +169,11 @@ export class ArcGeojsonLayer extends LitElement {
       if (this.featureLayer) this.view.map.remove(this.featureLayer);
       if (this.labelLayer) this.view.map.remove(this.labelLayer);
     }
-    // Reset ready promise for reconnection
     this._readyPromise = new Promise(
       resolve => (this._resolveReady = resolve)
     );
   }
 
-  // DIFFERENCE FROM STENCIL:
-  // Stencil: @Watch('propName') watchHandler() — individual property watchers
-  // LitElement: updated(changedProps) — single method for all property changes
-  // We manually check which props changed using changedProps.has()
   protected updated(changedProps: Map<string, unknown>): void {
     if (changedProps.has('geojson')) {
       this.updateGeojson(this.geojson);
@@ -274,21 +203,15 @@ export class ArcGeojsonLayer extends LitElement {
       changedProps.has('enableUserEditAddVertices') ||
       changedProps.has('enableUserEditDeleteVertices')
     ) {
+      console.log('[arc-geojson-layer] updateEditing called, enableUserEdit:', this.enableUserEdit);
       this.updateEditing(this.enableUserEdit);
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Internal geojson Symbol tagging
-  // DIFFERENCE FROM STENCIL:
-  // Not needed in Stencil because @Watch is synchronous.
-  // In LitElement we need this to distinguish our own geojson updates
-  // from external Angular/NgRx geojson updates. See comment at top of file.
-  // -------------------------------------------------------------------------
   private tagAsInternal(fc: FeatureCollection): FeatureCollection {
     Object.defineProperty(fc, INTERNAL_GEOJSON_TAG, {
       value: true,
-      enumerable: false,  // invisible to JSON.stringify — NgRx strips it
+      enumerable: false,
       configurable: true,
       writable: false
     });
@@ -303,16 +226,10 @@ export class ArcGeojsonLayer extends LitElement {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Map / view resolution
-  // SAME AS STENCIL — finds ancestor arc-map and gets view instance
-  // -------------------------------------------------------------------------
   private async resolveAncestorMapAndView(): Promise<void> {
     this.ancestorMap = this.closest('arc-map') as any;
     if (!this.ancestorMap) {
-      throw new Error(
-        'arc-geojson-layer must be a descendant of an <arc-map> element'
-      );
+      throw new Error('arc-geojson-layer must be a descendant of an <arc-map> element');
     }
     if (typeof this.ancestorMap.componentOnReady === 'function') {
       await this.ancestorMap.componentOnReady();
@@ -326,22 +243,8 @@ export class ArcGeojsonLayer extends LitElement {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Layer creation
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used FeatureLayer with applyEdits().
-  // We use GraphicsLayer because ArcGIS SDK 5.x FeatureLayer no longer
-  // supports client-side GeoJSON editing via applyEdits in the same way.
-  // GraphicsLayer gives us full control over graphics lifecycle.
-  // createEditor() is awaited so SketchViewModel exists before
-  // componentOnReady() resolves.
-  // -------------------------------------------------------------------------
-  private async createLayer(
-    geojson: string | FeatureCollection
-  ): Promise<void> {
-    const parsedGeojson = geojson ?? {
-      type: 'FeatureCollection', features: []
-    };
+  private async createLayer(geojson: string | FeatureCollection): Promise<void> {
+    const parsedGeojson = geojson ?? { type: 'FeatureCollection', features: [] };
 
     this.featureLayer = new GraphicsLayer({
       id: `${this.id || 'arc-geojson-layer'}-graphics`,
@@ -368,23 +271,11 @@ export class ArcGeojsonLayer extends LitElement {
     this.refreshLabels();
     this.updateInfoTemplate(this.infoTemplate);
     this.updateLayerClass(this.layerClass);
-
-    // Must await — SketchViewModel must exist before componentOnReady resolves
     await this.createEditor();
 
-    // Tag as internal so LitElement updated() ignores this initial set
     this.geojson = this.tagAsInternal(this.toFeatureCollectionFromLayer());
   }
 
-  // -------------------------------------------------------------------------
-  // Editor (SketchViewModel)
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used Draw widget for drawing + Edit widget for editing.
-  // ArcGIS SDK 5.x consolidated these into SketchViewModel.
-  // We recreate SketchViewModel fresh on each startDrawing() call to
-  // avoid stale state — this mirrors how the Stencil Draw widget worked
-  // (it was created fresh each time startDrawing was called).
-  // -------------------------------------------------------------------------
   private async createEditor(): Promise<void> {
     if (this.graphicsEditor) {
       try { this.graphicsEditor.destroy(); } catch { }
@@ -404,17 +295,25 @@ export class ArcGeojsonLayer extends LitElement {
     });
 
     this.graphicsEditor.on('create', (evt: any) => {
+      // DIAGNOSTIC LOG — remove after debugging
+      console.log('[arc-geojson-layer] CREATE EVENT state:', evt.state,
+        'geomType:', evt.graphic?.geometry?.type);
+
       if (evt.state === 'complete' && evt.graphic) {
+        console.log('[arc-geojson-layer] DRAWING COMPLETE - graphics before add:',
+          this.featureLayer.graphics.length);
         this.inDrawingMode = false;
         this.addToGeojson(evt.graphic);
+        console.log('[arc-geojson-layer] DRAWING COMPLETE - graphics after add:',
+          this.featureLayer.graphics.length);
         this.enableInfoPopupWindow(false);
         return;
       }
       if (evt.state === 'cancel') {
+        console.log('[arc-geojson-layer] DRAWING CANCELLED');
         this.inDrawingMode = false;
         return;
       }
-      // Keep inDrawingMode true during active drawing
       if (evt.state === 'active' || evt.state === 'start') {
         this.inDrawingMode = true;
       }
@@ -437,10 +336,6 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // View events — click, double-click, pointer-move
-  // SAME AS STENCIL — same events, same behavior
-  // -------------------------------------------------------------------------
   private bindViewEvents(): void {
     const clickHandle = this.view.on('click', async (evt: any) => {
       const hit = await this.view.hitTest(evt);
@@ -448,10 +343,7 @@ export class ArcGeojsonLayer extends LitElement {
       if (!graphic) return;
 
       if (this.enableUserEdit) {
-        if (
-          (evt.native?.ctrlKey || evt.native?.metaKey) &&
-          this.enableUserEditRemove
-        ) {
+        if ((evt.native?.ctrlKey || evt.native?.metaKey) && this.enableUserEditRemove) {
           this.removingItem = true;
           this.removeFromGeojson(graphic);
           this.graphicsEditor.cancel();
@@ -463,8 +355,6 @@ export class ArcGeojsonLayer extends LitElement {
       }
 
       this.emitLayerEvent('layerClick', this.buildMouseEvent(graphic, evt.mapPoint));
-
-      // Only show popup when NOT drawing and NOT editing
       if (!this.inDrawingMode) {
         this.showGraphicPopup(graphic, evt.mapPoint);
       }
@@ -476,7 +366,6 @@ export class ArcGeojsonLayer extends LitElement {
       if (!graphic) return;
 
       this.emitLayerEvent('doubleClick', this.buildMouseEvent(graphic, evt.mapPoint));
-
       if (this.enableUserEdit) {
         await this.activateGraphicsEditor(graphic);
         return;
@@ -504,49 +393,29 @@ export class ArcGeojsonLayer extends LitElement {
       const uid = this.getGraphicUniqueId(graphic);
       if (this.hoveredGraphicUid !== uid) {
         if (this.hoveredGraphicUid !== undefined) {
-          this.emitLayerEvent(
-            'layerMouseOut',
-            this.buildMouseEvent(graphic, evt.mapPoint)
-          );
+          this.emitLayerEvent('layerMouseOut', this.buildMouseEvent(graphic, evt.mapPoint));
         }
         this.hoveredGraphicUid = uid;
-        this.emitLayerEvent(
-          'layerMouseOver',
-          this.buildMouseEvent(graphic, evt.mapPoint)
-        );
+        this.emitLayerEvent('layerMouseOver', this.buildMouseEvent(graphic, evt.mapPoint));
       }
     });
 
     this.eventHandles.push(clickHandle, dblClickHandle, pointerMoveHandle);
   }
 
-  // -------------------------------------------------------------------------
-  // updateEditing
-  // DIFFERENCE FROM STENCIL — FIX 1:
-  // The old Stencil code called graphicsEditor.cancel() unconditionally
-  // whenever enableUserEdit changed. In Angular, after drawing completes,
-  // Angular sets enableUserEdit=true (to enter edit mode). This triggered
-  // cancel() which destroyed the just-drawn graphic.
-  //
-  // FIX: Only cancel if state is 'active' (mid-edit session).
-  // After drawing completes, SketchViewModel state returns to 'ready'.
-  // We must NOT cancel 'ready' state — that would erase the drawn graphic.
-  // -------------------------------------------------------------------------
   async updateEditing(_newUserEnableEdit: boolean): Promise<void> {
-    // FIXED: Only cancel if actively editing, NOT after draw completes
-    // In Stencil this was unconditional — caused drawn shapes to disappear
+    // FIX: Only cancel if actively editing — NOT after draw completes
+    // Stencil cancelled unconditionally which destroyed just-drawn graphics
     // when Angular set enableUserEdit=true in onAddGeojsonLayer handler
     if (this.graphicsEditor?.state === 'active') {
       try { this.graphicsEditor.cancel(); } catch { }
     }
 
     if (_newUserEnableEdit) {
-      // Hide popups when edit mode is enabled
       this.featureLayer.graphics.forEach((g: Graphic) => {
         g.popupTemplate = null as unknown as never;
       });
     } else {
-      // Restore popups when edit mode is disabled
       this.featureLayer.graphics.forEach((g: Graphic) => {
         g.popupTemplate = this.buildPopupTemplateFromCurrent(g);
       });
@@ -555,54 +424,63 @@ export class ArcGeojsonLayer extends LitElement {
     this.enableInfoPopupWindow(!_newUserEnableEdit && !this.inDrawingMode);
   }
 
-  // -------------------------------------------------------------------------
-  // updateGeojson — the core geojson update handler
-  // DIFFERENCE FROM STENCIL — FIX 2 + extra guards:
-  //
-  // Stencil @Watch('geojson') _onGeojsonChanged():
-  //   if (blockGeoJsonUpdate) return;           → synchronous, worked fine
-  //   if (inDrawingMode) return;
-  //
-  // LitElement updated() is async. blockGeoJsonUpdate is already false
-  // by the time updated() fires. We need multiple smarter guards:
-  //
-  // Guard 1: Symbol tag — detects our own internal sets (replaces blockGeoJsonUpdate)
-  // Guard 2: inDrawingMode — same as Stencil
-  // Guard 3: enableUserEdit — SAME AS STENCIL. When Angular sets enableUserEdit=true
-  //          after drawing, any geojson push must be ignored. The old Stencil code
-  //          had this same guard. It was accidentally removed in our LitElement port.
-  // Guard 4: incomingCount < currentCount — catches NgRx stale echo
-  // -------------------------------------------------------------------------
-  async updateGeojson(
-    newGeojson: string | FeatureCollection
-  ): Promise<void> {
-    // Guard 1: Skip our own internal update (replaces Stencil's blockGeoJsonUpdate)
-    if (this.isInternalGeojson(newGeojson)) return;
+  async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
+    // DIAGNOSTIC LOGS — remove after debugging
+    const isInternal = this.isInternalGeojson(newGeojson);
+    const incomingCount = typeof newGeojson === 'object' && newGeojson !== null
+      ? (newGeojson as FeatureCollection).features?.length ?? 0
+      : -1;
+    const currentCount = this.featureLayer?.graphics?.length ?? 0;
 
-    // Guard 2: Skip during active drawing
-    if (this.inDrawingMode || this.removingItem) return;
+    console.log('[arc-geojson-layer] updateGeojson called:', {
+      isInternal,
+      inDrawingMode: this.inDrawingMode,
+      removingItem: this.removingItem,
+      enableUserEdit: this.enableUserEdit,
+      incomingCount,
+      currentCount
+    });
 
-    // Guard 3: Skip when edit mode is active
-    // IMPORTANT: This matches the original Stencil _onGeojsonChanged guard.
-    // When Angular sets enableUserEdit=true after drawing completes,
-    // any incoming geojson push is stale. We must not process it or the
-    // drawn shape will be cleared from the layer.
-    if (this.enableUserEdit) return;
+    // Guard 1: Skip our own internal update
+    if (isInternal) {
+      console.log('[arc-geojson-layer] updateGeojson SKIPPED: internal tag');
+      return;
+    }
+
+    // Guard 2: Skip during drawing or removing
+    if (this.inDrawingMode || this.removingItem) {
+      console.log('[arc-geojson-layer] updateGeojson SKIPPED: inDrawingMode or removingItem');
+      return;
+    }
+
+    // Guard 3: Skip when edit mode active
+    // Same as old Stencil _onGeojsonChanged guard
+    if (this.enableUserEdit) {
+      console.log('[arc-geojson-layer] updateGeojson SKIPPED: enableUserEdit is true');
+      return;
+    }
 
     if (!this.featureLayer) {
       await this.createLayer(newGeojson);
       return;
     }
 
-    // Guard 4: Skip stale NgRx echo — Angular pushed fewer features than we have
+    // Guard 4: Skip stale NgRx echo
     const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
-    if (!parsed.parsedJson) return;
+    if (!parsed.parsedJson) {
+      console.log('[arc-geojson-layer] updateGeojson SKIPPED: could not parse');
+      return;
+    }
 
-    const incomingCount = parsed.parsedJson.features?.length ?? 0;
-    const currentCount = this.featureLayer.graphics.length;
-    if (currentCount > 0 && incomingCount < currentCount) return;
+    const incomingFeatCount = parsed.parsedJson.features?.length ?? 0;
+    if (currentCount > 0 && incomingFeatCount < currentCount) {
+      console.log('[arc-geojson-layer] updateGeojson SKIPPED: stale echo',
+        incomingFeatCount, '<', currentCount);
+      return;
+    }
 
-    // All guards passed — process the external geojson update
+    console.log('[arc-geojson-layer] updateGeojson PROCEEDING - will clear and redraw');
+
     this.featureLayer.removeAll();
     this.labelLayer?.removeAll();
 
@@ -618,14 +496,10 @@ export class ArcGeojsonLayer extends LitElement {
     this.updateInfoTemplate(this.infoTemplate);
   }
 
-  // -------------------------------------------------------------------------
-  // updateInfoTemplate — SAME AS STENCIL
-  // -------------------------------------------------------------------------
   updateInfoTemplate(newInfoTemplate: any): void {
     this.infoTemplate = newInfoTemplate;
     if (!this.featureLayer) return;
-    const parsed =
-      ArcGeojsonLayer.parseJson<InfoTemplateDetails>(newInfoTemplate);
+    const parsed = ArcGeojsonLayer.parseJson<InfoTemplateDetails>(newInfoTemplate);
     if (!parsed.parsedJson) return;
     const info = parsed.parsedJson;
     this.featureLayer.graphics.forEach((g: Graphic) => {
@@ -633,28 +507,17 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // updateLabelJson — SAME AS STENCIL
-  // -------------------------------------------------------------------------
   updateLabelJson(arg: string | object | object[]): void {
     this.labelJson = arg;
     this.refreshLabels();
   }
 
-  // -------------------------------------------------------------------------
-  // updateLayerClass — SAME AS STENCIL
-  // -------------------------------------------------------------------------
   updateLayerClass(cls: string): void {
     this.layerClass = cls;
     if (this.featureLayer) (this.featureLayer as any).className = cls;
     if (this.labelLayer) (this.labelLayer as any).className = `${cls}-labels`;
   }
 
-  // -------------------------------------------------------------------------
-  // updateRenderer — SAME AS STENCIL concept, different implementation
-  // DIFFERENCE: Stencil used FeatureLayer.renderer. We apply symbols
-  // per-graphic on GraphicsLayer since GraphicsLayer has no renderer property.
-  // -------------------------------------------------------------------------
   updateRenderer(newRenderer: any): void {
     if (newRenderer !== undefined && newRenderer !== null) {
       this.renderer = newRenderer;
@@ -665,40 +528,28 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // startDrawing — public method called by Angular
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used Draw widget which was created fresh each call.
-  // We recreate SketchViewModel fresh each call to avoid stale state.
-  // 50ms pause ensures MapView is ready to accept sketch input —
-  // not needed in Stencil because Draw widget handled this internally.
-  // -------------------------------------------------------------------------
   async startDrawing(drawGeometryType: string): Promise<void> {
     if (!this.featureLayer || !this.view) return;
 
-    const existingType = this.determineExistingGeometryType();
-    if (
-      existingType &&
-      !this.validGeometryType(drawGeometryType, existingType)
-    ) return;
+    console.log('[arc-geojson-layer] startDrawing called with:', drawGeometryType);
 
-    // Recreate fresh — prevents stale SketchViewModel state
+    const existingType = this.determineExistingGeometryType();
+    if (existingType && !this.validGeometryType(drawGeometryType, existingType)) return;
+
     await this.createEditor();
 
     this.inDrawingMode = true;
     this.enableInfoPopupWindow(false);
 
     const tool = this.toSketchCreateTool(drawGeometryType);
+    console.log('[arc-geojson-layer] creating sketch tool:', tool);
 
-    // Brief pause ensures MapView is ready to accept sketch input
     await new Promise<void>(resolve => setTimeout(resolve, 50));
 
     this.graphicsEditor.create(tool);
+    console.log('[arc-geojson-layer] graphicsEditor state after create:', this.graphicsEditor.state);
   }
 
-  // -------------------------------------------------------------------------
-  // cancelDrawing — SAME AS STENCIL
-  // -------------------------------------------------------------------------
   async cancelDrawing(): Promise<void> {
     this.inDrawingMode = false;
     if (this.graphicsEditor) {
@@ -707,13 +558,7 @@ export class ArcGeojsonLayer extends LitElement {
     this.enableInfoPopupWindow(true);
   }
 
-  // -------------------------------------------------------------------------
-  // Public API — SAME AS STENCIL
-  // -------------------------------------------------------------------------
-
-  async findFeatureByUniqueId(
-    uniqueId: string | number
-  ): Promise<Graphic | undefined> {
+  async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
     return this.featureLayer?.graphics.find(
       (g: Graphic) => g.attributes?.[this.uniqueIdPropertyName] === uniqueId
     );
@@ -726,10 +571,7 @@ export class ArcGeojsonLayer extends LitElement {
   async openPopup(id: string | number): Promise<void> {
     const graphic = await this.findFeatureByUniqueId(id);
     if (!graphic?.geometry) return;
-    this.showGraphicPopup(
-      graphic,
-      ArcGeojsonLayer.getPopupPoint(graphic.geometry)
-    );
+    this.showGraphicPopup(graphic, ArcGeojsonLayer.getPopupPoint(graphic.geometry));
   }
 
   async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
@@ -740,35 +582,19 @@ export class ArcGeojsonLayer extends LitElement {
       await this.view.goTo({ center: geometry, zoom: zoomLevel });
       return;
     }
-    if (
-      ArcGeojsonLayer.isPolyline(geometry) ||
-      ArcGeojsonLayer.isPolygon(geometry)
-    ) {
+    if (ArcGeojsonLayer.isPolyline(geometry) || ArcGeojsonLayer.isPolygon(geometry)) {
       const ext = geometry.extent;
       if (ext) await this.view.goTo(ext.expand(1.5));
     }
   }
 
-  // -------------------------------------------------------------------------
-  // enableInfoPopupWindow
-  // DIFFERENCE FROM STENCIL — FIX for immediate popup:
-  // Stencil had a delay in popup because it used hitTest which is async.
-  // We call this directly with the graphic in hand — no async hitTest needed
-  // for popup display, making it appear immediately on click.
-  // Popup is NEVER shown when editing OR drawing — same rule as Stencil.
-  // -------------------------------------------------------------------------
   enableInfoPopupWindow(enable: boolean): void {
-    // Popup only allowed when NOT editing AND NOT drawing
     const ok = enable && !this.enableUserEdit && !this.inDrawingMode;
     if (!ok && this.view?.popup?.visible) {
       this.view.popup.close();
     }
   }
 
-  // -------------------------------------------------------------------------
-  // activateGraphicsEditor — SAME AS STENCIL concept
-  // DIFFERENCE: Stencil used Edit widget. We use SketchViewModel.update().
-  // -------------------------------------------------------------------------
   async activateGraphicsEditor(graphic: Graphic): Promise<void> {
     if (!this.enableUserEdit || !this.graphicsEditor) return;
     this.enableInfoPopupWindow(false);
@@ -782,14 +608,6 @@ export class ArcGeojsonLayer extends LitElement {
     } as any);
   }
 
-  // -------------------------------------------------------------------------
-  // getSymbolForGraphic — NEW, not in Stencil
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used FeatureLayer renderer which handled symbols automatically.
-  // We use GraphicsLayer so we must apply symbols per-graphic manually.
-  // This method handles all renderer types (simple, unique-value) and
-  // normalizes legacy Esri REST symbol strings via JsonUtils.normalizePlainSymbol.
-  // -------------------------------------------------------------------------
   private getSymbolForGraphic(graphic: Graphic): any {
     if (!graphic.geometry) return null;
 
@@ -798,43 +616,31 @@ export class ArcGeojsonLayer extends LitElement {
       if (parsed.parsedJson) {
         const cfg = parsed.parsedJson;
 
-        // Simple renderer — one symbol for all graphics
         if (cfg.type === 'simple' && cfg.symbol) {
           return JsonUtils.normalizePlainSymbol(cfg.symbol);
         }
 
-        // UniqueValue renderer — match by geometry type
-        if (
-          Array.isArray(cfg.uniqueValueInfos) &&
-          cfg.uniqueValueInfos.length
-        ) {
+        if (Array.isArray(cfg.uniqueValueInfos) && cfg.uniqueValueInfos.length) {
           const geomType = graphic.geometry.type;
           const match = cfg.uniqueValueInfos.find((info: any) => {
             const val = (info.value ?? '').toString().toLowerCase();
-            const sym = (info.symbol?.type ?? '')
-              .toLowerCase().replace(/[\s-_]/g, '');
+            const sym = (info.symbol?.type ?? '').toLowerCase().replace(/[\s-_]/g, '');
             if (geomType === 'polygon') {
-              return val.endsWith('polygon') ||
-                sym === 'esrisfs' || sym === 'simplefill' ||
-                sym === 'simplefillsymbol';
+              return val.endsWith('polygon') || sym === 'esrisfs' ||
+                sym === 'simplefill' || sym === 'simplefillsymbol';
             }
             if (geomType === 'polyline') {
               return val.endsWith('polyline') || val.endsWith('line') ||
-                sym === 'esrisls' || sym === 'simpleline' ||
-                sym === 'simplelinesymbol';
+                sym === 'esrisls' || sym === 'simpleline' || sym === 'simplelinesymbol';
             }
-            // Point
             return sym === 'esrisms' || sym === 'esrismscirlce' ||
               sym === 'esrismscircle' || sym === 'simplemarker' ||
               sym === 'simplemarkersymbol' ||
               (!val.endsWith('polygon') && !val.endsWith('polyline'));
           });
-          if (match?.symbol) {
-            return JsonUtils.normalizePlainSymbol(match.symbol);
-          }
+          if (match?.symbol) return JsonUtils.normalizePlainSymbol(match.symbol);
         }
 
-        // defaultSymbol fallback
         if (cfg.defaultSymbol) {
           return JsonUtils.normalizePlainSymbol(cfg.defaultSymbol);
         }
@@ -844,42 +650,27 @@ export class ArcGeojsonLayer extends LitElement {
     return this.getDefaultSymbolForGeometry(graphic.geometry);
   }
 
-  // -------------------------------------------------------------------------
-  // GeoJSON conversion helpers — SAME AS STENCIL concept
-  // DIFFERENCE: Stencil used arcgisToGeoJSON / geojsonToArcGIS libraries.
-  // We implement conversion directly to avoid extra dependencies and
-  // to have full control over coordinate system handling.
-  // -------------------------------------------------------------------------
-
   private getUpGISJson(
     geojson: string | object
   ): { graphics: Graphic[]; geometryType?: string } | null {
     const result = ArcGeojsonLayer.parseJson<FeatureCollection>(geojson);
-    if (
-      !result.parsedJson ||
-      result.parsedJson.type !== 'FeatureCollection'
-    ) return null;
+    if (!result.parsedJson || result.parsedJson.type !== 'FeatureCollection') return null;
 
     const graphics: Graphic[] = [];
     let geometryType: string | undefined;
 
-    result.parsedJson.features.forEach(
-      (feature: Feature, index: number) => {
-        const g = this.geojsonFeatureToGraphic(feature, index);
-        if (g?.geometry) {
-          if (!geometryType) geometryType = g.geometry.type;
-          graphics.push(g);
-        }
+    result.parsedJson.features.forEach((feature: Feature, index: number) => {
+      const g = this.geojsonFeatureToGraphic(feature, index);
+      if (g?.geometry) {
+        if (!geometryType) geometryType = g.geometry.type;
+        graphics.push(g);
       }
-    );
+    });
 
     return { graphics, geometryType };
   }
 
-  private geojsonFeatureToGraphic(
-    feature: Feature,
-    index: number
-  ): Graphic | null {
+  private geojsonFeatureToGraphic(feature: Feature, index: number): Graphic | null {
     const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
     if (!geometry) return null;
 
@@ -894,9 +685,7 @@ export class ArcGeojsonLayer extends LitElement {
       symbol: this.getDefaultSymbolForGeometry(geometry)
     });
 
-    // Apply renderer symbol after construction
     graphic.symbol = this.getSymbolForGraphic(graphic);
-
     graphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
       graphic,
       infoTemplate: this.infoTemplate,
@@ -907,9 +696,7 @@ export class ArcGeojsonLayer extends LitElement {
     return graphic;
   }
 
-  private geojsonGeometryToArcGeometry(
-    geometry: GeoJsonGeometry | null
-  ): Geometry | null {
+  private geojsonGeometryToArcGeometry(geometry: GeoJsonGeometry | null): Geometry | null {
     if (!geometry) return null;
     switch (geometry.type) {
       case 'Point': {
@@ -919,10 +706,7 @@ export class ArcGeojsonLayer extends LitElement {
       case 'MultiPoint': {
         const pts = geometry.coordinates as number[][];
         if (!pts.length) return null;
-        return new Point({
-          x: pts[0][0], y: pts[0][1],
-          spatialReference: { wkid: 4326 }
-        });
+        return new Point({ x: pts[0][0], y: pts[0][1], spatialReference: { wkid: 4326 } });
       }
       case 'LineString':
         return new Polyline({
@@ -942,18 +726,14 @@ export class ArcGeojsonLayer extends LitElement {
       case 'MultiPolygon': {
         const first = (geometry.coordinates as number[][][][])[0];
         if (!first) return null;
-        return new Polygon({
-          rings: first, spatialReference: { wkid: 4326 }
-        });
+        return new Polygon({ rings: first, spatialReference: { wkid: 4326 } });
       }
       default:
         return null;
     }
   }
 
-  private arcGeometryToGeoJsonGeometry(
-    geometry: Geometry
-  ): GeoJsonGeometry {
+  private arcGeometryToGeoJsonGeometry(geometry: Geometry): GeoJsonGeometry {
     if (ArcGeojsonLayer.isPoint(geometry)) {
       const pt = this.toGeographicPoint(geometry as Point);
       return { type: 'Point', coordinates: [pt.x, pt.y] };
@@ -988,26 +768,16 @@ export class ArcGeojsonLayer extends LitElement {
     };
   }
 
-  // -------------------------------------------------------------------------
-  // addToGeojson — SAME AS STENCIL concept
-  // DIFFERENCE FROM STENCIL:
-  // Stencil: blockGeoJsonUpdate = true → this.geojson = x → blockGeoJsonUpdate = false
-  //          This worked because @Watch fired synchronously.
-  // LitElement: We tag the FeatureCollection with a Symbol instead.
-  //             When LitElement's async updated() fires, isInternalGeojson()
-  //             detects the tag and skips the update.
-  //             When NgRx echoes it back (JSON round-trip strips the tag),
-  //             the enableUserEdit guard catches it.
-  // -------------------------------------------------------------------------
   private addToGeojson(newGraphic: Graphic): void {
+    console.log('[arc-geojson-layer] addToGeojson called, geomType:',
+      newGraphic.geometry?.type);
+
     if (!newGraphic.attributes) newGraphic.attributes = {};
     if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined)
       newGraphic.attributes[this.uniqueIdPropertyName] = Date.now();
     if (newGraphic.attributes.OBJECTID === undefined)
       newGraphic.attributes.OBJECTID = Date.now();
 
-    // Always assign default symbol first (guaranteed non-null),
-    // then try renderer symbol on top
     newGraphic.symbol = this.getDefaultSymbolForGeometry(newGraphic.geometry);
     const rendererSym = this.getSymbolForGraphic(newGraphic);
     if (rendererSym) newGraphic.symbol = rendererSym;
@@ -1023,78 +793,63 @@ export class ArcGeojsonLayer extends LitElement {
       this.featureLayer.add(newGraphic);
     }
 
-    // Tag as internal — replaces Stencil's blockGeoJsonUpdate pattern
-    this.geojson = this.tagAsInternal(this.toFeatureCollectionFromLayer());
+    const newCollection = this.toFeatureCollectionFromLayer();
+    console.log('[arc-geojson-layer] addToGeojson: setting tagged geojson, features:',
+      newCollection.features.length);
+
+    this.geojson = this.tagAsInternal(newCollection);
 
     this.refreshLabels();
-    this.emitLayerEvent(
-      'userDrawItemAdded',
-      this.graphicToGeoJsonFeature(newGraphic)
-    );
+    this.emitLayerEvent('userDrawItemAdded', this.graphicToGeoJsonFeature(newGraphic));
+
+    // Check 500ms later if graphic survived
+    setTimeout(() => {
+      console.log('[arc-geojson-layer] 500ms check - graphics count:',
+        this.featureLayer?.graphics?.length,
+        'enableUserEdit:', this.enableUserEdit,
+        'inDrawingMode:', this.inDrawingMode);
+    }, 500);
+
+    setTimeout(() => {
+      console.log('[arc-geojson-layer] 2000ms check - graphics count:',
+        this.featureLayer?.graphics?.length);
+    }, 2000);
   }
 
-  // -------------------------------------------------------------------------
-  // removeFromGeojson — SAME AS STENCIL concept, same Symbol tagging
-  // -------------------------------------------------------------------------
   private removeFromGeojson(graphicToRemove: Graphic): void {
     this.featureLayer.remove(graphicToRemove);
-    // Tag as internal — replaces Stencil's blockGeoJsonUpdate
     this.geojson = this.tagAsInternal(this.toFeatureCollectionFromLayer());
     this.refreshLabels();
-    this.emitLayerEvent(
-      'userEditItemRemoved',
-      this.graphicToGeoJsonFeature(graphicToRemove)
-    );
+    this.emitLayerEvent('userEditItemRemoved', this.graphicToGeoJsonFeature(graphicToRemove));
   }
 
-  // -------------------------------------------------------------------------
-  // updateGeojsonWithChanges — SAME AS STENCIL concept, same Symbol tagging
-  // -------------------------------------------------------------------------
   private updateGeojsonWithChanges(graphicToUpdate: Graphic): void {
-    graphicToUpdate.popupTemplate =
-      JsonUtils.buildPopupTemplateFromCurrent({
-        graphic: graphicToUpdate,
-        infoTemplate: this.infoTemplate,
-        uniqueIdPropertyName: this.uniqueIdPropertyName,
-        fallbackTitle: this.name || 'Details'
-      });
-    // Tag as internal — replaces Stencil's blockGeoJsonUpdate
+    graphicToUpdate.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
+      graphic: graphicToUpdate,
+      infoTemplate: this.infoTemplate,
+      uniqueIdPropertyName: this.uniqueIdPropertyName,
+      fallbackTitle: this.name || 'Details'
+    });
     this.geojson = this.tagAsInternal(this.toFeatureCollectionFromLayer());
     this.refreshLabels();
-    this.emitLayerEvent(
-      'userEditItemUpdated',
-      this.graphicToGeoJsonFeature(graphicToUpdate)
-    );
+    this.emitLayerEvent('userEditItemUpdated', this.graphicToGeoJsonFeature(graphicToUpdate));
   }
 
-  // -------------------------------------------------------------------------
-  // Popup helpers
-  // DIFFERENCE FROM STENCIL:
-  // Stencil used PopupTemplate with content/title functions.
-  // We use the same approach but build from InfoTemplateDetails directly.
-  // showGraphicPopup is called with graphic already in hand — no async
-  // hitTest delay — so popup appears IMMEDIATELY on click.
-  // -------------------------------------------------------------------------
   private buildPopupTemplate(info: InfoTemplateDetails): PopupTemplate {
     return new PopupTemplate({
       title: (evt: any) => {
         const g = evt?.graphic ?? evt;
-        return typeof info.listItem === 'function'
-          ? info.listItem(g) : info.listItem;
+        return typeof info.listItem === 'function' ? info.listItem(g) : info.listItem;
       },
       content: (evt: any) => {
         const g = evt?.graphic ?? evt;
-        return typeof info.details === 'function'
-          ? info.details(g) : info.details;
+        return typeof info.details === 'function' ? info.details(g) : info.details;
       }
     });
   }
 
-  private buildPopupTemplateFromCurrent(
-    graphic: Graphic
-  ): PopupTemplate | null {
-    const parsed =
-      ArcGeojsonLayer.parseJson<InfoTemplateDetails>(this.infoTemplate);
+  private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+    const parsed = ArcGeojsonLayer.parseJson<InfoTemplateDetails>(this.infoTemplate);
     if (!parsed.parsedJson) return null;
     const info = parsed.parsedJson;
     const title = typeof info.listItem === 'function'
@@ -1105,11 +860,9 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
-    // NEVER show popup when editing or drawing — same rule as Stencil
     if (this.enableUserEdit || this.inDrawingMode) return;
     if (!graphic.geometry) return;
-    const location =
-      mapPoint ?? ArcGeojsonLayer.getPopupPoint(graphic.geometry);
+    const location = mapPoint ?? ArcGeojsonLayer.getPopupPoint(graphic.geometry);
     graphic.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
       graphic,
       infoTemplate: this.infoTemplate,
@@ -1121,9 +874,6 @@ export class ArcGeojsonLayer extends LitElement {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Labels — SAME AS STENCIL
-  // -------------------------------------------------------------------------
   private refreshLabels(): void {
     if (!this.labelLayer) return;
     this.labelLayer.removeAll();
@@ -1137,9 +887,7 @@ export class ArcGeojsonLayer extends LitElement {
       const pt = ArcGeojsonLayer.getPopupPoint(graphic.geometry);
       this.labelLayer.add(new Graphic({
         geometry: pt,
-        attributes: {
-          __labelFor: graphic.attributes?.[this.uniqueIdPropertyName]
-        },
+        attributes: { __labelFor: graphic.attributes?.[this.uniqueIdPropertyName] },
         symbol: new TextSymbol({
           text: String(label),
           color: labelColor as any,
@@ -1153,22 +901,14 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Default symbol — SAME AS STENCIL
-  // DIFFERENCE: Uses new SDK class constructors instead of JSON objects
-  // -------------------------------------------------------------------------
-  private getDefaultSymbolForGeometry(
-    geometry: Geometry | null | undefined
-  ): any {
+  private getDefaultSymbolForGeometry(geometry: Geometry | null | undefined): any {
     if (!geometry) return null;
     if (ArcGeojsonLayer.isPoint(geometry)) {
       return new SimpleMarkerSymbol({
         style: 'circle',
         color: this.DEFAULT_SYMBOL_COLOR as any,
         size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
-        outline: {
-          color: [0, 0, 0, 200], width: 1, style: 'solid'
-        } as any
+        outline: { color: [0, 0, 0, 200], width: 1, style: 'solid' } as any
       });
     }
     if (ArcGeojsonLayer.isPolyline(geometry)) {
@@ -1194,10 +934,6 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Geometry type helpers — SAME AS STENCIL
-  // -------------------------------------------------------------------------
-
   private determineExistingGeometryType(): string | undefined {
     return this.featureLayer?.graphics?.getItemAt(0)?.geometry?.type;
   }
@@ -1210,14 +946,10 @@ export class ArcGeojsonLayer extends LitElement {
     switch ((drawType || '').toUpperCase()) {
       case DrawGeometryTypes.FREEHAND_POLYLINE:
       case DrawGeometryTypes.LINE:
-      case DrawGeometryTypes.POLYLINE:
-        return 'polyline';
-      case DrawGeometryTypes.MULTI_POINT:
-        return 'multipoint';
-      case DrawGeometryTypes.POINT:
-        return 'point';
-      default:
-        return 'polygon';
+      case DrawGeometryTypes.POLYLINE: return 'polyline';
+      case DrawGeometryTypes.MULTI_POINT: return 'multipoint';
+      case DrawGeometryTypes.POINT: return 'point';
+      default: return 'polygon';
     }
   }
 
@@ -1243,14 +975,9 @@ export class ArcGeojsonLayer extends LitElement {
       this.enableUserEditAddVertices ||
       this.enableUserEditDeleteVertices
     ) return 'reshape';
-    if (this.enableUserEditScaling || this.enableUserEditRotating)
-      return 'transform';
+    if (this.enableUserEditScaling || this.enableUserEditRotating) return 'transform';
     return 'move';
   }
-
-  // -------------------------------------------------------------------------
-  // Geographic projection — SAME AS STENCIL
-  // -------------------------------------------------------------------------
 
   private toGeographicPoint(point: Point): Point {
     return point.spatialReference?.isWGS84
@@ -1270,14 +997,7 @@ export class ArcGeojsonLayer extends LitElement {
       : webMercatorUtils.webMercatorToGeographic(polygon) as Polygon;
   }
 
-  // -------------------------------------------------------------------------
-  // Mouse / event helpers — SAME AS STENCIL
-  // -------------------------------------------------------------------------
-
-  private buildMouseEvent(
-    graphic: Graphic,
-    mapPoint: Point | null
-  ): LayerMouseEvent {
+  private buildMouseEvent(graphic: Graphic, mapPoint: Point | null): LayerMouseEvent {
     const geo = mapPoint
       ? webMercatorUtils.webMercatorToGeographic(mapPoint) as Point
       : null;
@@ -1300,18 +1020,12 @@ export class ArcGeojsonLayer extends LitElement {
     return r?.graphic as Graphic | undefined;
   }
 
-  private getGraphicUniqueId(
-    graphic: Graphic
-  ): string | number | undefined {
+  private getGraphicUniqueId(graphic: Graphic): string | number | undefined {
     return (
       graphic.attributes?.[this.uniqueIdPropertyName] ??
       graphic.attributes?.OBJECTID
     );
   }
-
-  // -------------------------------------------------------------------------
-  // Static helpers — SAME AS STENCIL
-  // -------------------------------------------------------------------------
 
   static parseJson<T = any>(value: any): JsonParseResult<T> {
     if (value === null || value === undefined) {
@@ -1341,9 +1055,7 @@ export class ArcGeojsonLayer extends LitElement {
       });
     }
     if (ArcGeojsonLayer.isPolygon(geometry)) {
-      return (
-        (geometry as Polygon).centroid ?? new Point({ x: 0, y: 0 })
-      );
+      return (geometry as Polygon).centroid ?? new Point({ x: 0, y: 0 });
     }
     return new Point({ x: 0, y: 0 });
   }
