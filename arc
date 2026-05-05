@@ -1,39 +1,25 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  console.log('[arc-geojson-layer] startDrawing called with:', drawGeometryType);
-
-  // Clear any existing drawn graphic — user is starting a new draw
-  this.featureLayer.graphics.removeAll();
-  this.labelLayer.graphics.removeAll();
-  this._sourceCache = [];
-  this.sketchLayer?.graphics?.removeAll();
-
-  // Notify Angular that draw layer was cleared
-  // so it can reset drawGeojson and any saved fence state
-  this.emitLayerEvent('drawLayerCleared', null);
-
-  // Update internal geojson to empty
-  this.geojson = this.tagAsInternal(
-    { type: 'FeatureCollection', features: [] } as FeatureCollection
-  );
-
-  // Recreate SketchViewModel fresh
-  await this.createEditor();
-
-  this.inDrawingMode = true;
-  this.enableInfoPopupWindow(false);
-  await this.ancestorMap?.hideZoomSlider?.();
-  await this.ancestorMap?.hideScaleBar?.();
-
-  const tool = toSketchTool(drawGeometryType);
-  console.log('[arc-geojson-layer] creating sketch tool:', tool);
-
-  await new Promise<void>(resolve => setTimeout(resolve, 50));
-
-  try {
-    this.graphicsEditor.create(tool as any);
-    console.log('[arc-geojson-layer] graphicsEditor state:', this.graphicsEditor.state);
-  } catch (e) {
-    console.error('[arc-geojson-layer] startDrawing error:', e);
-    this.inDrawingMode = false;
+private updateGeojson(value: string | FeatureCollection): void {
+  if (this.isInternalGeojson(value)) {
+    console.log('[arc-geojson-layer] updateGeojson SKIPPED: internal tag');
+    return;
   }
+  const parsed = this.parseGeojson(value);
+  const incomingCount = parsed?.features?.length ?? 0;
+
+  console.log('[arc-geojson-layer] updateGeojson called:', {
+    inDrawingMode: this.inDrawingMode, removingItem: this.removingItem,
+    enableUserEdit: this.enableUserEdit, incomingCount,
+  });
+
+  if (this.inDrawingMode || this.removingItem || this.blockGeoJsonUpdate) return;
+
+  // IMPORTANT: allow clear even in edit mode — Angular may push empty
+  // geojson to reset the draw layer while enableUserEdit is still true
+  if (this.enableUserEdit && incomingCount > 0) return;
+
+  if (!parsed) return;
+
+  this.loadFeaturesFromGeojson(parsed);
+  this.updateRenderer(this.renderer);
+  this.refreshLabels();
 }
