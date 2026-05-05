@@ -1,25 +1,20 @@
-private updateGeojson(value: string | FeatureCollection): void {
-  if (this.isInternalGeojson(value)) {
-    console.log('[arc-geojson-layer] updateGeojson SKIPPED: internal tag');
-    return;
-  }
-  const parsed = this.parseGeojson(value);
-  const incomingCount = parsed?.features?.length ?? 0;
+const dblClickHandle = (this.view as any).on('double-click', (evt: any) => {
+  evt.stopPropagation?.();
 
-  console.log('[arc-geojson-layer] updateGeojson called:', {
-    inDrawingMode: this.inDrawingMode, removingItem: this.removingItem,
-    enableUserEdit: this.enableUserEdit, incomingCount,
-  });
+  setTimeout(() => {
+    const nearest = this.findNearest(evt.mapPoint);
+    if (!nearest) return;
 
-  if (this.inDrawingMode || this.removingItem || this.blockGeoJsonUpdate) return;
+    console.log('[arc-geojson-layer] double-click - activating editor for:',
+      nearest.geometry?.type);
 
-  // IMPORTANT: allow clear even in edit mode — Angular may push empty
-  // geojson to reset the draw layer while enableUserEdit is still true
-  if (this.enableUserEdit && incomingCount > 0) return;
+    // Force enable edit mode and activate editor directly
+    this.enableUserEdit = true;
+    this.activateGraphicsEditor(nearest);
 
-  if (!parsed) return;
-
-  this.loadFeaturesFromGeojson(parsed);
-  this.updateRenderer(this.renderer);
-  this.refreshLabels();
-}
+    // Notify Angular that edit mode was enabled via double-click
+    this.emitLayerEvent('userEditEnabled', 
+      graphicToGeoJsonFeature(nearest, this.uniqueIdPropertyName));
+  }, 100);
+});
+this.eventHandles.push(dblClickHandle);
