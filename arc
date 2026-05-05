@@ -1,34 +1,31 @@
-// esriSMS or simple-marker → SimpleMarkerSymbol
-if (type === 'esrisms' || type === 'simple-marker' ||
-    ArcGeojsonLayer.isPoint(geometry)) {
-  const outlineColor = rendererSymbol?.outline?.color ?? sym.outline?.color ?? [0, 0, 0, 200];
-  const outlineWidth = rendererSymbol?.outline?.width ?? sym.outline?.width ?? 1;
-  return new SimpleMarkerSymbol({
-    style: this.esriStyleToArcGIS(sym.style, 'circle') as any,
-    size: sym.size ?? size,
-    color: sym.color,
-    outline: new SimpleLineSymbol({ color: outlineColor, width: outlineWidth })
-  });
+async connectedCallback(): Promise<void> {
+  super.connectedCallback();
+  await this.waitForAncestorMap();
+  if (!this.isConnected) return;
+  try {
+    await this.resolveAncestorMapAndView();
+    await this.createLayer(this.geojson);
+    this.bindViewEvents();
+    this._initComplete = true;
+    console.log('[arc-geojson-layer] READY, name:', this.name);
+
+    // Always sync current geojson after init — Angular may have
+    // pushed real data before connectedCallback finished
+    const currentParsed = ArcGeojsonLayer.parseJson<FeatureCollection>(this.geojson);
+    const currentCount = currentParsed.parsedJson?.features?.length ?? 0;
+    const layerCount = this.featureLayer.graphics.length;
+
+    if (currentCount > 0 && currentCount !== layerCount) {
+      console.log('[arc-geojson-layer] syncing geojson after init, name:', this.name,
+        'count:', currentCount);
+      await this.updateGeojson(this.geojson);
+    }
+
+    if (this._pendingEnableUserEdit !== undefined) {
+      await this.updateEditing(this._pendingEnableUserEdit);
+      this._pendingEnableUserEdit = undefined;
+    }
+  } catch (e) {
+    console.error('[arc-geojson-layer] connectedCallback error:', e);
+  }
 }
-
-// esriSLS or simple-line → SimpleLineSymbol
-if (type === 'esrisls' || type === 'simple-line' ||
-    ArcGeojsonLayer.isPolyline(geometry)) {
-  return new SimpleLineSymbol({
-    style: this.esriStyleToArcGIS(sym.style, 'solid') as any,
-    width: sym.width ?? size,
-    color: sym.color
-  });
-}
-
-// esriSFS or simple-fill → SimpleFillSymbol
-const outlineColor = rendererSymbol?.outline?.color
-  ?? sym.outline?.color ?? [110, 110, 110, 255];
-const outlineWidth = rendererSymbol?.outline?.width
-  ?? sym.outline?.width ?? ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH;
-
-return new SimpleFillSymbol({
-  style: this.esriStyleToArcGIS(sym.style, 'solid') as any,
-  color: sym.color,
-  outline: new SimpleLineSymbol({ color: outlineColor, width: outlineWidth })
-});
