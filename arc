@@ -1,74 +1,29 @@
-const dblClickHandle = (this.view as any).on('double-click', (evt: any) => {
-  evt.stopPropagation?.();
-
-  // Cancel pending single-click
-  if (clickTimer) {
-    clearTimeout(clickTimer);
-    clickTimer = null;
-  }
-
-  // Close popup immediately
-  if ((this.view as any).popup?.visible) {
-    (this.view as any).popup.close();
-  }
-
-  const nearest = this.findNearest(evt.mapPoint);
-  if (!nearest) {
-    console.log('[arc-geojson-layer] double-click: no graphic found');
+private updateGeojson(value: string | FeatureCollection): void {
+  if (this.isInternalGeojson(value)) {
+    console.log('[arc-geojson-layer] updateGeojson SKIPPED: internal tag');
     return;
   }
 
-  console.log('[arc-geojson-layer] double-click - activating editor:',
-    nearest.geometry?.type);
+  const parsed = this.parseGeojson(value);
+  const incomingCount = parsed?.features?.length ?? 0;
 
-  this.enableInfoPopupWindow(false);
-  this.enableUserEdit = true;
+  console.log('[arc-geojson-layer] updateGeojson called:', {
+    isInternal: false,
+    inDrawingMode: this.inDrawingMode,
+    removingItem: this.removingItem,
+    enableUserEdit: this.enableUserEdit,
+    incomingCount,
+  });
 
-  // Do NOT recreate editor — use existing one
-  // Only startDrawing recreates the editor
-  this.activateGraphicsEditor(nearest);
+  if (this.inDrawingMode || this.removingItem || this.blockGeoJsonUpdate) return;
 
-  this.emitLayerEvent('userEditEnabled',
-    graphicToGeoJsonFeature(nearest, this.uniqueIdPropertyName));
-});
+  // Allow clear (incomingCount=0) even in edit mode
+  // Block only when incoming has data AND edit mode is on
+  if (this.enableUserEdit && incomingCount > 0) return;
 
+  if (!parsed) return;
 
-private activateGraphicsEditor(graphic: Graphic): void {
-  if (!this.graphicsEditor) {
-    console.warn('[arc-geojson-layer] no graphicsEditor');
-    return;
-  }
-
-  console.log('[arc-geojson-layer] activateGraphicsEditor, geomType:',
-    graphic.geometry?.type);
-
-  // Move graphic to sketch layer synchronously
-  this.featureLayer.graphics.remove(graphic);
-  
-  // Ensure graphic has symbol before adding to sketch layer
-  if (!graphic.symbol) {
-    graphic.symbol = this.getSymbolForGraphic(graphic);
-  }
-  
-  this.sketchLayer.graphics.add(graphic);
-
-  const tool = this.enableUserEditVertices ? 'reshape' : 'transform';
-  
-  // Call update immediately — no setTimeout needed
-  try {
-    this.graphicsEditor.update([graphic], {
-      tool,
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: !this.enableUserEditUniformScaling,
-      toggleToolOnClick: false,
-    } as any);
-    console.log('[arc-geojson-layer] graphicsEditor.update called, state:',
-      this.graphicsEditor.state);
-  } catch (e) {
-    console.error('[arc-geojson-layer] activateGraphicsEditor error:', e);
-    // Restore graphic to featureLayer on error
-    this.sketchLayer.graphics.remove(graphic);
-    this.featureLayer.graphics.add(graphic);
-  }
+  this.loadFeaturesFromGeojson(parsed);
+  this.updateRenderer(this.renderer);
+  this.refreshLabels();
 }
