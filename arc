@@ -1,29 +1,61 @@
-private updateGeojson(value: string | FeatureCollection): void {
-  if (this.isInternalGeojson(value)) {
-    console.log('[arc-geojson-layer] updateGeojson SKIPPED: internal tag');
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  // Guard: geometry may be undefined mid-edit (AbortError recovery)
+  if (!graphicToUpdate?.geometry) {
+    console.warn('[arc-geojson-layer] updateGeoJsonWithChanges: geometry undefined, skipping');
+    return;
+  }
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.tagAsInternal(this.toFeatureCollectionFromLayer());
+  this.blockGeoJsonUpdate = false;
+  this.refreshLabels();
+  this.rebuildSourceCache();
+  this.emitLayerEvent('userEditItemUpdated',
+    graphicToGeoJsonFeature(graphicToUpdate, this.uniqueIdPropertyName));
+}
+
+
+private activateGraphicsEditor(graphic: Graphic): void {
+  if (!this.graphicsEditor) {
+    console.warn('[arc-geojson-layer] no graphicsEditor');
     return;
   }
 
-  const parsed = this.parseGeojson(value);
-  const incomingCount = parsed?.features?.length ?? 0;
+  // If SketchViewModel is still in create/active state, cancel first
+  if (this.graphicsEditor.state === 'active') {
+    try { this.graphicsEditor.cancel(); } catch { }
+  }
 
-  console.log('[arc-geojson-layer] updateGeojson called:', {
-    isInternal: false,
-    inDrawingMode: this.inDrawingMode,
-    removingItem: this.removingItem,
-    enableUserEdit: this.enableUserEdit,
-    incomingCount,
-  });
+  console.log('[arc-geojson-layer] activateGraphicsEditor, state:',
+    this.graphicsEditor.state, 'geomType:', graphic.geometry?.type);
 
-  if (this.inDrawingMode || this.removingItem || this.blockGeoJsonUpdate) return;
+  this.featureLayer.graphics.remove(graphic);
+  if (!graphic.symbol) graphic.symbol = this.getSymbolForGraphic(graphic);
+  this.sketchLayer.graphics.add(graphic);
 
-  // Allow clear (incomingCount=0) even in edit mode
-  // Block only when incoming has data AND edit mode is on
-  if (this.enableUserEdit && incomingCount > 0) return;
+  const tool = this.enableUserEditVertices ? 'reshape' : 'transform';
 
-  if (!parsed) return;
+  try {
+    this.graphicsEditor.update([graphic], {
+      tool,
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: !this.enableUserEditUniformScaling,
+      toggleToolOnClick: false,
+    } as any);
+    console.log('[arc-geojson-layer] editor activated, new state:', this.graphicsEditor.state);
+  } catch (e: any) {
+    console.warn('[arc-geojson-layer] activateGraphicsEditor error:', e?.message);
+    // Restore graphic on error
+    this.sketchLayer.graphics.remove(graphic);
+    this.featureLayer.graphics.add(graphic);
+  }
+}
 
-  this.loadFeaturesFromGeojson(parsed);
-  this.updateRenderer(this.renderer);
-  this.refreshLabels();
+
+private toFeatureCollectionFromLayer(): FeatureCollection {
+  const features = (this.featureLayer?.graphics?.toArray() ?? [])
+    .filter((g: Graphic) => g?.geometry != null)  // ← guard
+    .map((g: Graphic) => graphicToGeoJsonFeature(g, this.uniqueIdPropertyName))
+    .filter((f: any) => f.geometry != null);
+  return { type: 'FeatureCollection', features } as FeatureCollection;
 }
