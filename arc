@@ -1,51 +1,45 @@
-const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
-  const hit = await this.view.hitTest(evt, {
-    include: [this.featureLayer, this.sketchLayer]
-  });
+private getDefaultSymbolForGeometry(
+  geometry: Geometry | null | undefined
+): any {
+  if (!geometry) return null;
 
-  const graphic = this.getLayerGraphicFromHit(hit);
+  const rendererConfig = this.renderer
+    ? JsonUtils.getJsonFor(this.renderer)
+    : null;
 
-  if (!graphic) {
-    this.view.container.style.cursor = '';
+  const parsedRenderer = rendererConfig?.parsedJson;
+  const rendererSymbol = parsedRenderer?.symbol;
 
-    if (this.hoveredGraphicUid !== undefined) {
-      this.hoveredGraphicUid = undefined;
+  if (rendererSymbol) {
+    const symbol = JsonUtils.normalizePlainSymbol(rendererSymbol);
 
-      this.emitLayerEvent('layerMouseOut', {
-        coordinates: { latitude: 0, longitude: 0 },
-        attributes: {}
-      });
+    if (ArcGeojsonLayer.isPolygon(geometry) && symbol?.color) {
+      const c = symbol.color.toArray ? symbol.color.toArray() : symbol.color;
+
+      symbol.color = [
+        c[0] ?? 0,
+        c[1] ?? 0,
+        c[2] ?? 255,
+        c[3] !== undefined ? Math.min(c[3], 90) : 90
+      ] as any;
     }
 
-    return;
+    return symbol;
   }
 
-  this.view.container.style.cursor = 'pointer';
+  let size = JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE;
 
-  const uid = this.getGraphicUniqueId(graphic);
-
-  if (this.hoveredGraphicUid !== uid) {
-    if (this.hoveredGraphicUid !== undefined) {
-      this.emitLayerEvent(
-        'layerMouseOut',
-        this.buildMouseEvent(graphic, evt.mapPoint)
-      );
-    }
-
-    this.hoveredGraphicUid = uid;
-
-    this.emitLayerEvent(
-      'layerMouseOver',
-      this.buildMouseEvent(graphic, evt.mapPoint)
-    );
+  if (ArcGeojsonLayer.isPolyline(geometry)) {
+    size = JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH;
   }
-});
 
-
-
-
-try {
-  if (this.view?.container) {
-    this.view.container.style.cursor = '';
+  if (ArcGeojsonLayer.isPolygon(geometry)) {
+    size = JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH;
   }
-} catch {}
+
+  return JsonUtils.getJsonSymbolFor(
+    geometry.type,
+    JsonUtils.DEFAULT_SYMBOL_COLOR,
+    size
+  );
+}
