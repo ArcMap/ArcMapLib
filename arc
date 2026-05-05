@@ -1,18 +1,22 @@
 async startDrawing(drawGeometryType: string): Promise<void> {
   console.log('[arc-geojson-layer] startDrawing called with:', drawGeometryType);
 
-  // Clear any previously drawn graphic from this layer
-  // User switching from circle to polygon should remove the circle
+  // Clear any existing drawn graphic — user is starting a new draw
   this.featureLayer.graphics.removeAll();
   this.labelLayer.graphics.removeAll();
   this._sourceCache = [];
-  
-  // Update internal geojson to reflect cleared state
+  this.sketchLayer?.graphics?.removeAll();
+
+  // Notify Angular that draw layer was cleared
+  // so it can reset drawGeojson and any saved fence state
+  this.emitLayerEvent('drawLayerCleared', null);
+
+  // Update internal geojson to empty
   this.geojson = this.tagAsInternal(
     { type: 'FeatureCollection', features: [] } as FeatureCollection
   );
 
-  // Recreate SketchViewModel fresh — prevents stuck state
+  // Recreate SketchViewModel fresh
   await this.createEditor();
 
   this.inDrawingMode = true;
@@ -27,8 +31,7 @@ async startDrawing(drawGeometryType: string): Promise<void> {
 
   try {
     this.graphicsEditor.create(tool as any);
-    console.log('[arc-geojson-layer] graphicsEditor state after create:', 
-      this.graphicsEditor.state);
+    console.log('[arc-geojson-layer] graphicsEditor state:', this.graphicsEditor.state);
   } catch (e) {
     console.error('[arc-geojson-layer] startDrawing error:', e);
     this.inDrawingMode = false;
