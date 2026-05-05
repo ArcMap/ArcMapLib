@@ -137,6 +137,10 @@ export class ArcGeojsonLayer extends LitElement {
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
+
+    // Wait for element to be inside arc-map in DOM
+    // Needed because Angular @if recreates element but connectedCallback
+    // fires before element is fully attached
     await this.waitForAncestorMap();
     if (!this.isConnected) return;
 
@@ -177,6 +181,8 @@ export class ArcGeojsonLayer extends LitElement {
       try { this.graphicsEditor.destroy(); } catch { }
     }
 
+    // Remove ALL layers from map — prevents ghost graphics
+    // when Angular @if destroys and recreates component
     if (this.view?.map) {
       if (this.featureLayer) {
         this.featureLayer.graphics.removeAll();
@@ -200,6 +206,8 @@ export class ArcGeojsonLayer extends LitElement {
   protected updated(changedProps: Map<string, unknown>): void {
     if (!this._initComplete) {
       // Store pending values that arrive before init completes
+      // LitElement updated() fires before connectedCallback async
+      // work finishes — unlike Stencil @Watch which fired after load
       if (changedProps.has('geojson') && !this.blockGeoJsonUpdate) {
         this._pendingGeojson = this.geojson;
       }
@@ -260,7 +268,7 @@ export class ArcGeojsonLayer extends LitElement {
   private async resolveAncestorMapAndView(): Promise<void> {
     this.ancestorMap = this.closest('arc-map') as any;
     if (!this.ancestorMap) {
-      throw new Error('arc-geojson-layer must be a descendant of an <arc-map> element');
+      throw new Error('arc-geojson-layer must be a descendant of <arc-map>');
     }
     if (typeof this.ancestorMap.componentOnReady === 'function') {
       await this.ancestorMap.componentOnReady();
@@ -283,12 +291,14 @@ export class ArcGeojsonLayer extends LitElement {
     const sketchId = `${this.id || 'arc-geojson-layer'}-sketch`;
 
     // Remove stale layers from previous instance
+    // Prevents ghost graphics when Angular @if recreates the component
     if (this.view?.map) {
       [graphicsId, labelsId, sketchId].forEach(id => {
         const stale = this.view.map.findLayerById(id);
         if (stale) {
           (stale as GraphicsLayer).graphics?.removeAll();
           this.view.map.remove(stale);
+          console.log('[arc-geojson-layer] removed stale layer:', id);
         }
       });
     }
@@ -297,11 +307,16 @@ export class ArcGeojsonLayer extends LitElement {
       id: graphicsId,
       title: this.name || this.id || 'Arc GeoJSON Layer'
     });
+
     this.labelLayer = new GraphicsLayer({
       id: labelsId,
       title: `${this.name || this.id || 'Arc GeoJSON Layer'} Labels`,
       listMode: 'hide'
     });
+
+    // Separate sketchLayer for SketchViewModel
+    // Original code used featureLayer as sketch layer which caused
+    // graphics to be unremovable when switching draw modes
     this.sketchLayer = new GraphicsLayer({
       id: sketchId,
       listMode: 'hide'
@@ -313,7 +328,9 @@ export class ArcGeojsonLayer extends LitElement {
       this.view.map.add(this.sketchLayer);
     }
 
-    const fsInfo = this.getUpGISJson(geojson ?? { type: 'FeatureCollection', features: [] });
+    const fsInfo = this.getUpGISJson(
+      geojson ?? { type: 'FeatureCollection', features: [] }
+    );
     if (fsInfo) {
       for (const graphic of fsInfo.graphics) {
         this.featureLayer.add(graphic);
@@ -345,6 +362,8 @@ export class ArcGeojsonLayer extends LitElement {
       try { this.graphicsEditor.destroy(); } catch { }
     }
 
+    // Use sketchLayer not featureLayer
+    // Keeps sketch graphics separate from display graphics
     this.graphicsEditor = new SketchViewModel({
       view: this.view,
       layer: this.sketchLayer,
@@ -363,6 +382,7 @@ export class ArcGeojsonLayer extends LitElement {
         'geomType:', evt.graphic?.geometry?.type);
       if (evt.state === 'complete' && evt.graphic) {
         if (this._isStartingDraw) return;
+        // Clone before clearing sketchLayer
         const cloned = evt.graphic.clone();
         this.sketchLayer.graphics.removeAll();
         this.inDrawingMode = false;
@@ -381,6 +401,7 @@ export class ArcGeojsonLayer extends LitElement {
       if (evt.state === 'complete' && evt.graphics?.length) {
         for (const graphic of evt.graphics) {
           if (!graphic?.geometry) continue;
+          // Move graphic back to featureLayer after edit
           this.sketchLayer.graphics.remove(graphic);
           if (!this.featureLayer.graphics.includes(graphic)) {
             this.featureLayer.add(graphic);
@@ -391,6 +412,7 @@ export class ArcGeojsonLayer extends LitElement {
       }
 
       if (evt.state === 'cancel') {
+        // Restore graphics from sketchLayer to featureLayer on cancel
         this.sketchLayer.graphics.toArray().forEach((g: Graphic) => {
           this.sketchLayer.graphics.remove(g);
           if (!this.featureLayer.graphics.includes(g)) {
@@ -413,6 +435,8 @@ export class ArcGeojsonLayer extends LitElement {
       const graphic = this.getLayerGraphicFromHit(hit);
       if (!graphic) return;
 
+      // 250ms delay so double-click can cancel single-click
+      // prevents popup from showing on double-click
       clickTimer = setTimeout(async () => {
         clickTimer = null;
 
@@ -437,6 +461,7 @@ export class ArcGeojsonLayer extends LitElement {
     });
 
     const dblClickHandle = this.view.on('double-click', async (evt: any) => {
+      // Cancel pending single-click — prevents popup
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
       if (this.view?.popup?.visible) this.view.popup.close();
 
@@ -447,6 +472,8 @@ export class ArcGeojsonLayer extends LitElement {
       const mouseEvent = this.buildMouseEvent(graphic, evt.mapPoint);
       this.emitLayerEvent('doubleClick', mouseEvent);
 
+      // Double-click activates editor if edit mode is on
+      // Info template never shows in edit mode
       if (this.enableUserEdit) {
         this.enableInfoPopupWindow(false);
         await this.activateGraphicsEditor(graphic);
@@ -498,12 +525,12 @@ export class ArcGeojsonLayer extends LitElement {
     }
 
     if (_newUserEnableEdit) {
-      // Edit mode ON — disable popups
+      // Edit mode ON — disable info template
       this.featureLayer.graphics.forEach((graphic: Graphic) => {
         graphic.popupTemplate = null as unknown as never;
       });
     } else {
-      // Edit mode OFF — restore popups
+      // Edit mode OFF — restore info template
       this.featureLayer.graphics.forEach((graphic: Graphic) => {
         graphic.popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
       });
@@ -526,8 +553,9 @@ export class ArcGeojsonLayer extends LitElement {
     console.log('[arc-geojson-layer] updateGeojson, name:', this.name,
       'incomingCount:', incomingCount, 'enableUserEdit:', this.enableUserEdit);
 
-    // Block data updates during edit mode
-    // BUT allow clear (incomingCount=0) always
+    // Block data updates in edit mode
+    // BUT always allow clear (incomingCount=0) — needed when
+    // closing expansion panel to remove fences from map
     if (this.enableUserEdit && incomingCount > 0) return;
 
     if (!this.featureLayer) {
@@ -584,19 +612,32 @@ export class ArcGeojsonLayer extends LitElement {
     if (this.labelLayer) (this.labelLayer as any).className = `${newLayerClass}-labels`;
   }
 
+  // ── updateRenderer ────────────────────────────────────────────────────────
+
   updateRenderer(newRenderer: any): void {
     this.renderer = newRenderer;
     if (!this.featureLayer) return;
 
     let parsedRenderer: any | undefined;
     const parsed = ArcGeojsonLayer.parseJson(newRenderer);
+
     if (parsed.parsedJson) {
-      try { parsedRenderer = rendererJsonUtils.fromJSON(parsed.parsedJson); } catch { }
+      try {
+        // Normalize esriSMS/esriSLS/esriSFS → simple-marker/simple-line/simple-fill
+        // before passing to fromJSON — ArcGIS 5.0 does not accept esri prefix strings
+        const normalized = ArcGeojsonLayer.normalizeRendererJson(parsed.parsedJson);
+        parsedRenderer = rendererJsonUtils.fromJSON(normalized);
+      } catch {
+        parsedRenderer = undefined;
+      }
     }
 
     this.featureLayer.graphics.forEach((graphic: Graphic) => {
       if (parsedRenderer?.getSymbol) {
-        try { graphic.symbol = parsedRenderer.getSymbol(graphic); return; } catch { }
+        try {
+          graphic.symbol = parsedRenderer.getSymbol(graphic);
+          return;
+        } catch { }
       }
       graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
     });
@@ -621,7 +662,7 @@ export class ArcGeojsonLayer extends LitElement {
     this.inDrawingMode = true;
     this.enableInfoPopupWindow(false);
 
-    // Recreate editor fresh every draw
+    // Recreate editor fresh every draw — prevents stuck state
     await this.createEditor();
     await new Promise<void>(r => setTimeout(r, 50));
 
@@ -631,6 +672,7 @@ export class ArcGeojsonLayer extends LitElement {
     try {
       this.graphicsEditor.create(tool);
       if (this.graphicsEditor.state !== 'active') {
+        console.warn('[arc-geojson-layer] editor stuck, recreating');
         await this.createEditor();
         await new Promise<void>(r => setTimeout(r, 50));
         this.graphicsEditor.create(tool);
@@ -662,9 +704,11 @@ export class ArcGeojsonLayer extends LitElement {
       try { this.graphicsEditor.cancel(); } catch { }
     }
 
-    // Move graphic from featureLayer to sketchLayer
+    // Move graphic from featureLayer to sketchLayer for editing
     this.featureLayer.remove(graphic);
-    if (!graphic.symbol) graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+    if (!graphic.symbol) {
+      graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+    }
     this.sketchLayer.add(graphic);
 
     try {
@@ -688,7 +732,7 @@ export class ArcGeojsonLayer extends LitElement {
 
   async findFeatureByUniqueId(uniqueId: string | number): Promise<Graphic | undefined> {
     return this.featureLayer?.graphics.find(
-      (g: Graphic) => g.attributes?.[this.uniqueIdPropertyName] === uniqueId
+      (graphic: Graphic) => graphic.attributes?.[this.uniqueIdPropertyName] === uniqueId
     );
   }
 
@@ -725,7 +769,9 @@ export class ArcGeojsonLayer extends LitElement {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  private getUpGISJson(geojson: string | object): { graphics: Graphic[]; geometryType?: string } | null {
+  private getUpGISJson(
+    geojson: string | object
+  ): { graphics: Graphic[]; geometryType?: string } | null {
     const result = ArcGeojsonLayer.parseJson<FeatureCollection>(geojson);
     if (!result.parsedJson || result.parsedJson.type !== 'FeatureCollection') return null;
 
@@ -766,7 +812,9 @@ export class ArcGeojsonLayer extends LitElement {
     return graphic;
   }
 
-  private geojsonGeometryToArcGeometry(geometry: GeoJsonGeometry | null): Geometry | null {
+  private geojsonGeometryToArcGeometry(
+    geometry: GeoJsonGeometry | null
+  ): Geometry | null {
     if (!geometry) return null;
     switch (geometry.type) {
       case 'Point': {
@@ -776,14 +824,26 @@ export class ArcGeojsonLayer extends LitElement {
       case 'MultiPoint': {
         const points = geometry.coordinates as number[][];
         if (!points.length) return null;
-        return new Point({ x: points[0][0], y: points[0][1], spatialReference: { wkid: 4326 } });
+        return new Point({
+          x: points[0][0], y: points[0][1],
+          spatialReference: { wkid: 4326 }
+        });
       }
       case 'LineString':
-        return new Polyline({ paths: [geometry.coordinates as number[][]], spatialReference: { wkid: 4326 } });
+        return new Polyline({
+          paths: [geometry.coordinates as number[][]],
+          spatialReference: { wkid: 4326 }
+        });
       case 'MultiLineString':
-        return new Polyline({ paths: geometry.coordinates as number[][][], spatialReference: { wkid: 4326 } });
+        return new Polyline({
+          paths: geometry.coordinates as number[][][],
+          spatialReference: { wkid: 4326 }
+        });
       case 'Polygon':
-        return new Polygon({ rings: geometry.coordinates as number[][][], spatialReference: { wkid: 4326 } });
+        return new Polygon({
+          rings: geometry.coordinates as number[][][],
+          spatialReference: { wkid: 4326 }
+        });
       case 'MultiPolygon': {
         const first = (geometry.coordinates as number[][][][])[0];
         if (!first) return null;
@@ -862,7 +922,8 @@ export class ArcGeojsonLayer extends LitElement {
     this.geojson = this.toFeatureCollectionFromLayer();
     this.blockGeoJsonUpdate = false;
     this.refreshLabels();
-    this.emitLayerEvent('userEditItemRemoved', this.graphicToGeoJsonFeature(graphicToRemove));
+    this.emitLayerEvent('userEditItemRemoved',
+      this.graphicToGeoJsonFeature(graphicToRemove));
   }
 
   private updateGeojsonWithChanges(graphicToUpdate: Graphic): void {
@@ -870,17 +931,24 @@ export class ArcGeojsonLayer extends LitElement {
       console.warn('[arc-geojson-layer] updateGeojsonWithChanges: no geometry');
       return;
     }
+
     graphicToUpdate.popupTemplate = JsonUtils.buildPopupTemplateFromCurrent({
       graphic: graphicToUpdate, infoTemplate: this.infoTemplate,
       uniqueIdPropertyName: this.uniqueIdPropertyName,
       fallbackTitle: this.name || 'Details'
     });
+
     this.blockGeoJsonUpdate = true;
     this.geojson = this.toFeatureCollectionFromLayer();
     this.blockGeoJsonUpdate = false;
+
     this.refreshLabels();
+
     const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
-    if (!feature?.geometry) return;
+    if (!feature?.geometry) {
+      console.warn('[arc-geojson-layer] updateGeojsonWithChanges: feature geometry null');
+      return;
+    }
     this.emitLayerEvent('userEditItemUpdated', feature);
   }
 
@@ -888,11 +956,13 @@ export class ArcGeojsonLayer extends LitElement {
     return new PopupTemplate({
       title: (event: any) => {
         const graphic = event?.graphic ?? event;
-        return typeof info.listItem === 'function' ? info.listItem(graphic) : info.listItem;
+        return typeof info.listItem === 'function'
+          ? info.listItem(graphic) : info.listItem;
       },
       content: (event: any) => {
         const graphic = event?.graphic ?? event;
-        return typeof info.details === 'function' ? info.details(graphic) : info.details;
+        return typeof info.details === 'function'
+          ? info.details(graphic) : info.details;
       }
     });
   }
@@ -901,8 +971,10 @@ export class ArcGeojsonLayer extends LitElement {
     const parsed = ArcGeojsonLayer.parseJson<InfoTemplateDetails>(this.infoTemplate);
     if (!parsed.parsedJson) return null;
     const info = parsed.parsedJson;
-    const title = typeof info.listItem === 'function' ? info.listItem(graphic) : info.listItem;
-    const content = typeof info.details === 'function' ? info.details(graphic) : info.details;
+    const title = typeof info.listItem === 'function'
+      ? info.listItem(graphic) : info.listItem;
+    const content = typeof info.details === 'function'
+      ? info.details(graphic) : info.details;
     return new PopupTemplate({ title, content });
   }
 
@@ -926,6 +998,7 @@ export class ArcGeojsonLayer extends LitElement {
     this.labelLayer.removeAll();
     const labelColor = JsonUtils.resolveLabelColor(this.labelColor);
     const labelSize = JsonUtils.resolveLabelSize(this.labelSize);
+
     this.featureLayer.graphics.forEach((graphic: Graphic) => {
       const label = graphic.attributes?.LABEL;
       if (!label || !graphic.geometry) return;
@@ -942,50 +1015,146 @@ export class ArcGeojsonLayer extends LitElement {
     });
   }
 
-  private getDefaultSymbolForGeometry(geometry: Geometry): any {
+  // ── getDefaultSymbolForGeometry ───────────────────────────────────────────
+  // Uses JsonUtils.getJsonSymbolFor (returns esriSMS/esriSLS/esriSFS format)
+  // then converts to ArcGIS 5.0 constructors instead of fromJSON()
+  // because ArcGIS 5.0 does not accept esri prefix type strings in fromJSON()
+
+  private getDefaultSymbolForGeometry(geometry: Geometry | null | undefined): any {
+    if (!geometry) return null;
+
+    // JsonUtils.getJsonSymbolFor returns legacy esriSMS/esriSLS/esriSFS JSON
+    // We read its values and construct ArcGIS 5.0 symbols directly
     const symbolJson = JsonUtils.getJsonSymbolFor(
-      geometry.type, this.DEFAULT_SYMBOL_COLOR,
+      geometry.type,
+      this.DEFAULT_SYMBOL_COLOR,
       ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE
     ) as any;
 
     const symbol = symbolJson?.symbol;
-    if (!symbol) return null;
 
-    try {
-      if (symbol.type === 'esriSMS' || geometry.type === 'point')
-        return SimpleMarkerSymbol.fromJSON(symbol);
-      if (symbol.type === 'esriSLS' || geometry.type === 'polyline')
-        return SimpleLineSymbol.fromJSON(symbol);
-      return SimpleFillSymbol.fromJSON(symbol);
-    } catch {
-      if (ArcGeojsonLayer.isPoint(geometry)) {
+    if (symbol) {
+      const type = (symbol.type || '').toLowerCase();
+
+      // esriSMS → SimpleMarkerSymbol
+      if (type === 'esrisms' || ArcGeojsonLayer.isPoint(geometry)) {
         return new SimpleMarkerSymbol({
-          style: 'circle', size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
-          color: this.DEFAULT_SYMBOL_COLOR as any,
-          outline: { color: [0, 0, 0, 200] as any, width: 1 }
+          style: symbol.style === 'esriSMSCircle' ? 'circle' : (symbol.style ?? 'circle'),
+          size: symbol.size ?? ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+          color: symbol.color as any,
+          outline: symbol.outline
+            ? new SimpleLineSymbol({
+                color: symbol.outline.color as any,
+                width: symbol.outline.width ?? 1
+              })
+            : new SimpleLineSymbol({ color: [0, 0, 0, 200] as any, width: 1 })
         });
       }
-      if (ArcGeojsonLayer.isPolyline(geometry)) {
+
+      // esriSLS → SimpleLineSymbol
+      if (type === 'esrisls' || ArcGeojsonLayer.isPolyline(geometry)) {
         return new SimpleLineSymbol({
-          style: 'solid', width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
-          color: this.DEFAULT_SYMBOL_COLOR as any
+          style: symbol.style === 'esriSLSSolid' ? 'solid' : (symbol.style ?? 'solid'),
+          width: symbol.width ?? ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+          color: symbol.color as any
         });
       }
-      return new SimpleFillSymbol({
-        style: 'solid',
-        color: [this.DEFAULT_SYMBOL_COLOR[0], this.DEFAULT_SYMBOL_COLOR[1],
-          this.DEFAULT_SYMBOL_COLOR[2], 100] as any,
-        outline: { color: [110, 110, 110, 255] as any, width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH }
+
+      // esriSFS → SimpleFillSymbol
+      if (type === 'esrisfs' || ArcGeojsonLayer.isPolygon(geometry)) {
+        return new SimpleFillSymbol({
+          style: symbol.style === 'esriSFSSolid' ? 'solid' : (symbol.style ?? 'solid'),
+          color: symbol.color as any,
+          outline: symbol.outline
+            ? new SimpleLineSymbol({
+                color: symbol.outline.color as any,
+                width: symbol.outline.width ?? ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+              })
+            : new SimpleLineSymbol({
+                color: [110, 110, 110, 255] as any,
+                width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+              })
+        });
+      }
+    }
+
+    // Fallback — direct constructors
+    const color = this.DEFAULT_SYMBOL_COLOR;
+    if (ArcGeojsonLayer.isPoint(geometry)) {
+      return new SimpleMarkerSymbol({
+        style: 'circle',
+        size: ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE,
+        color: color as any,
+        outline: new SimpleLineSymbol({ color: [0, 0, 0, 200] as any, width: 1 })
       });
     }
+    if (ArcGeojsonLayer.isPolyline(geometry)) {
+      return new SimpleLineSymbol({
+        style: 'solid',
+        width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH,
+        color: color as any
+      });
+    }
+    return new SimpleFillSymbol({
+      style: 'solid',
+      color: [color[0], color[1], color[2], 100] as any,
+      outline: new SimpleLineSymbol({
+        color: [110, 110, 110, 255] as any,
+        width: ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH
+      })
+    });
   }
+
+  // ── normalizeRendererJson ─────────────────────────────────────────────────
+  // Converts esriSMS/esriSLS/esriSFS → simple-marker/simple-line/simple-fill
+  // so rendererJsonUtils.fromJSON() can parse them in ArcGIS 5.0
+  // Supports both old library format and new ArcGIS 5.0 format
+
+  static normalizeRendererJson(rendererJson: any): any {
+    if (!rendererJson) return rendererJson;
+    const clone = JSON.parse(JSON.stringify(rendererJson));
+
+    const normSym = (sym: any): any => {
+      if (!sym) return sym;
+      // Normalize type strings
+      if (sym.type === 'esriSMS') sym.type = 'simple-marker';
+      if (sym.type === 'esriSLS') sym.type = 'simple-line';
+      if (sym.type === 'esriSFS') sym.type = 'simple-fill';
+      if (sym.type === 'esriTS')  sym.type = 'text';
+      // Normalize style strings
+      if (sym.style === 'esriSMSCircle') sym.style = 'circle';
+      if (sym.style === 'esriSLSSolid')  sym.style = 'solid';
+      if (sym.style === 'esriSFSSolid')  sym.style = 'solid';
+      if (sym.outline) sym.outline = normSym(sym.outline);
+      return sym;
+    };
+
+    if (clone.symbol) clone.symbol = normSym(clone.symbol);
+    if (clone.uniqueValueInfos) {
+      clone.uniqueValueInfos = clone.uniqueValueInfos.map(
+        (i: any) => ({ ...i, symbol: normSym(i.symbol) })
+      );
+    }
+    if (clone.classBreakInfos) {
+      clone.classBreakInfos = clone.classBreakInfos.map(
+        (i: any) => ({ ...i, symbol: normSym(i.symbol) })
+      );
+    }
+    return clone;
+  }
+
+  // ── Geometry utilities ────────────────────────────────────────────────────
 
   private determineExistingGeometryType(): string | undefined {
     return this.featureLayer?.graphics?.getItemAt(0)?.geometry?.type;
   }
 
-  private validGeometryType(drawGeometryType: string, featureLayerGeometryType: string): boolean {
-    return this.determineFeatureLayerGeometryType(drawGeometryType) === featureLayerGeometryType;
+  private validGeometryType(
+    drawGeometryType: string,
+    featureLayerGeometryType: string
+  ): boolean {
+    return this.determineFeatureLayerGeometryType(drawGeometryType) ===
+      featureLayerGeometryType;
   }
 
   private determineFeatureLayerGeometryType(drawGeometryType: string): string {
@@ -1041,15 +1210,21 @@ export class ArcGeojsonLayer extends LitElement {
     const geographicPoint = mapPoint
       ? webMercatorUtils.webMercatorToGeographic(mapPoint) as Point : null;
     return {
-      coordinates: { latitude: geographicPoint?.y ?? 0, longitude: geographicPoint?.x ?? 0 },
+      coordinates: {
+        latitude: geographicPoint?.y ?? 0,
+        longitude: geographicPoint?.x ?? 0
+      },
       attributes: graphic?.attributes ?? {}
     };
   }
 
   private emitLayerEvent(name: string, detail: any): void {
-    this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent(name, {
+      detail, bubbles: true, composed: true
+    }));
   }
 
+  // Check both featureLayer AND sketchLayer for hit results
   private getLayerGraphicFromHit(hit: any): Graphic | undefined {
     const result = hit?.results?.find(
       (r: any) => r.graphic?.layer === this.featureLayer ||
@@ -1059,7 +1234,8 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
   private getGraphicUniqueId(graphic: Graphic): string | number | undefined {
-    return graphic.attributes?.[this.uniqueIdPropertyName] ?? graphic.attributes?.OBJECTID;
+    return graphic.attributes?.[this.uniqueIdPropertyName] ??
+      graphic.attributes?.OBJECTID;
   }
 
   static parseJson<T = any>(value: any): JsonParseResult<T> {
@@ -1067,7 +1243,9 @@ export class ArcGeojsonLayer extends LitElement {
       return { error: new Error('Value is null or undefined') };
     if (typeof value === 'string') {
       try { return { parsedJson: JSON.parse(value) as T }; }
-      catch (e: any) { return { error: e instanceof Error ? e : new Error(String(e)) }; }
+      catch (e: any) {
+        return { error: e instanceof Error ? e : new Error(String(e)) };
+      }
     }
     return { parsedJson: value as T };
   }
