@@ -104,14 +104,6 @@ export class ArcGeojsonLayer extends LitElement {
 
   private ancestorMap!: any;
 
-  private readonly DEFAULT_SYMBOL_COLOR: number[] =
-
-    ArcGeojsonLayer.getRandomColor();
-
-  private static readonly DEFAULT_SYMBOL_LINE_WIDTH = 2;
-
-  private static readonly DEFAULT_SYMBOL_MARKER_SIZE = 12;
-
   private featureLayer!: GraphicsLayer;
 
   private labelLayer!: GraphicsLayer;
@@ -192,7 +184,7 @@ export class ArcGeojsonLayer extends LitElement {
 
   @property({ attribute: 'label-color' })
 
-  labelColor: number[] | string = this.DEFAULT_SYMBOL_COLOR;
+  labelColor: number[] | string = JsonUtils.DEFAULT_LABEL_COLOR;
 
   @property({ type: Number, attribute: 'label-size' })
 
@@ -270,15 +262,7 @@ export class ArcGeojsonLayer extends LitElement {
 
       }
 
-      console.log(
-
-        '[arc-geojson-layer] READY:',
-
-        this.name,
-
-        this.layerBaseId
-
-      );
+      console.log('[arc-geojson-layer] READY:', this.name, this.layerBaseId);
 
     } catch (error) {
 
@@ -292,29 +276,9 @@ export class ArcGeojsonLayer extends LitElement {
 
     super.disconnectedCallback();
 
-    this.eventHandles.forEach(h => {
+    this.cleanupEditor();
 
-      try { h.remove(); } catch {}
-
-    });
-
-    this.eventHandles = [];
-
-    this.editorHandles.forEach(h => {
-
-      try { h.remove(); } catch {}
-
-    });
-
-    this.editorHandles = [];
-
-    try {
-
-      this.graphicsEditor?.cancel();
-
-      this.graphicsEditor?.destroy();
-
-    } catch {}
+    this.cleanupViewEvents();
 
     if (this.view?.map) {
 
@@ -494,13 +458,15 @@ export class ArcGeojsonLayer extends LitElement {
 
     await this.view.when();
 
+    try {
+
+      this.view.navigation.doubleClickZoomEnabled = false;
+
+    } catch {}
+
   }
 
-  private async createLayer(
-
-    geojson: string | FeatureCollection
-
-  ): Promise<void> {
+  private async createLayer(geojson: string | FeatureCollection): Promise<void> {
 
     const gId = `${this.layerBaseId}-graphics`;
 
@@ -590,41 +556,11 @@ export class ArcGeojsonLayer extends LitElement {
 
     this.blockGeoJsonUpdate = false;
 
-    console.log(
-
-      '[arc-geojson-layer] createLayer DONE:',
-
-      this.name,
-
-      'layerId:',
-
-      gId,
-
-      'graphics:',
-
-      this.featureLayer.graphics.length
-
-    );
-
   }
 
   private async createEditor(): Promise<void> {
 
-    this.editorHandles.forEach(h => {
-
-      try { h.remove(); } catch {}
-
-    });
-
-    this.editorHandles = [];
-
-    try {
-
-      this.graphicsEditor?.cancel();
-
-      this.graphicsEditor?.destroy();
-
-    } catch {}
+    this.cleanupEditor();
 
     this.graphicsEditor = new SketchViewModel({
 
@@ -660,13 +596,23 @@ export class ArcGeojsonLayer extends LitElement {
 
       const cloned = evt.graphic.clone();
 
-      this.sketchLayer.graphics.removeAll();
+      this.resetEditorStateOnly();
 
       this.inDrawingMode = false;
 
-      this.enableInfoPopupWindow(true);
-
       this.addToGeojson(cloned);
+
+      if (this.enableUserEdit) {
+
+        cloned.popupTemplate = null as any;
+
+        this.enableInfoPopupWindow(false);
+
+      } else {
+
+        this.enableInfoPopupWindow(true);
+
+      }
 
     });
 
@@ -692,11 +638,9 @@ export class ArcGeojsonLayer extends LitElement {
 
         });
 
-        if (!this.enableUserEdit) {
+        this.resetEditorStateOnly();
 
-          this.enableInfoPopupWindow(true);
-
-        }
+        this.enableInfoPopupWindow(!this.enableUserEdit);
 
       }
 
@@ -716,11 +660,9 @@ export class ArcGeojsonLayer extends LitElement {
 
         });
 
-        if (!this.enableUserEdit) {
+        this.resetEditorStateOnly();
 
-          this.enableInfoPopupWindow(true);
-
-        }
+        this.enableInfoPopupWindow(!this.enableUserEdit);
 
       }
 
@@ -734,9 +676,19 @@ export class ArcGeojsonLayer extends LitElement {
 
     let clickTimer: any = null;
 
+    try {
+
+      this.view.navigation.doubleClickZoomEnabled = false;
+
+    } catch {}
+
     const clickHandle = this.view.on('click', async (evt: any) => {
 
-      const hit = await this.view.hitTest(evt);
+      const hit = await this.view.hitTest(evt, {
+
+        include: [this.featureLayer, this.sketchLayer]
+
+      });
 
       const graphic = this.getLayerGraphicFromHit(hit);
 
@@ -760,7 +712,13 @@ export class ArcGeojsonLayer extends LitElement {
 
             this.removeFromGeojson(graphic);
 
-            try { this.graphicsEditor.cancel(); } catch {}
+            try {
+
+              this.graphicsEditor?.cancel();
+
+            } catch {}
+
+            this.resetEditorStateOnly();
 
             this.removingItem = false;
 
@@ -806,7 +764,11 @@ export class ArcGeojsonLayer extends LitElement {
 
       this.enableInfoPopupWindow(false);
 
-      const hit = await this.view.hitTest(evt);
+      const hit = await this.view.hitTest(evt, {
+
+        include: [this.featureLayer, this.sketchLayer]
+
+      });
 
       const graphic = this.getLayerGraphicFromHit(hit);
 
@@ -838,57 +800,45 @@ export class ArcGeojsonLayer extends LitElement {
 
     });
 
-    const pointerMoveHandle = this.view.on(
+    const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
 
-      'pointer-move',
+      const hit = await this.view.hitTest(evt, {
 
-      async (evt: any) => {
+        include: [this.featureLayer, this.sketchLayer]
 
-        const hit = await this.view.hitTest(evt);
+      });
 
-        const graphic = this.getLayerGraphicFromHit(hit);
+      const graphic = this.getLayerGraphicFromHit(hit);
 
-        if (!graphic) {
+      if (!graphic) {
 
-          if (this.hoveredGraphicUid !== undefined) {
+        if (this.hoveredGraphicUid !== undefined) {
 
-            this.hoveredGraphicUid = undefined;
+          this.hoveredGraphicUid = undefined;
 
-            this.emitLayerEvent('layerMouseOut', {
+          this.emitLayerEvent('layerMouseOut', {
 
-              coordinates: { latitude: 0, longitude: 0 },
+            coordinates: { latitude: 0, longitude: 0 },
 
-              attributes: {}
+            attributes: {}
 
-            });
-
-          }
-
-          return;
+          });
 
         }
 
-        const uid = this.getGraphicUniqueId(graphic);
+        return;
 
-        if (this.hoveredGraphicUid !== uid) {
+      }
 
-          if (this.hoveredGraphicUid !== undefined) {
+      const uid = this.getGraphicUniqueId(graphic);
 
-            this.emitLayerEvent(
+      if (this.hoveredGraphicUid !== uid) {
 
-              'layerMouseOut',
-
-              this.buildMouseEvent(graphic, evt.mapPoint)
-
-            );
-
-          }
-
-          this.hoveredGraphicUid = uid;
+        if (this.hoveredGraphicUid !== undefined) {
 
           this.emitLayerEvent(
 
-            'layerMouseOver',
+            'layerMouseOut',
 
             this.buildMouseEvent(graphic, evt.mapPoint)
 
@@ -896,9 +846,19 @@ export class ArcGeojsonLayer extends LitElement {
 
         }
 
+        this.hoveredGraphicUid = uid;
+
+        this.emitLayerEvent(
+
+          'layerMouseOver',
+
+          this.buildMouseEvent(graphic, evt.mapPoint)
+
+        );
+
       }
 
-    );
+    });
 
     this.eventHandles.push(clickHandle, dblClickHandle, pointerMoveHandle);
 
@@ -952,11 +912,7 @@ export class ArcGeojsonLayer extends LitElement {
 
   }
 
-  async updateGeojson(
-
-    newGeojson: string | FeatureCollection
-
-  ): Promise<void> {
+  async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
 
     if (
 
@@ -1014,6 +970,8 @@ export class ArcGeojsonLayer extends LitElement {
 
     } catch {}
 
+    this.resetEditorStateOnly();
+
     this.featureLayer.graphics.removeAll();
 
     this.labelLayer?.graphics.removeAll();
@@ -1032,18 +990,6 @@ export class ArcGeojsonLayer extends LitElement {
 
     this.refreshLabels();
 
-    console.log(
-
-      '[arc-geojson-layer] updateGeojson DONE:',
-
-      this.name,
-
-      'graphics:',
-
-      this.featureLayer.graphics.length
-
-    );
-
   }
 
   updateInfoTemplate(newInfoTemplate: any): void {
@@ -1054,7 +1000,7 @@ export class ArcGeojsonLayer extends LitElement {
 
     this.featureLayer.graphics.forEach((g: Graphic) => {
 
-      g.popupTemplate = this.enableUserEdit
+      g.popupTemplate = this.enableUserEdit || this.inDrawingMode
 
         ? null as any
 
@@ -1116,13 +1062,13 @@ export class ArcGeojsonLayer extends LitElement {
 
     } catch {}
 
+    this.resetEditorStateOnly();
+
     this.featureLayer.graphics.removeAll();
 
     this.labelLayer?.graphics.removeAll();
 
     this.sketchLayer?.graphics.removeAll();
-
-    this.enableUserEdit = false;
 
     this.inDrawingMode = true;
 
@@ -1150,9 +1096,17 @@ export class ArcGeojsonLayer extends LitElement {
 
         await this.createEditor();
 
+        await new Promise<void>(resolve => setTimeout(resolve, 50));
+
         this.graphicsEditor.create(tool);
 
-      } catch {}
+      } catch (secondError) {
+
+        console.error('[arc-geojson-layer] second startDrawing failed:', secondError);
+
+        this.resetEditorStateOnly();
+
+      }
 
     }
 
@@ -1168,7 +1122,7 @@ export class ArcGeojsonLayer extends LitElement {
 
     } catch {}
 
-    this.sketchLayer?.graphics.removeAll();
+    this.resetEditorStateOnly();
 
     this.enableInfoPopupWindow(!this.enableUserEdit);
 
@@ -1176,9 +1130,21 @@ export class ArcGeojsonLayer extends LitElement {
 
   async activateGraphicsEditor(graphic: Graphic): Promise<void> {
 
-    if (!this.enableUserEdit || !this.graphicsEditor || !graphic?.geometry) {
+    if (!this.enableUserEdit) {
 
       return;
+
+    }
+
+    if (!graphic?.geometry) {
+
+      return;
+
+    }
+
+    if (!this.graphicsEditor) {
+
+      await this.createEditor();
 
     }
 
@@ -1186,29 +1152,35 @@ export class ArcGeojsonLayer extends LitElement {
 
     try {
 
-      this.graphicsEditor.cancel();
+      this.graphicsEditor?.cancel();
 
     } catch {}
 
+    this.resetEditorStateOnly();
+
+    const editableGraphic = graphic.clone();
+
+    editableGraphic.attributes = {
+
+      ...(graphic.attributes ?? {})
+
+    };
+
+    editableGraphic.symbol =
+
+      graphic.symbol ?? this.getDefaultSymbolForGeometry(graphic.geometry);
+
+    editableGraphic.popupTemplate = null as any;
+
     this.featureLayer.remove(graphic);
 
-    graphic.popupTemplate = null as any;
+    this.sketchLayer.graphics.removeAll();
 
-    if (!graphic.symbol) {
-
-      graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
-
-    }
-
-    if (!this.sketchLayer.graphics.includes(graphic)) {
-
-      this.sketchLayer.add(graphic);
-
-    }
+    this.sketchLayer.add(editableGraphic);
 
     try {
 
-      this.graphicsEditor.update([graphic], {
+      this.graphicsEditor.update([editableGraphic], {
 
         tool: this.resolveUpdateTool(),
 
@@ -1224,17 +1196,11 @@ export class ArcGeojsonLayer extends LitElement {
 
       });
 
-    } catch (error: any) {
+    } catch (error) {
 
-      console.warn(
+      console.error('[arc-geojson-layer] editor activation failed:', error);
 
-        '[arc-geojson-layer] activateGraphicsEditor error:',
-
-        error?.message
-
-      );
-
-      this.sketchLayer.remove(graphic);
+      this.sketchLayer.remove(editableGraphic);
 
       this.applyGraphicDefaults(graphic);
 
@@ -1243,6 +1209,8 @@ export class ArcGeojsonLayer extends LitElement {
         this.featureLayer.add(graphic);
 
       }
+
+      this.resetEditorStateOnly();
 
     }
 
@@ -1640,6 +1608,12 @@ export class ArcGeojsonLayer extends LitElement {
 
     this.applyGraphicDefaults(newGraphic);
 
+    if (this.enableUserEdit) {
+
+      newGraphic.popupTemplate = null as any;
+
+    }
+
     if (!this.featureLayer.graphics.includes(newGraphic)) {
 
       this.featureLayer.add(newGraphic);
@@ -1681,6 +1655,8 @@ export class ArcGeojsonLayer extends LitElement {
     this.refreshLabels();
 
     this.emitLayerEvent('userEditItemRemoved', feature);
+
+    this.resetEditorStateOnly();
 
   }
 
@@ -1828,19 +1804,25 @@ export class ArcGeojsonLayer extends LitElement {
 
       : null;
 
-    const rendererSymbol = rendererConfig?.parsedJson?.symbol;
+    const parsedRenderer = rendererConfig?.parsedJson;
 
-    if (rendererSymbol) {
+    if (parsedRenderer?.symbol) {
 
-      return JsonUtils.normalizePlainSymbol(rendererSymbol);
+      return JsonUtils.normalizePlainSymbol(parsedRenderer.symbol);
 
     }
 
-    let size = ArcGeojsonLayer.DEFAULT_SYMBOL_MARKER_SIZE;
+    let size = JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE;
 
     if (ArcGeojsonLayer.isPolyline(geometry)) {
 
-      size = ArcGeojsonLayer.DEFAULT_SYMBOL_LINE_WIDTH;
+      size = JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH;
+
+    }
+
+    if (ArcGeojsonLayer.isPolygon(geometry)) {
+
+      size = JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH;
 
     }
 
@@ -1848,7 +1830,7 @@ export class ArcGeojsonLayer extends LitElement {
 
       geometry.type,
 
-      this.DEFAULT_SYMBOL_COLOR,
+      JsonUtils.DEFAULT_SYMBOL_COLOR,
 
       size
 
@@ -1919,6 +1901,44 @@ export class ArcGeojsonLayer extends LitElement {
     }
 
     return 'move';
+
+  }
+
+  private resetEditorStateOnly(): void {
+
+    this.sketchLayer?.graphics.removeAll();
+
+  }
+
+  private cleanupEditor(): void {
+
+    this.editorHandles.forEach(h => {
+
+      try { h.remove(); } catch {}
+
+    });
+
+    this.editorHandles = [];
+
+    try {
+
+      this.graphicsEditor?.cancel();
+
+      this.graphicsEditor?.destroy();
+
+    } catch {}
+
+  }
+
+  private cleanupViewEvents(): void {
+
+    this.eventHandles.forEach(h => {
+
+      try { h.remove(); } catch {}
+
+    });
+
+    this.eventHandles = [];
 
   }
 
@@ -2002,15 +2022,25 @@ export class ArcGeojsonLayer extends LitElement {
 
   private getLayerGraphicFromHit(hit: any): Graphic | undefined {
 
-    return hit?.results?.find(
+    const result = hit?.results?.find((r: any) => {
 
-      (r: any) =>
+      const layer = r.graphic?.layer;
 
-        r.graphic?.layer === this.featureLayer ||
+      return (
 
-        r.graphic?.layer === this.sketchLayer
+        layer?.id === this.featureLayer?.id ||
 
-    )?.graphic;
+        layer?.id === this.sketchLayer?.id ||
+
+        layer === this.featureLayer ||
+
+        layer === this.sketchLayer
+
+      );
+
+    });
+
+    return result?.graphic;
 
   }
 
@@ -2099,22 +2129,6 @@ export class ArcGeojsonLayer extends LitElement {
     }
 
     return new Point({ x: 0, y: 0 });
-
-  }
-
-  static getRandomColor(): number[] {
-
-    return [
-
-      Math.floor(Math.random() * 200),
-
-      Math.floor(Math.random() * 200),
-
-      Math.floor(Math.random() * 200),
-
-      200
-
-    ];
 
   }
 
