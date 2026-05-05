@@ -1,62 +1,51 @@
-const nativeDblClick = async (event: MouseEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-
-  if (clickTimer) {
-    clearTimeout(clickTimer);
-    clickTimer = null;
-  }
-
-  console.log('[arc-geojson-layer] native dblclick fired');
-
-  const rect = this.view.container.getBoundingClientRect();
-
-  const screenPoint = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-
-  const hit = await this.view.hitTest(screenPoint, {
+const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
+  const hit = await this.view.hitTest(evt, {
     include: [this.featureLayer, this.sketchLayer]
   });
 
-  let graphic = this.getLayerGraphicFromHit(hit);
+  const graphic = this.getLayerGraphicFromHit(hit);
 
   if (!graphic) {
-    graphic = this.findNearestGraphic(this.view.toMap(screenPoint) as Point);
+    this.view.container.style.cursor = '';
+
+    if (this.hoveredGraphicUid !== undefined) {
+      this.hoveredGraphicUid = undefined;
+
+      this.emitLayerEvent('layerMouseOut', {
+        coordinates: { latitude: 0, longitude: 0 },
+        attributes: {}
+      });
+    }
+
+    return;
   }
 
-  console.log('[arc-geojson-layer] native dblclick graphic:', {
-    enableUserEdit: this.enableUserEdit,
-    found: !!graphic,
-    geometry: graphic?.geometry?.type
-  });
+  this.view.container.style.cursor = 'pointer';
 
-  if (!graphic) return;
+  const uid = this.getGraphicUniqueId(graphic);
 
-  this.emitLayerEvent(
-    'doubleClick',
-    this.buildMouseEvent(graphic, this.view.toMap(screenPoint) as Point)
-  );
+  if (this.hoveredGraphicUid !== uid) {
+    if (this.hoveredGraphicUid !== undefined) {
+      this.emitLayerEvent(
+        'layerMouseOut',
+        this.buildMouseEvent(graphic, evt.mapPoint)
+      );
+    }
 
-  if (this.enableUserEdit) {
-    await this.activateGraphicsEditor(graphic);
-  }
-};
+    this.hoveredGraphicUid = uid;
 
-this.view.container.addEventListener('dblclick', nativeDblClick, true);
-
-this.eventHandles.push({
-  remove: () => {
-    this.view.container.removeEventListener('dblclick', nativeDblClick, true);
+    this.emitLayerEvent(
+      'layerMouseOver',
+      this.buildMouseEvent(graphic, evt.mapPoint)
+    );
   }
 });
 
 
 
-private findNearestGraphic(_mapPoint: Point): Graphic | undefined {
-  return this.featureLayer?.graphics
-    ?.toArray()
-    ?.find((g: Graphic) => !!g.geometry);
-}
 
+try {
+  if (this.view?.container) {
+    this.view.container.style.cursor = '';
+  }
+} catch {}
