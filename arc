@@ -1,3 +1,108 @@
+private finishActiveEditor(): void {
+  if (!this._editorOpen) return;
+
+  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
+
+  graphics.forEach((g: Graphic) => {
+    if (!g?.geometry) return;
+    this.updateGeojsonWithChanges(g);
+  });
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this._editorOpen = false;
+  this.enableInfoPopupWindow(!this.enableUserEdit);
+
+  console.log('[up-geojson-layer] editor closed');
+}
+
+
+
+private async handleEditorDoubleClick(mapPoint: Point, source: string): Promise<void> {
+  if (!this.enableUserEdit) return;
+
+  const now = Date.now();
+
+  // Prevent ArcGIS double-click and native dblclick from both running.
+  if (now - this._lastDoubleClickHandledAt < 350) {
+    console.log('[up-geojson-layer] duplicate dblclick ignored from', source);
+    return;
+  }
+
+  this._lastDoubleClickHandledAt = now;
+
+  if (this.isEditorActive()) {
+    this.finishActiveEditor();
+    return;
+  }
+
+  const graphic = this.findNearestEditableGraphic(mapPoint);
+
+  console.log('[up-geojson-layer] handleEditorDoubleClick:', {
+    source,
+    found: !!graphic,
+    geometry: graphic?.geometry?.type,
+    featureCount: this.featureLayer?.graphics?.length
+  });
+
+  if (!graphic) return;
+
+  await this.activateGraphicsEditor(graphic);
+}
+
+
+async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) return;
+
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  this.graphicsEditor.layer = this.featureLayer;
+
+  graphic.popupTemplate = null as any;
+
+  if (!graphic.symbol) {
+    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+  }
+
+  const tool = this.resolveUpdateTool(graphic);
+
+  console.log('[up-geojson-layer] opening editor with', {
+    tool,
+    geometry: graphic.geometry.type,
+    featureCount: this.featureLayer.graphics.length
+  });
+
+  try {
+    this.graphicsEditor.update([graphic], {
+      tool,
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false
+    });
+
+    this._editorOpen = true;
+
+    console.log('[up-geojson-layer] editor opened');
+  } catch (error) {
+    this._editorOpen = false;
+    console.error('[up-geojson-layer] editor activation failed:', error);
+  }
+}
+
+
+
 private bindViewEvents(): void {
   let clickTimer: any = null;
 
@@ -10,17 +115,15 @@ private bindViewEvents(): void {
     clickTimer = setTimeout(async () => {
       clickTimer = null;
 
+      if (this.enableUserEdit) {
+        return;
+      }
+
       const hit = await this.view.hitTest(evt, {
         include: [this.featureLayer, this.sketchLayer]
       });
 
       const graphic = this.getLayerGraphicFromHit(hit);
-
-      if (this.enableUserEdit) {
-        // Single click should never open/close editor.
-        // Editor open/close is controlled only by double-click.
-        return;
-      }
 
       if (!graphic) return;
 
@@ -43,36 +146,7 @@ private bindViewEvents(): void {
       clickTimer = null;
     }
 
-    if (!this.enableUserEdit) return;
-
-    // If editor is already open, double-click should close it.
-    if (this.isEditorActive()) {
-      this.finishActiveEditor();
-      return;
-    }
-
-    this.enableInfoPopupWindow(false);
-
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer]
-    });
-
-    let graphic = this.getLayerGraphicFromHit(hit);
-
-    if (!graphic || graphic.geometry?.type === 'point') {
-      graphic = this.findNearestEditableGraphic(evt.mapPoint);
-    }
-
-    console.log('[up-geojson-layer] double click edit:', {
-      enableUserEdit: this.enableUserEdit,
-      found: !!graphic,
-      geometry: graphic?.geometry?.type,
-      featureCount: this.featureLayer?.graphics?.length
-    });
-
-    if (!graphic) return;
-
-    await this.activateGraphicsEditor(graphic);
+    await this.handleEditorDoubleClick(evt.mapPoint, 'arcgis-double-click');
   });
 
   const nativeDblClick = async (event: MouseEvent) => {
@@ -84,14 +158,6 @@ private bindViewEvents(): void {
       clickTimer = null;
     }
 
-    if (!this.enableUserEdit) return;
-
-    // Same rule for native fallback.
-    if (this.isEditorActive()) {
-      this.finishActiveEditor();
-      return;
-    }
-
     const rect = this.view.container.getBoundingClientRect();
 
     const screenPoint = {
@@ -99,27 +165,9 @@ private bindViewEvents(): void {
       y: event.clientY - rect.top
     };
 
-    const hit = await this.view.hitTest(screenPoint, {
-      include: [this.featureLayer]
-    });
+    const mapPoint = this.view.toMap(screenPoint) as Point;
 
-    let graphic = this.getLayerGraphicFromHit(hit);
-
-    if (!graphic || graphic.geometry?.type === 'point') {
-      graphic = this.findNearestEditableGraphic(
-        this.view.toMap(screenPoint) as Point
-      );
-    }
-
-    console.log('[up-geojson-layer] native dblclick edit:', {
-      enableUserEdit: this.enableUserEdit,
-      found: !!graphic,
-      geometry: graphic?.geometry?.type
-    });
-
-    if (!graphic) return;
-
-    await this.activateGraphicsEditor(graphic);
+    await this.handleEditorDoubleClick(mapPoint, 'native-dblclick');
   };
 
   this.view.container.addEventListener('dblclick', nativeDblClick, true);
@@ -167,24 +215,4 @@ private bindViewEvents(): void {
       }
     }
   );
-}
-
-private finishActiveEditor(): void {
-  if (!this._editorOpen) return;
-
-  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
-
-  graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-    this.updateGeojsonWithChanges(g);
-  });
-
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
-
-  this._editorOpen = false;
-  this.enableInfoPopupWindow(!this.enableUserEdit);
-
-  console.log('[up-geojson-layer] editor closed');
 }
