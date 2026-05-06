@@ -1,96 +1,61 @@
-private getParsedCenter(): number[] | undefined {
-  const centerValue = this.center;
+private async initializeMap(
+  parsedCenter?: number[],
+  parsedExtent?: any
+): Promise<void> {
+  if (this.view) return;
 
-  if (
-    centerValue &&
-    typeof centerValue === 'object' &&
-    'longitude' in centerValue &&
-    'latitude' in centerValue &&
-    typeof centerValue.longitude === 'number' &&
-    typeof centerValue.latitude === 'number'
-  ) {
-    return [centerValue.longitude, centerValue.latitude];
+  const mapEl = this.renderRoot?.querySelector('#upMap') as any;
+
+  if (!mapEl) {
+    console.error('[up-map] arcgis-map element not found');
+    return;
   }
 
-  return undefined;
-}
+  mapEl.basemap = this.basemap || 'gray-vector';
 
-
-private getParsedExtent(): any | undefined {
-  const extentValue = this.extent;
-
-  if (
-    extentValue &&
-    typeof extentValue === 'object' &&
-    typeof extentValue.leftLongitude === 'number' &&
-    typeof extentValue.rightLongitude === 'number' &&
-    typeof extentValue.topLatitude === 'number' &&
-    typeof extentValue.bottomLatitude === 'number'
-  ) {
-    return {
-      xmin: extentValue.leftLongitude,
-      ymin: extentValue.bottomLatitude,
-      xmax: extentValue.rightLongitude,
-      ymax: extentValue.topLatitude,
-      spatialReference: { wkid: 4326 }
-    };
+  if (parsedCenter) {
+    mapEl.center = parsedCenter;
   }
 
-  return undefined;
-}
-
-
-protected async firstUpdated(): Promise<void> {
-  await this.updateComplete;
-
-  const parsedCenter = this.getParsedCenter();
-  const parsedExtent = this.getParsedExtent();
-
-  console.log('[up-map] firstUpdated parsedCenter:', parsedCenter);
-  console.log('[up-map] firstUpdated parsedExtent:', parsedExtent);
-  console.log('[up-map] firstUpdated zoom:', this.zoom);
-
-  await this.initializeMap(parsedCenter, parsedExtent);
-}
-
-
-protected updated(changedProps: Map<string, unknown>): void {
-  if (!this.view) return;
-
-  if (
-    changedProps.has('center') ||
-    changedProps.has('extent') ||
-    changedProps.has('zoom')
-  ) {
-    this.applyViewProperties();
+  if (typeof this.zoom === 'number') {
+    mapEl.zoom = this.zoom;
   }
-}
 
-
-private async applyViewProperties(): Promise<void> {
-  if (!this.view) return;
-
-  const parsedExtent = this.getParsedExtent();
-  const parsedCenter = this.getParsedCenter();
-
-  try {
-    if (parsedExtent) {
-      await this.view.goTo(parsedExtent);
-      return;
-    }
-
-    if (parsedCenter) {
-      await this.view.goTo({
-        center: parsedCenter,
-        zoom: this.zoom
-      });
-      return;
-    }
-
-    if (typeof this.zoom === 'number') {
-      this.view.zoom = this.zoom;
-    }
-  } catch (error) {
-    console.warn('[up-map] failed to apply view properties:', error);
+  if (parsedExtent) {
+    mapEl.extent = parsedExtent;
   }
+
+  await mapEl.componentOnReady?.();
+
+  this.mapElement = mapEl;
+  this.view = mapEl.view;
+
+  if (!this.view) {
+    console.error('[up-map] MapView not available');
+    return;
+  }
+
+  await this.view.when();
+
+  if (parsedExtent) {
+    await this.view.goTo(parsedExtent);
+  } else if (parsedCenter) {
+    await this.view.goTo({
+      center: parsedCenter,
+      zoom: this.zoom
+    });
+  }
+
+  this.dispatchEvent(
+    new CustomEvent('map-ready', {
+      detail: {
+        view: this.view,
+        map: this.view.map
+      },
+      bubbles: true,
+      composed: true
+    })
+  );
+
+  console.log('[up-map] initialized');
 }
