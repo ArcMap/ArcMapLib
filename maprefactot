@@ -1,46 +1,49 @@
-import { css } from "lit";
+private currentZoomValue?: number;
 
-export const arcMapStyles = css`
-  :host {
-    display: block;
-    height: 100%;
-    width: 100%;
-  }
+private setupZoomEmitter(): void {
+  if (!this.view) return;
 
-  arcgis-map {
-    width: 100%;
-    height: 100%;
-    display: block;
-    min-height: 500px;
-  }
+  this.eventHandles.remove("map-zoom");
 
-  .map-wrapper {
-    height: 100%;
-    width: 100%;
-    overflow: visible;
-  }
+  this.eventHandles.add(
+    reactiveUtils.watch(
+      () => this.view?.zoom,
+      (zoom) => {
+        if (typeof zoom !== "number") return;
 
-  .widget-stack {
-    position: absolute;
-    left: 16px;
-    bottom: 30px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    z-index: 10;
-  }
+        if (this.currentZoomValue === zoom) {
+          return;
+        }
 
-  .widget-stack arcgis-scale-bar {
-    position: static;
-  }
+        this.currentZoomValue = zoom;
 
-  .popup-scrollable-content {
-    max-height: 260px;
-    overflow: auto;
-  }
+        this.zoom = zoom;
 
-  .popup-close-button {
-    float: right;
-    cursor: pointer;
-  }
-`;
+        this.dispatchEvent(
+          new CustomEvent<number>("zoom", {
+            detail: zoom,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      },
+      {
+        initial: false,
+      },
+    ),
+    "map-zoom",
+  );
+}
+
+
+<link
+  rel="stylesheet"
+  href="https://js.arcgis.com/calcite-components/3.2.1/calcite.css"
+/>
+
+
+<link
+  rel="stylesheet"
+  href="https://js.arcgis.com/5.0/esri/themes/light/main.css"
+/>
+
