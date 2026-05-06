@@ -1,39 +1,32 @@
-private injectGeojsonStyles(): void {
-  const styleId = 'arc-geojson-layer-cursor-style';
+private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
+  const geometryType = graphic?.geometry?.type;
 
-  if (document.getElementById(styleId)) return;
+  // Circle drawn by Sketch usually becomes polygon.
+  // If you store shapeType/drawType, use that to keep circle as transform.
+  const isCircle =
+    graphic?.attributes?.drawGeometryType === DrawGeometryTypes.CIRCLE ||
+    graphic?.attributes?.shapeType === DrawGeometryTypes.CIRCLE ||
+    graphic?.attributes?.geometryType === DrawGeometryTypes.CIRCLE;
 
-  const style = document.createElement('style');
-  style.id = styleId;
-  style.textContent = geojsonStyles.cssText;
-
-  document.head.appendChild(style);
-}
-
-
-
-async connectedCallback(): Promise<void> {
-  super.connectedCallback();
-
-  this.injectGeojsonStyles();
-
-  await this.waitForAncestorMap();
-
-  // existing code...
-}
-
-
-private setMapCursor(cursor: 'default' | 'pointer'): void {
-  const container = this.view?.container as HTMLElement;
-  if (!container) return;
-
-  if (cursor === 'pointer') {
-    container.classList.add('cursor-pointer');
-  } else {
-    container.classList.remove('cursor-pointer');
+  if (isCircle) {
+    return 'transform';
   }
 
-  try {
-    (this.view as any).cursor = cursor;
-  } catch {}
+  if (
+    geometryType === 'polygon' &&
+    (
+      this.enableUserEditVertices ||
+      this.enableUserEditAddVertices ||
+      this.enableUserEditDeleteVertices
+    )
+  ) {
+    return 'reshape';
+  }
+
+  if (this.enableUserEditScaling || this.enableUserEditRotating) {
+    return 'transform';
+  }
+
+  return 'move';
 }
+
