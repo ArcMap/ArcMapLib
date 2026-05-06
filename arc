@@ -1,31 +1,42 @@
-this.sketchLayer.graphics.removeAll();
+async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) return;
 
-const editableGraphic = new Graphic({
-  geometry: graphic.geometry.clone(),
-  attributes: { ...(graphic.attributes ?? {}) },
-  symbol: graphic.symbol ?? this.getDefaultSymbolForGeometry(graphic.geometry),
-  popupTemplate: null as any
-});
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
 
-this.sketchLayer.graphics.add(editableGraphic);
+  this.enableInfoPopupWindow(false);
 
-await this.view.whenLayerView(this.sketchLayer);
-await new Promise(resolve => setTimeout(resolve, 100));
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
 
-console.log('[up-geojson-layer] sketch graphics count', this.sketchLayer.graphics.length);
+  // Important: edit existing graphic directly from featureLayer
+  this.graphicsEditor.layer = this.featureLayer;
 
-if (this.sketchLayer.graphics.length === 0) {
-  console.error('[up-geojson-layer] failed to add graphic to sketch layer');
-  return;
+  graphic.popupTemplate = null as any;
+
+  if (!graphic.symbol) {
+    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
+  }
+
+  const tool = this.resolveUpdateTool(graphic);
+
+  console.log('[up-geojson-layer] opening editor with', {
+    tool,
+    geometry: graphic.geometry.type,
+    featureCount: this.featureLayer.graphics.length
+  });
+
+  this.graphicsEditor.update([graphic], {
+    tool,
+    enableRotation: this.enableUserEditRotating,
+    enableScaling: this.enableUserEditScaling,
+    preserveAspectRatio: this.enableUserEditUniformScaling,
+    multipleSelectionEnabled: false,
+    toggleToolOnClick: false
+  });
+
+  console.log('[up-geojson-layer] editor opened');
 }
 
-const tool = this.resolveUpdateTool(editableGraphic);
-
-this.graphicsEditor.update([editableGraphic], {
-  tool,
-  enableRotation: this.enableUserEditRotating,
-  enableScaling: this.enableUserEditScaling,
-  preserveAspectRatio: this.enableUserEditUniformScaling,
-  multipleSelectionEnabled: false,
-  toggleToolOnClick: false
-});
