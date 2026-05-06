@@ -1,49 +1,31 @@
-private currentZoomValue?: number;
+private handleArcgisMapReady = async (event: Event): Promise<void> => {
+  if (this.isMapInitialized) return;
 
-private setupZoomEmitter(): void {
-  if (!this.view) return;
+  const mapEl = event.target as any;
 
-  this.eventHandles.remove("map-zoom");
+  if (!mapEl?.view || !mapEl?.map) {
+    console.warn("arcgis-map ready fired, but map/view is missing");
+    return;
+  }
 
-  this.eventHandles.add(
-    reactiveUtils.watch(
-      () => this.view?.zoom,
-      (zoom) => {
-        if (typeof zoom !== "number") return;
+  this.view = mapEl.view;
+  this.map = mapEl.map;
 
-        if (this.currentZoomValue === zoom) {
-          return;
-        }
+  await this.view.when();
 
-        this.currentZoomValue = zoom;
+  this.isMapInitialized = true;
 
-        this.zoom = zoom;
+  this.applyZoomConstraints();
+  this.ensureDrawLayer();
+  this.setupDrawTool();
+  this.setupMapClickHandler();
+  this.setupViewStateWatchers();
+  this.setupPopupBridge();
+  this.syncPopupOptions();
+  this.syncMouseWheelZoom();
+  this.syncDoubleClickZoom();
+  this.syncKeyboardNavigation();
 
-        this.dispatchEvent(
-          new CustomEvent<number>("zoom", {
-            detail: zoom,
-            bubbles: true,
-            composed: true,
-          }),
-        );
-      },
-      {
-        initial: false,
-      },
-    ),
-    "map-zoom",
-  );
-}
-
-
-<link
-  rel="stylesheet"
-  href="https://js.arcgis.com/calcite-components/3.2.1/calcite.css"
-/>
-
-
-<link
-  rel="stylesheet"
-  href="https://js.arcgis.com/5.0/esri/themes/light/main.css"
-/>
-
+  this.resolveMapReady();
+  this.reflectCurrentMapState();
+};
