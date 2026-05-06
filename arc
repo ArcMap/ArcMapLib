@@ -1,84 +1,52 @@
-private setMapCursor(cursor: 'default' | 'pointer', evt?: any): void {
-  const container = this.view?.container as HTMLElement;
-  if (!container) return;
+private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
+  if (this.enableUserEdit || this.inDrawingMode || this.shouldSuppressPopup()) {
+    return;
+  }
 
-  const value = cursor === 'pointer' ? 'pointer' : '';
+  if (!graphic?.geometry) return;
+
+  const location = mapPoint ?? ArcGeojsonLayer.getPopupPoint(graphic.geometry);
+
+  graphic.popupTemplate =
+    graphic.popupTemplate ?? this.buildPopupTemplateFromCurrent(graphic);
+
+  if (!graphic.popupTemplate) return;
 
   try {
-    (this.view as any).cursor = cursor;
+    this.view.popupEnabled = true;
   } catch {}
 
-  container.style.setProperty('cursor', value, 'important');
-
-  const surface = container.querySelector('.esri-view-surface') as HTMLElement;
-  surface?.style.setProperty('cursor', value, 'important');
-
-  const canvas = container.querySelector('canvas') as HTMLElement;
-  canvas?.style.setProperty('cursor', value, 'important');
-
-  if (this._lastCursorElement) {
-    this._lastCursorElement.style.removeProperty('cursor');
-    this._lastCursorElement = undefined;
-  }
-
-  if (cursor === 'pointer' && evt?.x !== undefined && evt?.y !== undefined) {
-    const rect = container.getBoundingClientRect();
-
-    const clientX = rect.left + evt.x;
-    const clientY = rect.top + evt.y;
-
-    const el = document.elementFromPoint(clientX, clientY) as HTMLElement;
-
-    if (el) {
-      el.style.setProperty('cursor', 'pointer', 'important');
-      this._lastCursorElement = el;
-    }
-  }
+  this.view.openPopup({
+    location,
+    features: [graphic]
+  });
 }
 
 
 
-const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
+const clickHandle = this.view.on('click', async (evt: any) => {
+  if (this.enableUserEdit) {
+    return;
+  }
+
   const hit = await this.view.hitTest(evt, {
-    include: [this.featureLayer, this.sketchLayer]
+    include: [this.featureLayer]
   });
 
   const graphic = this.getLayerGraphicFromHit(hit);
 
-  if (!graphic) {
-    this.setMapCursor('default', evt);
+  if (!graphic) return;
 
-    if (this.hoveredGraphicUid !== undefined) {
-      this.hoveredGraphicUid = undefined;
-
-      this.emitLayerEvent('layerMouseOut', {
-        coordinates: { latitude: 0, longitude: 0 },
-        attributes: {}
-      });
-    }
-
-    return;
+  // Open popup immediately first
+  if (!this.inDrawingMode) {
+    this.showGraphicPopup(graphic, evt.mapPoint);
   }
 
-  this.setMapCursor('pointer', evt);
-
-  const uid = this.getGraphicUniqueId(graphic);
-
-  if (this.hoveredGraphicUid !== uid) {
-    if (this.hoveredGraphicUid !== undefined) {
-      this.emitLayerEvent(
-        'layerMouseOut',
-        this.buildMouseEvent(graphic, evt.mapPoint)
-      );
-    }
-
-    this.hoveredGraphicUid = uid;
-
+  // Emit Angular event after popup opens
+  setTimeout(() => {
     this.emitLayerEvent(
-      'layerMouseOver',
+      'layerClick',
       this.buildMouseEvent(graphic, evt.mapPoint)
     );
-  }
+  }, 0);
 });
-
-
