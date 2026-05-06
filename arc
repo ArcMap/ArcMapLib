@@ -1,77 +1,34 @@
-private finishActiveEditor(): void {
-  if (!this._editorOpen) return;
-
-  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
-
-  graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-    this.updateGeojsonWithChanges(g);
+const clickHandle = this.view.on('click', async (evt: any) => {
+  const hit = await this.view.hitTest(evt, {
+    include: [this.featureLayer, this.sketchLayer]
   });
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
+  const graphic = this.getLayerGraphicFromHit(hit);
 
-  this._editorOpen = false;
-  this.enableInfoPopupWindow(!this.enableUserEdit);
-
-  console.log('[up-geojson-layer] editor closed');
-}
-
-
-
-async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.enableUserEdit || !graphic?.geometry) return;
-
-  if (!this.graphicsEditor) {
-    await this.createEditor();
+  // Click outside while editor is open -> close editor
+  if (!graphic) {
+    if (this.isEditorActive()) {
+      this.finishActiveEditor();
+    }
+    return;
   }
 
-  this.enableInfoPopupWindow(false);
+  clickTimer = setTimeout(async () => {
+    clickTimer = null;
 
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
+    if (this.enableUserEdit) {
+      // Single click should not open editor.
+      // Editor opens only on double-click.
+      return;
+    }
 
-  this.graphicsEditor.layer = this.featureLayer;
+    this.emitLayerEvent(
+      'layerClick',
+      this.buildMouseEvent(graphic, evt.mapPoint)
+    );
 
-  graphic.popupTemplate = null as any;
-
-  if (!graphic.symbol) {
-    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
-  }
-
-  const tool = this.resolveUpdateTool(graphic);
-
-  console.log('[up-geojson-layer] opening editor with', {
-    tool,
-    geometry: graphic.geometry.type,
-    featureCount: this.featureLayer.graphics.length
-  });
-
-  try {
-    this.graphicsEditor.update([graphic], {
-      tool,
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false
-    });
-
-    this._editorOpen = true;
-
-    console.log('[up-geojson-layer] editor opened');
-  } catch (error) {
-    this._editorOpen = false;
-    console.error('[up-geojson-layer] editor activation failed:', error);
-  }
-}
-
-
-const graphic = this.getLayerGraphicFromHit(hit);
-
-if (!graphic && this.isEditorActive()) {
-  this.finishActiveEditor();
-  return;
-}
+    if (!this.inDrawingMode) {
+      this.showGraphicPopup(graphic, evt.mapPoint);
+    }
+  }, 250);
+});
