@@ -1,49 +1,34 @@
-private setMapCursor(cursor: 'default' | 'pointer', evt?: any): void {
-  const value = cursor === 'pointer' ? 'pointer' : '';
+private getDefaultSymbolForGeometry(
+  geometry: Geometry | null | undefined
+): any {
+  if (!geometry) return null;
 
-  try {
-    (this.view as any).cursor = cursor;
-  } catch {}
+  const rendererConfig = this.renderer
+    ? JsonUtils.getJsonFor(this.renderer)
+    : null;
 
-  try {
-    const container = this.view?.container as HTMLElement;
-    container?.style.setProperty('cursor', value, 'important');
+  const parsedRenderer = rendererConfig?.parsedJson;
+  const rendererSymbol = parsedRenderer?.symbol;
 
-    const surface = container?.querySelector('.esri-view-surface') as HTMLElement;
-    surface?.style.setProperty('cursor', value, 'important');
+  // 1. Angular renderer wins
+  if (rendererSymbol) {
+    return JsonUtils.normalizePlainSymbol(rendererSymbol);
+  }
 
-    const canvas = container?.querySelector('canvas') as HTMLElement;
-    canvas?.style.setProperty('cursor', value, 'important');
+  // 2. Library fallback only when Angular did not pass renderer
+  let size = JsonUtils.DEFAULT_SYMBOL_MARKER_SIZE;
 
-    if (evt?.x !== undefined && evt?.y !== undefined) {
-      const el = document.elementFromPoint(evt.x, evt.y) as HTMLElement;
-      el?.style.setProperty('cursor', value, 'important');
-    }
-  } catch {}
+  if (ArcGeojsonLayer.isPolyline(geometry)) {
+    size = JsonUtils.DEFAULT_SYMBOL_LINE_WIDTH;
+  }
+
+  if (ArcGeojsonLayer.isPolygon(geometry)) {
+    size = JsonUtils.DEFAULT_SYMBOL_POLYGON_WIDTH;
+  }
+
+  return JsonUtils.getJsonSymbolFor(
+    geometry.type,
+    JsonUtils.getRandomColor(),
+    size
+  );
 }
-
-const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
-  const hit = await this.view.hitTest(evt, {
-    include: [this.featureLayer, this.sketchLayer]
-  });
-
-  const graphic = this.getLayerGraphicFromHit(hit);
-
-  if (!graphic) {
-    this.setMapCursor('default', evt);
-    return;
-  }
-
-  this.setMapCursor('pointer', evt);
-
-  const uid = this.getGraphicUniqueId(graphic);
-
-  if (this.hoveredGraphicUid !== uid) {
-    this.hoveredGraphicUid = uid;
-
-    this.emitLayerEvent(
-      'layerMouseOver',
-      this.buildMouseEvent(graphic, evt.mapPoint)
-    );
-  }
-});
