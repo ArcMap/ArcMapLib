@@ -1,218 +1,112 @@
-private finishActiveEditor(): void {
-  if (!this._editorOpen) return;
+private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
+  const drawGeometryType =
+    graphic?.attributes?.drawGeometryType ??
+    graphic?.attributes?.shapeType ??
+    graphic?.attributes?.geometryType;
 
-  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
+  const isCircle =
+    String(drawGeometryType).toUpperCase() === DrawGeometryTypes.CIRCLE;
 
-  graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-    this.updateGeojsonWithChanges(g);
-  });
+  // Circle must use transform, not reshape.
+  // Circle is stored as polygon, but reshape will distort it.
+  if (isCircle) {
+    return 'transform';
+  }
+
+  // Normal polygon should allow vertex editing.
+  if (
+    graphic?.geometry?.type === 'polygon' &&
+    (
+      this.enableUserEditVertices ||
+      this.enableUserEditAddVertices ||
+      this.enableUserEditDeleteVertices
+    )
+  ) {
+    return 'reshape';
+  }
+
+  if (this.enableUserEditScaling || this.enableUserEditRotating) {
+    return 'transform';
+  }
+
+  return 'move';
+}
+
+
+
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!this.featureLayer || !this.view) return;
+
+  this._isStartingDraw = true;
 
   try {
     this.graphicsEditor?.cancel();
   } catch {}
 
-  this._editorOpen = false;
-  this.enableInfoPopupWindow(!this.enableUserEdit);
+  this.resetEditorStateOnly();
 
-  console.log('[up-geojson-layer] editor closed');
-}
+  this.featureLayer.graphics.removeAll();
+  this.labelLayer?.graphics.removeAll();
+  this.sketchLayer?.graphics.removeAll();
 
-
-
-private async handleEditorDoubleClick(mapPoint: Point, source: string): Promise<void> {
-  if (!this.enableUserEdit) return;
-
-  const now = Date.now();
-
-  // Prevent ArcGIS double-click and native dblclick from both running.
-  if (now - this._lastDoubleClickHandledAt < 350) {
-    console.log('[up-geojson-layer] duplicate dblclick ignored from', source);
-    return;
-  }
-
-  this._lastDoubleClickHandledAt = now;
-
-  if (this.isEditorActive()) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  const graphic = this.findNearestEditableGraphic(mapPoint);
-
-  console.log('[up-geojson-layer] handleEditorDoubleClick:', {
-    source,
-    found: !!graphic,
-    geometry: graphic?.geometry?.type,
-    featureCount: this.featureLayer?.graphics?.length
-  });
-
-  if (!graphic) return;
-
-  await this.activateGraphicsEditor(graphic);
-}
-
-
-async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.enableUserEdit || !graphic?.geometry) return;
-
-  if (!this.graphicsEditor) {
-    await this.createEditor();
-  }
-
+  this.inDrawingMode = true;
   this.enableInfoPopupWindow(false);
+  this._currentDrawGeometryType = drawGeometryType;
+
+  this._isStartingDraw = false;
+
+  await this.createEditor();
+  await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+  const tool = this.toSketchCreateTool(drawGeometryType);
 
   try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  this.graphicsEditor.layer = this.featureLayer;
-
-  graphic.popupTemplate = null as any;
-
-  if (!graphic.symbol) {
-    graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
-  }
-
-  const tool = this.resolveUpdateTool(graphic);
-
-  console.log('[up-geojson-layer] opening editor with', {
-    tool,
-    geometry: graphic.geometry.type,
-    featureCount: this.featureLayer.graphics.length
-  });
-
-  try {
-    this.graphicsEditor.update([graphic], {
-      tool,
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false
-    });
-
-    this._editorOpen = true;
-
-    console.log('[up-geojson-layer] editor opened');
+    this.graphicsEditor.layer = this.sketchLayer;
+    this.graphicsEditor.create(tool);
   } catch (error) {
-    this._editorOpen = false;
-    console.error('[up-geojson-layer] editor activation failed:', error);
+    console.error('[up-geojson-layer] startDrawing error:', error);
+
+    this.inDrawingMode = false;
+    this._currentDrawGeometryType = undefined;
+
+    try {
+      await this.createEditor();
+      await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+      this.graphicsEditor.layer = this.sketchLayer;
+      this.graphicsEditor.create(tool);
+    } catch (secondError) {
+      console.error('[up-geojson-layer] second startDrawing failed:', secondError);
+      this.resetEditorStateOnly();
+    }
   }
 }
 
 
+const createHandle = this.graphicsEditor.on('create', (evt: any) => {
+  if (evt.state !== 'complete' || !evt.graphic || this._isStartingDraw) {
+    return;
+  }
 
-private bindViewEvents(): void {
-  let clickTimer: any = null;
+  const cloned = evt.graphic.clone();
 
-  const clickHandle = this.view.on('click', async (evt: any) => {
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      if (this.enableUserEdit) {
-        return;
-      }
-
-      const hit = await this.view.hitTest(evt, {
-        include: [this.featureLayer, this.sketchLayer]
-      });
-
-      const graphic = this.getLayerGraphicFromHit(hit);
-
-      if (!graphic) return;
-
-      this.emitLayerEvent(
-        'layerClick',
-        this.buildMouseEvent(graphic, evt.mapPoint)
-      );
-
-      if (!this.inDrawingMode) {
-        this.showGraphicPopup(graphic, evt.mapPoint);
-      }
-    }, 250);
-  });
-
-  const dblClickHandle = this.view.on('double-click', async (evt: any) => {
-    evt.stopPropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    await this.handleEditorDoubleClick(evt.mapPoint, 'arcgis-double-click');
-  });
-
-  const nativeDblClick = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    const rect = this.view.container.getBoundingClientRect();
-
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-
-    const mapPoint = this.view.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(mapPoint, 'native-dblclick');
+  cloned.attributes = {
+    ...(cloned.attributes ?? {}),
+    drawGeometryType: this._currentDrawGeometryType
   };
 
-  this.view.container.addEventListener('dblclick', nativeDblClick, true);
+  this.resetEditorStateOnly();
 
-  const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer, this.sketchLayer]
-    });
+  this.inDrawingMode = false;
 
-    const graphic = this.getLayerGraphicFromHit(hit);
+  this.addToGeojson(cloned);
 
-    if (!graphic) {
-      this.setMapCursor('default', evt);
-      return;
-    }
+  this._currentDrawGeometryType = undefined;
 
-    this.setMapCursor('pointer', evt);
-
-    const uid = this.getGraphicUniqueId(graphic);
-
-    if (this.hoveredGraphicUid !== uid) {
-      if (this.hoveredGraphicUid !== undefined) {
-        this.emitLayerEvent(
-          'layerMouseOut',
-          this.buildMouseEvent(graphic, evt.mapPoint)
-        );
-      }
-
-      this.hoveredGraphicUid = uid;
-
-      this.emitLayerEvent(
-        'layerMouseOver',
-        this.buildMouseEvent(graphic, evt.mapPoint)
-      );
-    }
-  });
-
-  this.eventHandles.push(
-    clickHandle,
-    dblClickHandle,
-    pointerMoveHandle,
-    {
-      remove: () => {
-        this.view.container.removeEventListener('dblclick', nativeDblClick, true);
-      }
-    }
-  );
-}
+  if (this.enableUserEdit) {
+    cloned.popupTemplate = null as any;
+    this.enableInfoPopupWindow(false);
+  } else {
+    this.enableInfoPopupWindow(true);
+  }
+});
