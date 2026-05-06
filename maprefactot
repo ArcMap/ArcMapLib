@@ -1,0 +1,1484 @@
+import { LitElement, html, PropertyValues } from "lit";
+import { customElement, property, queryAsync } from "lit/decorators.js";
+
+import ArcGISMap from "@arcgis/core/Map";
+import MapView from "@arcgis/core/views/MapView";
+import Extent from "@arcgis/core/geometry/Extent";
+import Point from "@arcgis/core/geometry/Point";
+import Graphic from "@arcgis/core/Graphic";
+import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
+import Handles from "@arcgis/core/core/Handles";
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
+import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
+
+import type {
+  LatLongPoint,
+  UpMapExtent as ArcMapExtent,
+  PopupEvent,
+  MapTransientShapeCoordinates,
+  DrawTool,
+} from "../external-api";
+
+import type {
+  LayerElement,
+  GraphicsLayerElement,
+  NonGraphicsLayerElement,
+} from "../common/shared-types";
+
+import { arcMapStyles } from "./map.styles";
+import MapUtils from "../common/map-utils";
+import DrawEditUtils from "../common/draw-edit-utils";
+import ValidationService from "../common/validation-service";
+
+@customElement("arc-map")
+export class ArcMap extends LitElement {
+  static styles = arcMapStyles;
+
+  private static readonly DEFAULT_BASEMAP = "arcgis/streets";
+  private static readonly DEFAULT_ZOOM = 5;
+  private static readonly DEFAULT_CENTER_LATITUDE = 38.3;
+  private static readonly DEFAULT_CENTER_LONGITUDE = -98.4;
+
+  private eventHandles = new Handles();
+
+  private map?: ArcGISMap;
+  private view?: MapView;
+
+  @queryAsync("#arcMap")
+  private arcgisMapElement!: Promise<any>;
+
+  private mapReady: Promise<void>;
+  private resolveMapReady!: () => void;
+  private isMapInitialized = false;
+
+  private mapReadyResolvers: Array<(map: ArcGISMap) => void> = [];
+  private viewReadyResolvers: Array<(view: MapView) => void> = [];
+
+  private drawLayer?: GraphicsLayer;
+  private drawTransientShapeTool?: SketchViewModel;
+
+  private previousExtentStack: Extent[] = [];
+  private nextExtentStack: Extent[] = [];
+
+  private layerAddQueue: Promise<void> = Promise.resolve();
+
+  private suppressViewStateReflection = false;
+  private suppressPropertyUpdate = false;
+
+  private popupFeatures: Graphic[] = [];
+  private localPopupContent: string | null = null;
+  private popupCloseButton =
+    `<button class="popup-close-button" data-action="closePopup">×</button>`;
+
+  private popupContentClickHandler = (event: Event): void => {
+    this.handlePopupContentClick(event);
+  };
+
+  @property({ attribute: "center" })
+  center: LatLongPoint | string | null = {
+    latitude: ArcMap.DEFAULT_CENTER_LATITUDE,
+    longitude: ArcMap.DEFAULT_CENTER_LONGITUDE,
+  };
+
+  @property({ type: Boolean })
+  showZoom = true;
+
+  @property({ type: Boolean })
+  showHome = false;
+
+  @property({ type: Boolean })
+  showLocate = false;
+
+  @property({
+    type: Boolean,
+    attribute: "show-scale-bar",
+    reflect: true,
+  })
+  showScaleBar = false;
+
+  @property({
+    type: Boolean,
+    attribute: "disable-map-scroll-wheel-zoom",
+    reflect: true,
+  })
+  disableMapScrollWheelZoom = false;
+
+  @property({
+    type: Boolean,
+    attribute: "enable-double-click-to-zoom",
+    reflect: true,
+  })
+  enableDoubleClickToZoom = true;
+
+  @property({
+    type: Boolean,
+    attribute: "enable-keyboard-navigation",
+    reflect: true,
+  })
+  enableKeyboardNavigation = true;
+
+  @property({
+    type: Boolean,
+    attribute: "is-popup-visible",
+    reflect: true,
+  })
+  isPopupVisible = true;
+
+  @property({
+    type: Boolean,
+    attribute: "use-popup-content-only",
+    reflect: true,
+  })
+  usePopupContentOnly = false;
+
+  @property({ attribute: "custom-popup-content" })
+  customPopupContent: string | null = null;
+
+  @property({
+    type: String,
+    attribute: "basemap",
+    reflect: true,
+  })
+  basemap = ArcMap.DEFAULT_BASEMAP;
+
+  /**
+   * IMPORTANT:
+   * Do not reflect extent.
+   * Reflecting extent can cause Lit/Angular loop because object attributes become strings.
+   */
+  @property({ attribute: "extent" })
+  extent: ArcMapExtent | string | null = null;
+
+  @property({
+    type: Number,
+    attribute: "max-zoom",
+    reflect: true,
+  })
+  maxZoom = 23;
+
+  @property({
+    type: Number,
+    attribute: "min-zoom",
+    reflect: true,
+  })
+  minZoom = 0;
+
+  @property({
+    type: Number,
+    attribute: "zoom",
+    reflect: true,
+  })
+  zoom = ArcMap.DEFAULT_ZOOM;
+
+  constructor() {
+    super();
+
+    this.mapReady = new Promise<void>((resolve) => {
+      this.resolveMapReady = resolve;
+    });
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.destroyMap();
+  }
+
+  protected override async firstUpdated(): Promise<void> {
+    await this.initializeMap();
+  }
+
+  protected override async updated(
+    changedProperties: PropertyValues<this>,
+  ): Promise<void> {
+    super.updated(changedProperties);
+
+    if (!this.view || this.suppressPropertyUpdate) return;
+
+    await this.mapReady;
+
+    if (changedProperties.has("basemap")) {
+      this.updateBasemap(this.basemap);
+    }
+
+    if (changedProperties.has("minZoom") || changedProperties.has("maxZoom")) {
+      this.applyZoomConstraints();
+    }
+
+    if (changedProperties.has("extent") && this.extent) {
+      await this.applyExtentFromProperty(this.extent);
+      return;
+    }
+
+    if (changedProperties.has("center") && this.center) {
+      await this.applyCenterFromProperty(this.center);
+    }
+
+    if (changedProperties.has("zoom")) {
+      this.applyZoomFromProperty(this.zoom);
+    }
+
+    if (changedProperties.has("disableMapScrollWheelZoom")) {
+      this.syncMouseWheelZoom();
+    }
+
+    if (changedProperties.has("enableDoubleClickToZoom")) {
+      this.syncDoubleClickZoom();
+    }
+
+    if (changedProperties.has("enableKeyboardNavigation")) {
+      this.syncKeyboardNavigation();
+    }
+
+    if (changedProperties.has("isPopupVisible")) {
+      this.syncPopupOptions();
+    }
+
+    if (
+      changedProperties.has("usePopupContentOnly") ||
+      changedProperties.has("customPopupContent")
+    ) {
+      this.rebuildPopupContent();
+    }
+  }
+
+  private async initializeMap(): Promise<void> {
+    if (this.isMapInitialized) return;
+
+    const mapEl = await this.arcgisMapElement;
+
+    if (!mapEl) {
+      console.warn("arcgis-map element not found");
+      return;
+    }
+
+    const attachView = async (): Promise<void> => {
+      if (this.isMapInitialized) return;
+
+      const view = mapEl.view as MapView | undefined;
+      const map = mapEl.map as ArcGISMap | undefined;
+
+      if (!view || !map) return;
+
+      this.view = view;
+      this.map = map;
+
+      await this.view.when();
+
+      this.isMapInitialized = true;
+
+      this.applyZoomConstraints();
+      this.ensureDrawLayer();
+      this.setupDrawTool();
+      this.setupMapClickHandler();
+      this.setupViewStateWatchers();
+      this.setupPopupBridge();
+
+      this.syncPopupOptions();
+      this.syncMouseWheelZoom();
+      this.syncDoubleClickZoom();
+      this.syncKeyboardNavigation();
+
+      this.resolveMapReady();
+
+      this.mapReadyResolvers.forEach((resolve) => resolve(this.map!));
+      this.mapReadyResolvers = [];
+
+      this.viewReadyResolvers.forEach((resolve) => resolve(this.view!));
+      this.viewReadyResolvers = [];
+
+      this.reflectCurrentMapState();
+    };
+
+    if (mapEl.view && mapEl.map) {
+      await attachView();
+      return;
+    }
+
+    mapEl.addEventListener("arcgisViewReadyChange", attachView, {
+      once: true,
+    });
+  }
+
+  private ensureDrawLayer(): void {
+    if (!this.map) return;
+
+    if (!this.drawLayer) {
+      this.drawLayer = new GraphicsLayer({
+        id: "arc-map-draw-layer",
+        listMode: "hide",
+      });
+    }
+
+    if (!this.map.findLayerById(this.drawLayer.id)) {
+      this.map.add(this.drawLayer);
+    }
+  }
+
+  public async getMapInstance(): Promise<ArcGISMap> {
+    await this.mapReady;
+
+    if (!this.map) {
+      throw new Error("ArcMap map instance is not available.");
+    }
+
+    return this.map;
+  }
+
+  public async getViewInstance(): Promise<MapView> {
+    await this.mapReady;
+
+    if (!this.view) {
+      throw new Error("ArcMap view instance is not available.");
+    }
+
+    await this.view.when();
+    return this.view;
+  }
+
+  public async getEsriMap(): Promise<ArcGISMap> {
+    return this.getMapInstance();
+  }
+
+  public async getMapView(): Promise<MapView> {
+    return this.getViewInstance();
+  }
+
+  private setupViewStateWatchers(): void {
+    if (!this.view) return;
+
+    this.eventHandles.remove("view-state-watchers");
+
+    this.eventHandles.add(
+      reactiveUtils.watch(
+        () => ({
+          zoom: this.view?.zoom,
+          center: this.view?.center,
+          extent: this.view?.extent,
+        }),
+        (newState, oldState) => {
+          if (this.suppressViewStateReflection) return;
+
+          if (oldState?.extent && newState.extent) {
+            this.previousExtentStack.push(oldState.extent.clone());
+            this.nextExtentStack = [];
+          }
+
+          this.reflectCurrentMapState();
+        },
+        {
+          initial: false,
+        },
+      ),
+      "view-state-watchers",
+    );
+  }
+
+  private reflectCurrentMapState(): void {
+    if (!this.view) return;
+
+    const currentZoom = this.normalizeZoom(this.view.zoom);
+
+    const centerPoint = this.view.center;
+    const currentExtent = this.view.extent;
+
+    this.suppressPropertyUpdate = true;
+
+    try {
+      this.zoom = currentZoom;
+
+      if (centerPoint) {
+        const centerToEmit: LatLongPoint = {
+          latitude: ValidationService.validateLatitude(
+            centerPoint.latitude,
+            ArcMap.DEFAULT_CENTER_LATITUDE,
+          ),
+          longitude: ValidationService.validateLongitude(
+            centerPoint.longitude,
+            ArcMap.DEFAULT_CENTER_LONGITUDE,
+          ),
+        };
+
+        this.center = centerToEmit;
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>("center-change", {
+            detail: centerToEmit,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }
+
+      if (currentExtent) {
+        const geographicExtent =
+          webMercatorUtils.webMercatorToGeographic(currentExtent) as Extent;
+
+        if (geographicExtent) {
+          const extentToEmit: ArcMapExtent = {
+            bottomLatitude: geographicExtent.ymin,
+            topLatitude: geographicExtent.ymax,
+            leftLongitude: geographicExtent.xmin,
+            rightLongitude: geographicExtent.xmax,
+          };
+
+          this.extent = extentToEmit;
+
+          this.dispatchEvent(
+            new CustomEvent<ArcMapExtent>("extent-change", {
+              detail: extentToEmit,
+              bubbles: true,
+              composed: true,
+            }),
+          );
+
+          this.dispatchEvent(
+            new CustomEvent<ArcMapExtent>("extentChange", {
+              detail: extentToEmit,
+              bubbles: true,
+              composed: true,
+            }),
+          );
+        }
+      }
+
+      this.dispatchEvent(
+        new CustomEvent<number>("zoom", {
+          detail: currentZoom,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    } finally {
+      queueMicrotask(() => {
+        this.suppressPropertyUpdate = false;
+      });
+    }
+  }
+
+  private async applyExtentFromProperty(
+    extentInput: ArcMapExtent | string,
+  ): Promise<void> {
+    if (!this.view) return;
+
+    const nextExtent = await ArcMap.parseValidateAndConvertExtent(extentInput)
+      .catch(() => null);
+
+    if (!nextExtent) return;
+
+    if (this.isSameCurrentExtent(nextExtent)) return;
+
+    this.suppressViewStateReflection = true;
+
+    try {
+      await this.view.goTo(nextExtent, { animate: false });
+    } finally {
+      this.suppressViewStateReflection = false;
+    }
+  }
+
+  private async applyCenterFromProperty(
+    centerInput: LatLongPoint | string,
+  ): Promise<void> {
+    if (!this.view) return;
+
+    const nextCenter = ArcMap.parseValidateAndConvertLatLongPoint(centerInput);
+    if (!nextCenter) return;
+
+    if (ArcMap.areLatLongEqual(this.view.center, nextCenter)) return;
+
+    const point = new Point({
+      longitude: nextCenter.longitude,
+      latitude: nextCenter.latitude,
+      spatialReference: { wkid: 4326 },
+    });
+
+    this.suppressViewStateReflection = true;
+
+    try {
+      await this.view.goTo({ target: point }, { animate: false });
+    } finally {
+      this.suppressViewStateReflection = false;
+    }
+  }
+
+  private applyZoomFromProperty(nextZoom: number): void {
+    if (!this.view) return;
+
+    const normalizedZoom = this.normalizeZoom(nextZoom);
+
+    if (this.view.zoom === normalizedZoom) return;
+
+    this.view.zoom = normalizedZoom;
+  }
+
+  private normalizeZoom(value: number): number {
+    if (!Number.isFinite(value)) return ArcMap.DEFAULT_ZOOM;
+
+    const rounded = Math.round(value);
+
+    return Math.max(this.minZoom, Math.min(this.maxZoom, rounded));
+  }
+
+  private isSameCurrentExtent(nextExtent: Extent): boolean {
+    if (!this.view?.extent) return false;
+
+    const currentGeographic =
+      webMercatorUtils.webMercatorToGeographic(this.view.extent) as Extent;
+
+    if (!currentGeographic) return false;
+
+    return (
+      Math.abs(currentGeographic.xmin - nextExtent.xmin) < 0.000001 &&
+      Math.abs(currentGeographic.ymin - nextExtent.ymin) < 0.000001 &&
+      Math.abs(currentGeographic.xmax - nextExtent.xmax) < 0.000001 &&
+      Math.abs(currentGeographic.ymax - nextExtent.ymax) < 0.000001
+    );
+  }
+
+  private updateBasemap(nextBasemap: string): void {
+    if (!this.map) return;
+
+    const safeBasemap =
+      typeof nextBasemap === "string" && nextBasemap.trim().length > 0
+        ? nextBasemap
+        : ArcMap.DEFAULT_BASEMAP;
+
+    if (this.map.basemap === safeBasemap) return;
+
+    try {
+      this.map.basemap = safeBasemap;
+    } catch (error) {
+      console.warn("Invalid basemap. Falling back to default.", error);
+      this.map.basemap = ArcMap.DEFAULT_BASEMAP;
+    }
+  }
+
+  private applyZoomConstraints(): void {
+    if (!this.view) return;
+
+    this.view.constraints = {
+      ...this.view.constraints,
+      minZoom: this.minZoom,
+      maxZoom: this.maxZoom,
+    };
+  }
+
+  private setupMapClickHandler(): void {
+    if (!this.view) return;
+
+    this.eventHandles.remove("map-click");
+
+    this.eventHandles.add(
+      this.view.on("click", (event: any) => {
+        if (!this.view || !event.mapPoint) return;
+
+        const geographicPoint =
+          webMercatorUtils.webMercatorToGeographic(event.mapPoint) as Point;
+
+        if (!geographicPoint) return;
+
+        const detail: LatLongPoint = {
+          latitude: ValidationService.validateLatitude(
+            geographicPoint.latitude,
+            ArcMap.DEFAULT_CENTER_LATITUDE,
+          ),
+          longitude: ValidationService.validateLongitude(
+            geographicPoint.longitude,
+            ArcMap.DEFAULT_CENTER_LONGITUDE,
+          ),
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>("map-click", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<LatLongPoint>("mapClick", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }),
+      "map-click",
+    );
+  }
+
+  private syncMouseWheelZoom(): void {
+    if (!this.view) return;
+
+    this.eventHandles.remove("mouse-wheel");
+
+    if (!this.disableMapScrollWheelZoom) return;
+
+    this.eventHandles.add(
+      this.view.on("mouse-wheel", (event: any) => {
+        event.stopPropagation();
+      }),
+      "mouse-wheel",
+    );
+  }
+
+  private syncDoubleClickZoom(): void {
+    if (!this.view) return;
+
+    this.eventHandles.remove("double-click");
+
+    if (this.enableDoubleClickToZoom) return;
+
+    const normalDoubleClick = this.view.on("double-click", (event: any) => {
+      event.stopPropagation();
+    });
+
+    const shiftDoubleClick = this.view.on(
+      "double-click",
+      ["Shift"],
+      (event: any) => {
+        event.stopPropagation();
+      },
+    );
+
+    this.eventHandles.add(
+      [normalDoubleClick, shiftDoubleClick],
+      "double-click",
+    );
+  }
+
+  private syncKeyboardNavigation(): void {
+    if (!this.view) return;
+
+    this.eventHandles.remove("keyboard-navigation");
+
+    if (this.enableKeyboardNavigation) return;
+
+    const blockedKeys = [
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "+",
+      "-",
+      "=",
+      "_",
+      "PageUp",
+      "PageDown",
+    ];
+
+    const keyDownHandle = this.view.on("key-down", (event: any) => {
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+
+    const keyUpHandle = this.view.on("key-up", (event: any) => {
+      if (blockedKeys.includes(event.key)) {
+        event.stopPropagation();
+      }
+    });
+
+    this.eventHandles.add(
+      [keyDownHandle, keyUpHandle],
+      "keyboard-navigation",
+    );
+  }
+
+  private syncPopupOptions(): void {
+    if (!this.view?.popup) return;
+
+    this.view.popupEnabled = this.isPopupVisible;
+
+    this.view.popup.visibleElements = {
+      ...this.view.popup.visibleElements,
+      closeButton: this.isPopupVisible,
+    };
+
+    if (!this.isPopupVisible) {
+      this.view.popup.close();
+    }
+
+    if (this.usePopupContentOnly && this.customPopupContent) {
+      this.view.popup.content = this.createPopupContentNode(
+        this.customPopupContent,
+      );
+    }
+  }
+
+  private setupPopupBridge(): void {
+    if (!this.view?.popup) return;
+
+    const popup = this.view.popup;
+
+    this.eventHandles.remove("popup-bridge");
+
+    const featuresHandle = reactiveUtils.watch(
+      () => popup.features,
+      (features) => {
+        this.popupFeatures = Array.from((features ?? []) as Graphic[]);
+        this.localPopupContent = null;
+
+        const detail: PopupEvent = {
+          features: this.popupFeatures,
+          selectedIndex: popup.selectedFeatureIndex ?? 0,
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>("popup-features-set", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>("popupFeaturesSet", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.rebuildPopupContent();
+      },
+    );
+
+    const selectedHandle = reactiveUtils.watch(
+      () => popup.selectedFeatureIndex,
+      () => {
+        const detail: PopupEvent = {
+          features: this.popupFeatures,
+          selectedIndex: popup.selectedFeatureIndex ?? 0,
+        };
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>("popup-selection-changed", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<PopupEvent>("popupSelectionChanged", {
+            detail,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.rebuildPopupContent();
+      },
+    );
+
+    this.eventHandles.add([featuresHandle, selectedHandle], "popup-bridge");
+  }
+
+  private rebuildPopupContent(): void {
+    if (!this.view?.popup) return;
+
+    const popup = this.view.popup;
+
+    if (this.usePopupContentOnly) {
+      popup.content = this.createPopupContentNode(
+        this.customPopupContent ?? "Loading...",
+      );
+      return;
+    }
+
+    if (!this.popupFeatures.length) {
+      popup.content = this.createPopupContentNode(
+        `${this.popupCloseButton}<div class="popup-scrollable-content"><p>No features in this area</p></div>`,
+      );
+      return;
+    }
+
+    if (this.popupFeatures.length === 1) {
+      this.localPopupContent = ArcMap.buildSingleFeaturePopupHtml(
+        this.popupFeatures[0],
+        this.popupCloseButton,
+      );
+
+      popup.content = this.createPopupContentNode(this.localPopupContent);
+      return;
+    }
+
+    const listItems = this.popupFeatures
+      .map((feature, index) => {
+        return `<div class="arc-font-caption popup-list-item" data-action="popupDetails" data-index="${index}">
+          ${ArcMap.getListItemLabel(feature, index)}
+        </div>`;
+      })
+      .join("");
+
+    this.localPopupContent =
+      `${this.popupCloseButton}` +
+      `<p class="arc-font-body">Choose one</p>` +
+      `<div class="popup-scrollable-content">${listItems}</div>`;
+
+    popup.content = this.createPopupContentNode(this.localPopupContent);
+  }
+
+  private handlePopupContentClick(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    const actionElement = target?.closest("[data-action]") as HTMLElement | null;
+
+    if (!actionElement) return;
+
+    const action = actionElement.dataset.action;
+
+    if (action === "closePopup") {
+      this.closePopup();
+      return;
+    }
+
+    if (action === "popupDetails") {
+      const index = Number(actionElement.dataset.index ?? 0);
+      const feature = this.popupFeatures[index];
+
+      if (!feature || !this.view?.popup) return;
+
+      this.view.popup.features = [feature];
+      this.view.popup.content = this.createPopupContentNode(
+        ArcMap.buildSingleFeaturePopupHtml(feature, this.popupCloseButton),
+      );
+    }
+  }
+
+  private createPopupContentNode(content: string | null): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = content ?? "";
+    wrapper.addEventListener("click", this.popupContentClickHandler);
+    return wrapper;
+  }
+
+  private static buildSingleFeaturePopupHtml(
+    feature: Graphic,
+    popupCloseButton: string,
+  ): string {
+    const layerName = MapUtils.getLayerName(feature.layer as any) || "Feature";
+    const popupTemplate = feature.popupTemplate;
+
+    let content = "";
+
+    if (
+      popupTemplate?.content &&
+      typeof popupTemplate.content === "string"
+    ) {
+      content = popupTemplate.content;
+    } else if (feature.attributes) {
+      content = Object.entries(feature.attributes)
+        .map(
+          ([key, value]) =>
+            `<div><strong>${key}:</strong> ${String(value)}</div>`,
+        )
+        .join("");
+    } else {
+      content = "<p>No details available.</p>";
+    }
+
+    return (
+      `<div class="popup-content">` +
+      popupCloseButton +
+      `<div class="popup-group-title-container"><p class="arc-font-body"><b>${layerName}</b></p></div>` +
+      `<div class="arc-font-caption popup-scrollable-content">${content}</div>` +
+      `</div>`
+    );
+  }
+
+  private static getListItemLabel(feature: Graphic, index: number): string {
+    const attrs = feature.attributes ?? {};
+
+    return String(
+      attrs.name ??
+        attrs.title ??
+        attrs.label ??
+        attrs.id ??
+        `Feature ${index + 1}`,
+    );
+  }
+
+  private setupDrawTool(): void {
+    if (!this.view || !this.drawLayer || this.drawTransientShapeTool) return;
+
+    this.drawTransientShapeTool = new SketchViewModel({
+      view: this.view,
+      layer: this.drawLayer,
+      defaultCreateOptions: {
+        hasZ: false,
+      },
+      pointSymbol: {
+        type: "simple-marker",
+        size: 8,
+        style: "circle",
+        color: [0, 122, 255, 1],
+        outline: {
+          color: [255, 255, 255, 1],
+          width: 1,
+        },
+      } as any,
+      polylineSymbol: {
+        type: "simple-line",
+        color: [0, 122, 255, 1],
+        width: 2,
+      } as any,
+      polygonSymbol: {
+        type: "simple-fill",
+        color: [0, 122, 255, 0.15],
+        outline: {
+          color: [0, 122, 255, 1],
+          width: 2,
+        },
+      } as any,
+    });
+
+    this.drawTransientShapeTool.on("create", (event: any) => {
+      if (event.state === "complete") {
+        this.emitTransientShapeCoordinates(event.graphic?.geometry);
+      }
+    });
+  }
+
+  public async startTransientShapeDrawing(
+    drawGeometryType: string,
+  ): Promise<void> {
+    await this.mapReady;
+
+    if (!this.drawTransientShapeTool) return;
+
+    const normalized = String(drawGeometryType ?? "").toLowerCase();
+
+    const geometryType =
+      DrawEditUtils.determineFeatureLayerGeometryType(normalized);
+
+    const humanReadable =
+      DrawEditUtils.convertEsriGeometryTypeToHumanReadable(
+        geometryType,
+      )?.toLowerCase();
+
+    let createTool: "point" | "polyline" | "polygon" | null = null;
+
+    if (humanReadable === "point") createTool = "point";
+    if (humanReadable === "polyline") createTool = "polyline";
+    if (humanReadable === "polygon") createTool = "polygon";
+
+    if (!createTool) {
+      console.warn(
+        `The geometry type ${drawGeometryType} is invalid. Drawing cancelled.`,
+      );
+      return;
+    }
+
+    this.drawTransientShapeTool.create(createTool);
+  }
+
+  public async stopTransientShapeDrawing(): Promise<void> {
+    await this.mapReady;
+
+    if (this.drawTransientShapeTool) {
+      this.drawTransientShapeTool.cancel();
+    }
+  }
+
+  private emitTransientShapeCoordinates(
+    geometry: __esri.Geometry | null | undefined,
+  ): void {
+    if (!geometry) return;
+
+    let selectionCoordinates: number[][] | number[][][] | null = null;
+
+    if (geometry.type === "point") {
+      const point = geometry as Point;
+      const geographicPoint =
+        webMercatorUtils.webMercatorToGeographic(point) as Point;
+
+      if (!geographicPoint) return;
+
+      selectionCoordinates = [
+        [geographicPoint.longitude, geographicPoint.latitude],
+      ];
+    }
+
+    if (geometry.type === "polyline") {
+      const polyline = geometry as __esri.Polyline;
+      const geographicPolyline =
+        webMercatorUtils.webMercatorToGeographic(polyline) as __esri.Polyline;
+
+      selectionCoordinates = geographicPolyline.paths?.[0] ?? null;
+    }
+
+    if (geometry.type === "polygon") {
+      const polygon = geometry as __esri.Polygon;
+      const geographicPolygon =
+        webMercatorUtils.webMercatorToGeographic(polygon) as __esri.Polygon;
+
+      selectionCoordinates = geographicPolygon.rings ?? null;
+    }
+
+    if (!selectionCoordinates) return;
+
+    const detail: MapTransientShapeCoordinates = {
+      selectionCoordinates,
+    };
+
+    this.dispatchEvent(
+      new CustomEvent<MapTransientShapeCoordinates>(
+        "map-draw-transient-shape-coordinates",
+        {
+          detail,
+          bubbles: true,
+          composed: true,
+        },
+      ),
+    );
+
+    this.dispatchEvent(
+      new CustomEvent<MapTransientShapeCoordinates>(
+        "mapDrawTransientShapeCoordinates",
+        {
+          detail,
+          bubbles: true,
+          composed: true,
+        },
+      ),
+    );
+  }
+
+  public async addLayer(
+    newLayer: __esri.Layer,
+    element?: HTMLElement,
+  ): Promise<void> {
+    await this.mapReady;
+
+    if (!this.map) return;
+
+    if (!element) {
+      this.map.add(newLayer);
+      return;
+    }
+
+    this.layerAddQueue = this.layerAddQueue.then(async () => {
+      const layerCheckFunction =
+        ArcMap.isGraphicsLayerElement(element) ||
+        ArcMap.isNonGraphicsLayerElement(element);
+
+      const layerIdPromises = this.getAllLayerIdsFromSubsequentSiblings(
+        element,
+        layerCheckFunction,
+      );
+
+      let nextParentUp = element.parentElement;
+
+      while (nextParentUp && !MapUtils.isArcMap(nextParentUp as HTMLElement)) {
+        layerIdPromises.push(
+          ...this.getAllLayerIdsFromSubsequentSiblings(
+            nextParentUp,
+            layerCheckFunction,
+          ),
+        );
+
+        nextParentUp = nextParentUp.parentElement;
+      }
+
+      const subsequentLayerIds = await Promise.all(layerIdPromises);
+
+      const subsequentLayerIndices = subsequentLayerIds
+        .map((layerId) =>
+          this.map!.layers.findIndex((layer) => layer.id === layerId),
+        )
+        .filter((layerIndex) => layerIndex !== -1);
+
+      if (subsequentLayerIndices.length > 0) {
+        this.map!.add(newLayer, Math.min(...subsequentLayerIndices));
+      } else {
+        this.map!.add(newLayer);
+      }
+    });
+
+    await this.layerAddQueue;
+  }
+
+  public async removeLayer(layer: __esri.Layer): Promise<void> {
+    if (!layer) return;
+
+    await this.mapReady;
+
+    if (this.view?.popup) {
+      const popupFeatures = Array.from(
+        (this.view.popup.features ?? []) as Graphic[],
+      );
+
+      const featuresToKeep = popupFeatures.filter(
+        (feature) => feature.layer?.id !== layer.id,
+      );
+
+      if (!featuresToKeep.length) {
+        this.view.popup.close();
+      } else if (featuresToKeep.length !== popupFeatures.length) {
+        this.view.popup.features = featuresToKeep;
+      }
+    }
+
+    this.map?.remove(layer);
+  }
+
+  public async enableInfoWindow(enable: boolean): Promise<void> {
+    await this.mapReady;
+
+    if (!this.view?.popup) return;
+
+    this.view.popupEnabled = enable;
+
+    if (!enable) {
+      this.view.popup.close();
+    }
+  }
+
+  public async zoomToPreviousExtent(): Promise<void> {
+    await this.mapReady;
+
+    if (!this.view) return;
+
+    const previous = this.previousExtentStack.pop();
+    if (!previous) return;
+
+    if (this.view.extent) {
+      this.nextExtentStack.push(this.view.extent.clone());
+    }
+
+    this.suppressViewStateReflection = true;
+
+    try {
+      await this.view.goTo(previous, { animate: false });
+    } finally {
+      this.suppressViewStateReflection = false;
+    }
+  }
+
+  public async zoomToNextExtent(): Promise<void> {
+    await this.mapReady;
+
+    if (!this.view) return;
+
+    const next = this.nextExtentStack.pop();
+    if (!next) return;
+
+    if (this.view.extent) {
+      this.previousExtentStack.push(this.view.extent.clone());
+    }
+
+    this.suppressViewStateReflection = true;
+
+    try {
+      await this.view.goTo(next, { animate: false });
+    } finally {
+      this.suppressViewStateReflection = false;
+    }
+  }
+
+  public async setPopupContent(
+    content: string,
+    hideCloseButton: boolean,
+  ): Promise<void> {
+    await this.mapReady;
+
+    if (!this.view?.popup) return;
+
+    const finalContent = hideCloseButton
+      ? content
+      : this.popupCloseButton + content;
+
+    this.customPopupContent = finalContent;
+    this.view.popup.content = this.createPopupContentNode(finalContent);
+  }
+
+  public async setPopupFeatures(features: Graphic[]): Promise<void> {
+    await this.mapReady;
+
+    if (!this.view?.popup) return;
+
+    this.popupFeatures = Array.from(features);
+
+    this.view.popup.open({
+      features,
+    });
+  }
+
+  public async closePopup(): Promise<void> {
+    await this.mapReady;
+
+    if (this.view?.popup) {
+      this.view.popup.close();
+    }
+  }
+
+  public async showZoomSlider(): Promise<void> {
+    this.showZoom = true;
+    await this.updateComplete;
+  }
+
+  public async hideZoomSlider(): Promise<void> {
+    this.showZoom = false;
+    await this.updateComplete;
+  }
+
+  public async showHomeMethod(): Promise<void> {
+    this.showHome = true;
+    await this.updateComplete;
+  }
+
+  public async hideHomeMethod(): Promise<void> {
+    this.showHome = false;
+    await this.updateComplete;
+  }
+
+  public async showLocateMethod(): Promise<void> {
+    this.showLocate = true;
+    await this.updateComplete;
+  }
+
+  public async hideLocateMethod(): Promise<void> {
+    this.showLocate = false;
+    await this.updateComplete;
+  }
+
+  public async showScaleBarMethod(): Promise<void> {
+    this.showScaleBar = true;
+    await this.updateComplete;
+  }
+
+  public async hideScaleBar(): Promise<void> {
+    this.showScaleBar = false;
+    await this.updateComplete;
+  }
+
+  private async getAllLayerIdsFromDescendants(
+    element: Element,
+    layerCheckFunction: (elm: Element) => elm is LayerElement,
+  ): Promise<string[]> {
+    const ids: string[] = [];
+
+    for (const childElement of Array.from(element.children)) {
+      if (layerCheckFunction(childElement)) {
+        const layerId = await Promise.resolve(childElement.getLayerId?.() ?? "");
+        if (layerId) ids.push(layerId);
+      } else {
+        ids.push(
+          ...(await this.getAllLayerIdsFromDescendants(
+            childElement,
+            layerCheckFunction,
+          )),
+        );
+      }
+    }
+
+    return ids;
+  }
+
+  private getAllLayerIdsFromSubsequentSiblings(
+    element: Element,
+    layerCheckFunction: (elm: Element) => elm is LayerElement,
+  ): Promise<string>[] {
+    const layerIdPromises: Promise<string>[] = [];
+    let nextSibling = element.nextElementSibling;
+
+    while (nextSibling) {
+      if (layerCheckFunction(nextSibling)) {
+        layerIdPromises.push(
+          Promise.resolve(nextSibling.getLayerId?.() ?? ""),
+        );
+      } else if (nextSibling.matches("[data-basemap]")) {
+        layerIdPromises.push(
+          this.getAllLayerIdsFromDescendants(
+            nextSibling,
+            layerCheckFunction,
+          ).then((ids) => ids[0] ?? ""),
+        );
+      }
+
+      nextSibling = nextSibling.nextElementSibling;
+    }
+
+    return layerIdPromises;
+  }
+
+  private static isGraphicsLayerElement(
+    element: Element,
+  ): element is GraphicsLayerElement {
+    return [
+      "ARC-FEATURE-LAYER",
+      "ARC-GEOJSON-LAYER",
+      "ARC-POINT",
+      "ARC-POLYLINE",
+      "ARC-ROUTE",
+    ].includes(element.tagName.toUpperCase());
+  }
+
+  private static isNonGraphicsLayerElement(
+    element: Element,
+  ): element is NonGraphicsLayerElement {
+    return [
+      "ARC-WMS-LAYER",
+      "ARC-TILED-MAP-SERVICE-LAYER",
+      "ARC-IMAGE-SERVICE-LAYER",
+    ].includes(element.tagName.toUpperCase());
+  }
+
+  private static parseValidateAndConvertLatLongPoint(
+    latLong: LatLongPoint | string,
+  ): LatLongPoint | undefined {
+    let parsedLatLong: LatLongPoint;
+
+    if (typeof latLong === "string") {
+      try {
+        parsedLatLong = JSON.parse(latLong) as LatLongPoint;
+      } catch {
+        console.warn("Invalid center JSON");
+        return;
+      }
+    } else {
+      parsedLatLong = latLong;
+    }
+
+    if (
+      !parsedLatLong ||
+      typeof parsedLatLong.latitude !== "number" ||
+      typeof parsedLatLong.longitude !== "number"
+    ) {
+      return;
+    }
+
+    return {
+      latitude: Math.max(-85, Math.min(85, parsedLatLong.latitude)),
+      longitude: Math.max(-180, Math.min(180, parsedLatLong.longitude)),
+    };
+  }
+
+  private static async parseValidateAndConvertExtent(
+    extent: ArcMapExtent | string,
+  ): Promise<Extent> {
+    let parsed: ArcMapExtent;
+
+    if (typeof extent === "string") {
+      try {
+        parsed = JSON.parse(extent) as ArcMapExtent;
+      } catch {
+        return Promise.reject("Invalid extent JSON");
+      }
+    } else {
+      parsed = extent;
+    }
+
+    if (
+      !parsed ||
+      parsed.leftLongitude >= parsed.rightLongitude ||
+      parsed.bottomLatitude >= parsed.topLatitude
+    ) {
+      return Promise.reject("Invalid extent values");
+    }
+
+    return new Extent({
+      xmin: parsed.leftLongitude,
+      ymin: parsed.bottomLatitude,
+      xmax: parsed.rightLongitude,
+      ymax: parsed.topLatitude,
+      spatialReference: { wkid: 4326 },
+    });
+  }
+
+  private static areLatLongEqual(
+    a: LatLongPoint | Point | undefined,
+    b: LatLongPoint | undefined,
+  ): boolean {
+    if (!a || !b) return false;
+
+    const aLatitude = "latitude" in a ? a.latitude : undefined;
+    const aLongitude = "longitude" in a ? a.longitude : undefined;
+
+    return (
+      Math.abs((aLatitude ?? 0) - b.latitude) < 0.000001 &&
+      Math.abs((aLongitude ?? 0) - b.longitude) < 0.000001
+    );
+  }
+
+  private destroyMap(): void {
+    this.eventHandles.removeAll();
+
+    if (this.drawTransientShapeTool) {
+      this.drawTransientShapeTool.destroy();
+      this.drawTransientShapeTool = undefined;
+    }
+
+    if (this.view) {
+      this.view.destroy();
+      this.view = undefined;
+    }
+
+    this.map = undefined;
+    this.isMapInitialized = false;
+  }
+
+  render() {
+    const parsedCenter =
+      this.center &&
+      typeof this.center === "object" &&
+      "longitude" in this.center &&
+      "latitude" in this.center
+        ? [this.center.longitude, this.center.latitude]
+        : undefined;
+
+    const parsedExtent =
+      this.extent &&
+      typeof this.extent === "object" &&
+      typeof this.extent.leftLongitude === "number" &&
+      typeof this.extent.rightLongitude === "number" &&
+      typeof this.extent.topLatitude === "number" &&
+      typeof this.extent.bottomLatitude === "number"
+        ? {
+            xmin: this.extent.leftLongitude,
+            ymin: this.extent.bottomLatitude,
+            xmax: this.extent.rightLongitude,
+            ymax: this.extent.topLatitude,
+            spatialReference: { wkid: 4326 },
+          }
+        : undefined;
+
+    return html`
+      <div class="map-wrapper">
+        <arcgis-map
+          id="arcMap"
+          class="map"
+          .basemap=${this.basemap || ArcMap.DEFAULT_BASEMAP}
+          .extent=${parsedExtent}
+          .center=${parsedExtent ? undefined : parsedCenter}
+          .zoom=${parsedExtent ? undefined : this.zoom}
+          .maxZoom=${this.maxZoom}
+          .minZoom=${this.minZoom}
+        >
+          <arcgis-popup slot="popup"></arcgis-popup>
+
+          <div class="widget-stack" slot="top-left">
+            ${this.showHome
+              ? html`<arcgis-home position="manual"></arcgis-home>`
+              : ""}
+            ${this.showLocate
+              ? html`<arcgis-locate position="manual"></arcgis-locate>`
+              : ""}
+            ${this.showZoom
+              ? html`<arcgis-zoom position="manual"></arcgis-zoom>`
+              : ""}
+            ${this.showScaleBar
+              ? html`<arcgis-scale-bar
+                  position="manual"
+                  unit="dual"
+                ></arcgis-scale-bar>`
+              : ""}
+          </div>
+        </arcgis-map>
+      </div>
+    `;
+  }
+}
