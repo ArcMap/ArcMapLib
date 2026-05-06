@@ -1,46 +1,23 @@
-private setMapCursor(cursor: 'default' | 'pointer'): void {
-  const container = this.view?.container as HTMLElement;
-  if (!container) return;
-
-  container.classList.toggle('arc-geojson-hover-pointer', cursor === 'pointer');
-
-  let style = document.getElementById('arc-geojson-hover-pointer-style') as HTMLStyleElement | null;
-
-  if (!style) {
-    style = document.createElement('style');
-    style.id = 'arc-geojson-hover-pointer-style';
-    style.textContent = `
-      .arc-geojson-hover-pointer,
-      .arc-geojson-hover-pointer *,
-      .arc-geojson-hover-pointer canvas,
-      .arc-geojson-hover-pointer .esri-view-surface,
-      .arc-geojson-hover-pointer .esri-view-root,
-      .arc-geojson-hover-pointer .esri-view-surface--inset-outline {
-        cursor: pointer !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
+private setMapCursor(cursor: 'default' | 'pointer', evt?: any): void {
+  const value = cursor === 'pointer' ? 'pointer' : '';
 
   try {
     (this.view as any).cursor = cursor;
   } catch {}
+
+  try {
+    const container = this.view?.container as HTMLElement;
+    container?.style.setProperty('cursor', value, 'important');
+
+    const surface = container?.querySelector('.esri-view-surface') as HTMLElement;
+    surface?.style.setProperty('cursor', value, 'important');
+
+    const canvas = container?.querySelector('canvas') as HTMLElement;
+    canvas?.style.setProperty('cursor', value, 'important');
+
+    if (evt?.x !== undefined && evt?.y !== undefined) {
+      const el = document.elementFromPoint(evt.x, evt.y) as HTMLElement;
+      el?.style.setProperty('cursor', value, 'important');
+    }
+  } catch {}
 }
-
-
-
-if (!graphic) {
-  this.setMapCursor('default');
-  return;
-}
-
-this.setMapCursor('pointer');
-
-console.log('cursor check:', {
-  found: true,
-  type: graphic.geometry?.type,
-  classAdded: (this.view.container as HTMLElement).classList.contains('arc-geojson-hover-pointer'),
-  computedCursor: getComputedStyle(this.view.container as HTMLElement).cursor
-});
-
-
