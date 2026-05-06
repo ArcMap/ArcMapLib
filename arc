@@ -1,52 +1,23 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.featureLayer || !this.view) return;
+private finishActiveEditor(): void {
+  if (!this._editorOpen) return;
 
-  this._isStartingDraw = true;
+  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
+
+  graphics.forEach((g: Graphic) => {
+    if (!g?.geometry) return;
+    this.updateGeojsonWithChanges(g);
+  });
 
   try {
     this.graphicsEditor?.cancel();
   } catch {}
 
-  this.resetEditorStateOnly();
+  this._editorOpen = false;
+  this.enableInfoPopupWindow(!this.enableUserEdit);
 
-  this.featureLayer.graphics.removeAll();
-  this.labelLayer?.graphics.removeAll();
-  this.sketchLayer?.graphics.removeAll();
-
-  this.inDrawingMode = true;
-  this.enableInfoPopupWindow(false);
-  this._currentDrawGeometryType = drawGeometryType;
-
-  this._isStartingDraw = false;
-
-  await this.createEditor();
-  await new Promise<void>(resolve => setTimeout(resolve, 50));
-
-  const tool = this.toSketchCreateTool(drawGeometryType);
-
-  try {
-    // Drawing should use sketchLayer
-    this.graphicsEditor.layer = this.sketchLayer;
-
-    this.graphicsEditor.create(tool);
-  } catch (error) {
-    console.error('[up-geojson-layer] startDrawing error:', error);
-
-    this.inDrawingMode = false;
-    this._currentDrawGeometryType = undefined;
-
-    try {
-      await this.createEditor();
-      await new Promise<void>(resolve => setTimeout(resolve, 50));
-
-      this.graphicsEditor.layer = this.sketchLayer;
-      this.graphicsEditor.create(tool);
-    } catch (secondError) {
-      console.error('[up-geojson-layer] second startDrawing failed:', secondError);
-      this.resetEditorStateOnly();
-    }
-  }
+  console.log('[up-geojson-layer] editor closed');
 }
+
 
 
 async activateGraphicsEditor(graphic: Graphic): Promise<void> {
@@ -62,8 +33,6 @@ async activateGraphicsEditor(graphic: Graphic): Promise<void> {
     this.graphicsEditor.cancel();
   } catch {}
 
-  // Editing should use the original featureLayer graphic directly.
-  // Do not move graphic into sketchLayer.
   this.graphicsEditor.layer = this.featureLayer;
 
   graphic.popupTemplate = null as any;
@@ -90,9 +59,19 @@ async activateGraphicsEditor(graphic: Graphic): Promise<void> {
       toggleToolOnClick: false
     });
 
+    this._editorOpen = true;
+
     console.log('[up-geojson-layer] editor opened');
   } catch (error) {
+    this._editorOpen = false;
     console.error('[up-geojson-layer] editor activation failed:', error);
   }
 }
 
+
+const graphic = this.getLayerGraphicFromHit(hit);
+
+if (!graphic && this.isEditorActive()) {
+  this.finishActiveEditor();
+  return;
+}
