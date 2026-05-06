@@ -1,19 +1,69 @@
-private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
-  const geometryType = graphic?.geometry?.type;
+private replaceGraphicInFeatureLayer(updatedGraphic: Graphic): void {
+  const uid = this.getGraphicUniqueId(updatedGraphic);
 
-  // Circle drawn by Sketch usually becomes polygon.
-  // If you store shapeType/drawType, use that to keep circle as transform.
+  this.featureLayer.graphics.toArray().forEach((g: Graphic) => {
+    if (this.getGraphicUniqueId(g) === uid) {
+      this.featureLayer.remove(g);
+    }
+  });
+
+  this.sketchLayer.graphics.toArray().forEach((g: Graphic) => {
+    if (this.getGraphicUniqueId(g) === uid) {
+      this.sketchLayer.remove(g);
+    }
+  });
+
+  this.applyGraphicDefaults(updatedGraphic);
+  this.featureLayer.add(updatedGraphic);
+}
+
+
+
+this.sketchLayer.remove(g);
+this.applyGraphicDefaults(g);
+
+if (!this.featureLayer.graphics.includes(g)) {
+  this.featureLayer.add(g);
+}
+
+this.updateGeojsonWithChanges(g);
+
+
+
+
+this.replaceGraphicInFeatureLayer(g);
+this.updateGeojsonWithChanges(g);
+
+
+
+
+
+const uid = this.getGraphicUniqueId(graphic);
+
+this.featureLayer.graphics.toArray().forEach((g: Graphic) => {
+  if (this.getGraphicUniqueId(g) === uid) {
+    this.featureLayer.remove(g);
+  }
+});
+
+this.sketchLayer.graphics.toArray().forEach((g: Graphic) => {
+  if (this.getGraphicUniqueId(g) === uid) {
+    this.sketchLayer.remove(g);
+  }
+});
+
+
+
+private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
   const isCircle =
-    graphic?.attributes?.drawGeometryType === DrawGeometryTypes.CIRCLE ||
-    graphic?.attributes?.shapeType === DrawGeometryTypes.CIRCLE ||
-    graphic?.attributes?.geometryType === DrawGeometryTypes.CIRCLE;
+    graphic?.attributes?.drawGeometryType === DrawGeometryTypes.CIRCLE;
 
   if (isCircle) {
     return 'transform';
   }
 
   if (
-    geometryType === 'polygon' &&
+    graphic?.geometry?.type === 'polygon' &&
     (
       this.enableUserEditVertices ||
       this.enableUserEditAddVertices ||
@@ -29,4 +79,3 @@ private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
 
   return 'move';
 }
-
