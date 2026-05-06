@@ -2,7 +2,10 @@ private async initializeMap(
   parsedCenter?: number[],
   parsedExtent?: any
 ): Promise<void> {
-  if (this.view) return;
+
+  if (this.view) {
+    return;
+  }
 
   const mapEl = this.renderRoot?.querySelector('#upMap') as any;
 
@@ -45,17 +48,6 @@ private async initializeMap(
       zoom: this.zoom
     });
   }
-
-  this.dispatchEvent(
-    new CustomEvent('map-ready', {
-      detail: {
-        view: this.view,
-        map: this.view.map
-      },
-      bubbles: true,
-      composed: true
-    })
-  );
 
   console.log('[up-map] initialized');
 }
