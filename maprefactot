@@ -1,24 +1,46 @@
-private updateBasemap(nextBasemap: string): void {
-  if (!this.map) return;
+import { css } from "lit";
 
-  const safeBasemap =
-    typeof nextBasemap === "string" && nextBasemap.trim().length > 0
-      ? nextBasemap
-      : ArcMap.DEFAULT_BASEMAP;
-
-  const currentBasemap = this.map.basemap as any;
-
-  const currentBasemapId =
-    typeof currentBasemap === "string"
-      ? currentBasemap
-      : currentBasemap?.id ?? currentBasemap?.title ?? "";
-
-  if (currentBasemapId === safeBasemap) return;
-
-  try {
-    (this.map as any).basemap = safeBasemap;
-  } catch (error) {
-    console.warn("Invalid basemap. Falling back to default.", error);
-    (this.map as any).basemap = ArcMap.DEFAULT_BASEMAP;
+export const arcMapStyles = css`
+  :host {
+    display: block;
+    height: 100%;
+    width: 100%;
   }
-}
+
+  arcgis-map {
+    width: 100%;
+    height: 100%;
+    display: block;
+    min-height: 500px;
+  }
+
+  .map-wrapper {
+    height: 100%;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .widget-stack {
+    position: absolute;
+    left: 16px;
+    bottom: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 10;
+  }
+
+  .widget-stack arcgis-scale-bar {
+    position: static;
+  }
+
+  .popup-scrollable-content {
+    max-height: 260px;
+    overflow: auto;
+  }
+
+  .popup-close-button {
+    float: right;
+    cursor: pointer;
+  }
+`;
