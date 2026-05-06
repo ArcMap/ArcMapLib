@@ -1,11 +1,45 @@
-Old vs New Editor — Brief Summary
-Old (Stencil + ArcGIS 3.x)
-	•	2 separate widgets — Draw toolbar for creating, Edit toolbar for editing
-	•	Each had its own separate events — rotate, scale, move, vertex were all different listeners
-	•	Edited graphics directly on the display layer
-	•	Simple boolean blockGeoJsonUpdate flag was enough
-New (LitElement + ArcGIS 5.0)
-	•	1 single widget — SketchViewModel handles everything
-	•	All events flow through one update event — check state and toolEventInfo.type to know what happened
-	•	Must clone graphic to sketchLayer first — SketchViewModel cannot edit FeatureLayer graphics directly
-	•	Needed 6 new guard flags because LitElement lifecycle fires earlier than Stencil
+private finishActiveEditor(): void {
+  const editedGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
+
+  editedGraphics.forEach((g: Graphic) => {
+    this.replaceGraphicInFeatureLayer(g);
+    this.updateGeojsonWithChanges(g);
+  });
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this.sketchLayer?.graphics?.removeAll();
+  this.enableInfoPopupWindow(!this.enableUserEdit);
+}
+
+
+
+
+if (this.enableUserEdit && this.graphicsEditor?.state === 'active') {
+  this.finishActiveEditor();
+  return;
+}
+
+
+
+
+if (this.enableUserEdit) {
+  if (this.graphicsEditor?.state === 'active') {
+    this.finishActiveEditor();
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
+  return;
+}
+
+
+
+
+this.sketchLayer?.graphics?.removeAll();
+
+try {
+  this.graphicsEditor?.cancel();
+} catch {}
