@@ -1,31 +1,96 @@
-private handleArcgisMapReady = async (event: Event): Promise<void> => {
-  if (this.isMapInitialized) return;
+private getParsedCenter(): number[] | undefined {
+  const centerValue = this.center;
 
-  const mapEl = event.target as any;
-
-  if (!mapEl?.view || !mapEl?.map) {
-    console.warn("arcgis-map ready fired, but map/view is missing");
-    return;
+  if (
+    centerValue &&
+    typeof centerValue === 'object' &&
+    'longitude' in centerValue &&
+    'latitude' in centerValue &&
+    typeof centerValue.longitude === 'number' &&
+    typeof centerValue.latitude === 'number'
+  ) {
+    return [centerValue.longitude, centerValue.latitude];
   }
 
-  this.view = mapEl.view;
-  this.map = mapEl.map;
+  return undefined;
+}
 
-  await this.view.when();
 
-  this.isMapInitialized = true;
+private getParsedExtent(): any | undefined {
+  const extentValue = this.extent;
 
-  this.applyZoomConstraints();
-  this.ensureDrawLayer();
-  this.setupDrawTool();
-  this.setupMapClickHandler();
-  this.setupViewStateWatchers();
-  this.setupPopupBridge();
-  this.syncPopupOptions();
-  this.syncMouseWheelZoom();
-  this.syncDoubleClickZoom();
-  this.syncKeyboardNavigation();
+  if (
+    extentValue &&
+    typeof extentValue === 'object' &&
+    typeof extentValue.leftLongitude === 'number' &&
+    typeof extentValue.rightLongitude === 'number' &&
+    typeof extentValue.topLatitude === 'number' &&
+    typeof extentValue.bottomLatitude === 'number'
+  ) {
+    return {
+      xmin: extentValue.leftLongitude,
+      ymin: extentValue.bottomLatitude,
+      xmax: extentValue.rightLongitude,
+      ymax: extentValue.topLatitude,
+      spatialReference: { wkid: 4326 }
+    };
+  }
 
-  this.resolveMapReady();
-  this.reflectCurrentMapState();
-};
+  return undefined;
+}
+
+
+protected async firstUpdated(): Promise<void> {
+  await this.updateComplete;
+
+  const parsedCenter = this.getParsedCenter();
+  const parsedExtent = this.getParsedExtent();
+
+  console.log('[up-map] firstUpdated parsedCenter:', parsedCenter);
+  console.log('[up-map] firstUpdated parsedExtent:', parsedExtent);
+  console.log('[up-map] firstUpdated zoom:', this.zoom);
+
+  await this.initializeMap(parsedCenter, parsedExtent);
+}
+
+
+protected updated(changedProps: Map<string, unknown>): void {
+  if (!this.view) return;
+
+  if (
+    changedProps.has('center') ||
+    changedProps.has('extent') ||
+    changedProps.has('zoom')
+  ) {
+    this.applyViewProperties();
+  }
+}
+
+
+private async applyViewProperties(): Promise<void> {
+  if (!this.view) return;
+
+  const parsedExtent = this.getParsedExtent();
+  const parsedCenter = this.getParsedCenter();
+
+  try {
+    if (parsedExtent) {
+      await this.view.goTo(parsedExtent);
+      return;
+    }
+
+    if (parsedCenter) {
+      await this.view.goTo({
+        center: parsedCenter,
+        zoom: this.zoom
+      });
+      return;
+    }
+
+    if (typeof this.zoom === 'number') {
+      this.view.zoom = this.zoom;
+    }
+  } catch (error) {
+    console.warn('[up-map] failed to apply view properties:', error);
+  }
+}
