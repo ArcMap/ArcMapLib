@@ -1,43 +1,33 @@
 private setMapCursor(cursor: 'default' | 'pointer'): void {
-  const styleId = 'arc-geojson-layer-cursor-override';
+  const container = this.view?.container as HTMLElement;
+  if (!container) return;
 
-  let style = document.getElementById(styleId) as HTMLStyleElement | null;
+  container.classList.toggle('arc-geojson-hover-pointer', cursor === 'pointer');
 
-  if (cursor === 'pointer') {
-    if (!style) {
-      style = document.createElement('style');
-      style.id = styleId;
-      document.head.appendChild(style);
-    }
+  let style = document.getElementById('arc-geojson-hover-pointer-style') as HTMLStyleElement | null;
 
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'arc-geojson-hover-pointer-style';
     style.textContent = `
-      .esri-view,
-      .esri-view *,
-      .esri-view canvas,
-      .esri-view .esri-view-surface {
+      .arc-geojson-hover-pointer,
+      .arc-geojson-hover-pointer *,
+      .arc-geojson-hover-pointer canvas,
+      .arc-geojson-hover-pointer .esri-view-surface,
+      .arc-geojson-hover-pointer .esri-view-root,
+      .arc-geojson-hover-pointer .esri-view-surface--inset-outline {
         cursor: pointer !important;
       }
     `;
-
-    try {
-      (this.view as any).cursor = 'pointer';
-    } catch {}
-
-    return;
-  }
-
-  if (style) {
-    style.remove();
+    document.head.appendChild(style);
   }
 
   try {
-    (this.view as any).cursor = 'default';
+    (this.view as any).cursor = cursor;
   } catch {}
+}
 
 
-
-
-const graphic = this.getLayerGraphicFromHit(hit);
 
 if (!graphic) {
   this.setMapCursor('default');
@@ -45,3 +35,12 @@ if (!graphic) {
 }
 
 this.setMapCursor('pointer');
+
+console.log('cursor check:', {
+  found: true,
+  type: graphic.geometry?.type,
+  classAdded: (this.view.container as HTMLElement).classList.contains('arc-geojson-hover-pointer'),
+  computedCursor: getComputedStyle(this.view.container as HTMLElement).cursor
+});
+
+
