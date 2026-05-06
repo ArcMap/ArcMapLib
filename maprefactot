@@ -1,69 +1,24 @@
-private emitTransientShapeCoordinates(
-  geometry: Geometry | null | undefined,
-): void {
-  if (!geometry) return;
+private updateBasemap(nextBasemap: string): void {
+  if (!this.map) return;
 
-  let selectionCoordinates: number[][] | number[][][] | null = null;
+  const safeBasemap =
+    typeof nextBasemap === "string" && nextBasemap.trim().length > 0
+      ? nextBasemap
+      : ArcMap.DEFAULT_BASEMAP;
 
-  if (geometry.type === "point") {
-    const point = geometry as Point;
-    const geographicPoint = webMercatorUtils.webMercatorToGeographic(
-      point,
-    ) as Point | null;
+  const currentBasemap = this.map.basemap as any;
 
-    const longitude = geographicPoint?.longitude;
-    const latitude = geographicPoint?.latitude;
+  const currentBasemapId =
+    typeof currentBasemap === "string"
+      ? currentBasemap
+      : currentBasemap?.id ?? currentBasemap?.title ?? "";
 
-    if (typeof longitude !== "number" || typeof latitude !== "number") {
-      return;
-    }
+  if (currentBasemapId === safeBasemap) return;
 
-    selectionCoordinates = [[longitude, latitude]];
+  try {
+    (this.map as any).basemap = safeBasemap;
+  } catch (error) {
+    console.warn("Invalid basemap. Falling back to default.", error);
+    (this.map as any).basemap = ArcMap.DEFAULT_BASEMAP;
   }
-
-  if (geometry.type === "polyline") {
-    const polyline = geometry as Polyline;
-    const geographicPolyline = webMercatorUtils.webMercatorToGeographic(
-      polyline,
-    ) as Polyline | null;
-
-    selectionCoordinates = geographicPolyline?.paths?.[0] ?? null;
-  }
-
-  if (geometry.type === "polygon") {
-    const polygon = geometry as Polygon;
-    const geographicPolygon = webMercatorUtils.webMercatorToGeographic(
-      polygon,
-    ) as Polygon | null;
-
-    selectionCoordinates = geographicPolygon?.rings ?? null;
-  }
-
-  if (!selectionCoordinates) return;
-
-  const detail: MapTransientShapeCoordinates = {
-    selectionCoordinates,
-  };
-
-  this.dispatchEvent(
-    new CustomEvent<MapTransientShapeCoordinates>(
-      "map-draw-transient-shape-coordinates",
-      {
-        detail,
-        bubbles: true,
-        composed: true,
-      },
-    ),
-  );
-
-  this.dispatchEvent(
-    new CustomEvent<MapTransientShapeCoordinates>(
-      "mapDrawTransientShapeCoordinates",
-      {
-        detail,
-        bubbles: true,
-        composed: true,
-      },
-    ),
-  );
 }
