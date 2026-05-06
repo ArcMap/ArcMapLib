@@ -1,7 +1,21 @@
+if (this.graphicsEditor?.state === 'active' || this.sketchLayer?.graphics?.length > 0) {
+  this.finishActiveEditor();
+  return;
+}
+
+
+private _finishingEditor = false;
+
 private finishActiveEditor(): void {
+  if (this._finishingEditor) return;
+
+  this._finishingEditor = true;
+
   const editedGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
 
   editedGraphics.forEach((g: Graphic) => {
+    if (!g?.geometry) return;
+
     this.replaceGraphicInFeatureLayer(g);
     this.updateGeojsonWithChanges(g);
   });
@@ -11,35 +25,60 @@ private finishActiveEditor(): void {
   } catch {}
 
   this.sketchLayer?.graphics?.removeAll();
+
   this.enableInfoPopupWindow(!this.enableUserEdit);
+
+  setTimeout(() => {
+    this._finishingEditor = false;
+  }, 0);
 }
 
 
 
 
-if (this.enableUserEdit && this.graphicsEditor?.state === 'active') {
-  this.finishActiveEditor();
-  return;
-}
 
+const dblClickHandle = this.view.on('double-click', async (evt: any) => {
+  evt.stopPropagation();
 
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+  }
 
-
-if (this.enableUserEdit) {
-  if (this.graphicsEditor?.state === 'active') {
+  // IMPORTANT: turn editor off before hitTest
+  if (this.graphicsEditor?.state === 'active' || this.sketchLayer?.graphics?.length > 0) {
     this.finishActiveEditor();
     return;
   }
 
-  await this.activateGraphicsEditor(graphic);
+  this.enableInfoPopupWindow(false);
+
+  const hit = await this.view.hitTest(evt, {
+    include: [this.featureLayer, this.sketchLayer]
+  });
+
+  let graphic = this.getLayerGraphicFromHit(hit);
+
+  if (!graphic) {
+    graphic = this.findNearestGraphic(evt.mapPoint);
+  }
+
+  if (!graphic) return;
+
+  if (this.enableUserEdit) {
+    await this.activateGraphicsEditor(graphic);
+    return;
+  }
+
+  if (!this.inDrawingMode) {
+    this.enableInfoPopupWindow(true);
+    this.showGraphicPopup(graphic, evt.mapPoint);
+  }
+});
+
+
+
+if (this.graphicsEditor?.state === 'active' || this.sketchLayer?.graphics?.length > 0) {
+  this.finishActiveEditor();
   return;
 }
-
-
-
-
-this.sketchLayer?.graphics?.removeAll();
-
-try {
-  this.graphicsEditor?.cancel();
-} catch {}
