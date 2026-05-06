@@ -1,112 +1,49 @@
-private resolveUpdateTool(graphic?: Graphic): 'move' | 'reshape' | 'transform' {
-  const drawGeometryType =
-    graphic?.attributes?.drawGeometryType ??
-    graphic?.attributes?.shapeType ??
-    graphic?.attributes?.geometryType;
-
-  const isCircle =
-    String(drawGeometryType).toUpperCase() === DrawGeometryTypes.CIRCLE;
-
-  // Circle must use transform, not reshape.
-  // Circle is stored as polygon, but reshape will distort it.
-  if (isCircle) {
-    return 'transform';
-  }
-
-  // Normal polygon should allow vertex editing.
-  if (
-    graphic?.geometry?.type === 'polygon' &&
-    (
-      this.enableUserEditVertices ||
-      this.enableUserEditAddVertices ||
-      this.enableUserEditDeleteVertices
-    )
-  ) {
-    return 'reshape';
-  }
-
-  if (this.enableUserEditScaling || this.enableUserEditRotating) {
-    return 'transform';
-  }
-
-  return 'move';
-}
-
-
-
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.featureLayer || !this.view) return;
-
-  this._isStartingDraw = true;
+private setMapCursor(cursor: 'default' | 'pointer', evt?: any): void {
+  const value = cursor === 'pointer' ? 'pointer' : '';
 
   try {
-    this.graphicsEditor?.cancel();
+    (this.view as any).cursor = cursor;
   } catch {}
 
-  this.resetEditorStateOnly();
-
-  this.featureLayer.graphics.removeAll();
-  this.labelLayer?.graphics.removeAll();
-  this.sketchLayer?.graphics.removeAll();
-
-  this.inDrawingMode = true;
-  this.enableInfoPopupWindow(false);
-  this._currentDrawGeometryType = drawGeometryType;
-
-  this._isStartingDraw = false;
-
-  await this.createEditor();
-  await new Promise<void>(resolve => setTimeout(resolve, 50));
-
-  const tool = this.toSketchCreateTool(drawGeometryType);
-
   try {
-    this.graphicsEditor.layer = this.sketchLayer;
-    this.graphicsEditor.create(tool);
-  } catch (error) {
-    console.error('[up-geojson-layer] startDrawing error:', error);
+    const container = this.view?.container as HTMLElement;
+    container?.style.setProperty('cursor', value, 'important');
 
-    this.inDrawingMode = false;
-    this._currentDrawGeometryType = undefined;
+    const surface = container?.querySelector('.esri-view-surface') as HTMLElement;
+    surface?.style.setProperty('cursor', value, 'important');
 
-    try {
-      await this.createEditor();
-      await new Promise<void>(resolve => setTimeout(resolve, 50));
+    const canvas = container?.querySelector('canvas') as HTMLElement;
+    canvas?.style.setProperty('cursor', value, 'important');
 
-      this.graphicsEditor.layer = this.sketchLayer;
-      this.graphicsEditor.create(tool);
-    } catch (secondError) {
-      console.error('[up-geojson-layer] second startDrawing failed:', secondError);
-      this.resetEditorStateOnly();
+    if (evt?.x !== undefined && evt?.y !== undefined) {
+      const el = document.elementFromPoint(evt.x, evt.y) as HTMLElement;
+      el?.style.setProperty('cursor', value, 'important');
     }
-  }
+  } catch {}
 }
 
+const pointerMoveHandle = this.view.on('pointer-move', async (evt: any) => {
+  const hit = await this.view.hitTest(evt, {
+    include: [this.featureLayer, this.sketchLayer]
+  });
 
-const createHandle = this.graphicsEditor.on('create', (evt: any) => {
-  if (evt.state !== 'complete' || !evt.graphic || this._isStartingDraw) {
+  const graphic = this.getLayerGraphicFromHit(hit);
+
+  if (!graphic) {
+    this.setMapCursor('default', evt);
     return;
   }
 
-  const cloned = evt.graphic.clone();
+  this.setMapCursor('pointer', evt);
 
-  cloned.attributes = {
-    ...(cloned.attributes ?? {}),
-    drawGeometryType: this._currentDrawGeometryType
-  };
+  const uid = this.getGraphicUniqueId(graphic);
 
-  this.resetEditorStateOnly();
+  if (this.hoveredGraphicUid !== uid) {
+    this.hoveredGraphicUid = uid;
 
-  this.inDrawingMode = false;
-
-  this.addToGeojson(cloned);
-
-  this._currentDrawGeometryType = undefined;
-
-  if (this.enableUserEdit) {
-    cloned.popupTemplate = null as any;
-    this.enableInfoPopupWindow(false);
-  } else {
-    this.enableInfoPopupWindow(true);
+    this.emitLayerEvent(
+      'layerMouseOver',
+      this.buildMouseEvent(graphic, evt.mapPoint)
+    );
   }
 });
