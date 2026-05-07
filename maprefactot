@@ -1,22 +1,120 @@
-jest.mock('@arcgis/core/renderers/SimpleRenderer', () => {
-  return jest.fn().mockImplementation((opts: any) => ({
-    ...opts,
-    __type: 'SimpleRenderer'
-  }));
-});
+static updateRenderer(
+  newRenderer: any,
+  featureLayer: FeatureLayer | GeoJSONLayer,
+  rendererTypeToModule: any,
+  symbolJson: any
+): void {
+  if (newRenderer) {
+    const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
 
-jest.mock('@arcgis/core/renderers/Renderer', () => {
-  return jest.fn().mockImplementation((opts: any) => ({
-    ...opts,
-    __type: 'Renderer'
-  }));
-});
+    if (rendererParseResult.error) {
+      console.warn(
+        'Could not parse new value for renderer, staying on the previous value',
+        rendererParseResult.error
+      );
+      return;
+    }
 
-jest.mock('@arcgis/core/core/Handles', () => {
-  return jest.fn().mockImplementation(() => ({
-    add: jest.fn(),
-    remove: jest.fn(),
-    removeAll: jest.fn(),
-    destroy: jest.fn()
-  }));
-});
+    const parsedRendererConfig = rendererParseResult.parsedJson;
+
+    const normalizedRendererType = JsonUtils.normalizeRendererType(
+      parsedRendererConfig.type
+    );
+
+    parsedRendererConfig.type = normalizedRendererType;
+
+    const rendererModuleName = rendererTypeToModule[normalizedRendererType];
+
+    if (rendererModuleName === undefined) {
+      console.error(
+        'Unrecognized renderer type',
+        parsedRendererConfig.type,
+        'Must be one of',
+        Object.keys(rendererTypeToModule)
+      );
+      return;
+    }
+
+    if (parsedRendererConfig.symbol) {
+      parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
+        parsedRendererConfig.symbol
+      );
+    }
+
+    if (parsedRendererConfig.defaultSymbol) {
+      parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
+        parsedRendererConfig.defaultSymbol
+      );
+    }
+
+    if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
+      parsedRendererConfig.uniqueValueInfos =
+        parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
+          ...info,
+          symbol: info.symbol
+            ? JsonUtils.normalizePlainSymbol(info.symbol)
+            : info.symbol
+        }));
+    }
+
+    if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
+      parsedRendererConfig.classBreakInfos =
+        parsedRendererConfig.classBreakInfos.map((info: any) => ({
+          ...info,
+          symbol: info.symbol
+            ? JsonUtils.normalizePlainSymbol(info.symbol)
+            : info.symbol
+        }));
+    }
+
+    let renderer;
+
+    switch (rendererModuleName) {
+      case 'simple':
+        renderer = new SimpleRenderer(parsedRendererConfig);
+        break;
+
+      case 'unique-value':
+        renderer = new UniqueValueRenderer(parsedRendererConfig);
+        break;
+
+      case 'class-breaks':
+        renderer = new ClassBreaksRenderer(parsedRendererConfig);
+        break;
+
+      default:
+        renderer = new SimpleRenderer(parsedRendererConfig);
+        break;
+    }
+
+    featureLayer.renderer = renderer;
+    return;
+  }
+
+  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
+
+  featureLayer.renderer = new SimpleRenderer({
+    symbol: fallbackSymbol
+  });
+}
+
+
+static normalizeRendererType(type: string): string {
+  const t = String(type || '').trim().toLowerCase();
+
+  switch (t) {
+    case 'uniquevalue':
+    case 'unique-value':
+      return 'unique-value';
+
+    case 'classbreaks':
+    case 'class-breaks':
+      return 'class-breaks';
+
+    case 'simple':
+      return 'simple';
+
+    default:
+      return t;
+  }
+}
