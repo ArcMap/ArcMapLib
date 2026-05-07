@@ -1,40 +1,22 @@
-jest.mock('@arcgis/core/symbols/SimpleMarkerSymbol', () => {
+jest.mock('@arcgis/core/renderers/ClassBreaksRenderer', () => {
   return jest.fn().mockImplementation((opts: any) => ({
     ...opts,
-    __type: 'SimpleMarkerSymbol'
+    __type: 'ClassBreaksRenderer'
   }));
 });
 
-jest.mock('@arcgis/core/symbols/SimpleLineSymbol', () => {
+jest.mock('@arcgis/core/renderers/SimpleRenderer', () => {
   return jest.fn().mockImplementation((opts: any) => ({
     ...opts,
-    __type: 'SimpleLineSymbol'
+    __type: 'SimpleRenderer'
   }));
 });
 
-jest.mock('@arcgis/core/symbols/SimpleFillSymbol', () => {
+jest.mock('@arcgis/core/renderers/UniqueValueRenderer', () => {
   return jest.fn().mockImplementation((opts: any) => ({
     ...opts,
-    __type: 'SimpleFillSymbol'
+    __type: 'UniqueValueRenderer'
   }));
 });
 
-jest.mock('@arcgis/core/symbols/PictureMarkerSymbol', () => {
-  return jest.fn().mockImplementation((opts: any) => ({
-    ...opts,
-    __type: 'PictureMarkerSymbol'
-  }));
-});
-
-
-module.exports = {
-  testEnvironment: 'node',
-  extensionsToTreatAsEsm: ['.ts'],
-  transform: {
-    '^.+\\.(ts|tsx)$': 'babel-jest',
-  },
-  setupFiles: ['<rootDir>/src/test/jest.setup.ts'],
-  transformIgnorePatterns: [
-    '/node_modules/(?!@arcgis/core/)'
-  ],
-};
+import JsonUtils from './json-utils';
