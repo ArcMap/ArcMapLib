@@ -2,11 +2,30 @@ private geojsonFeatureToGraphic(
   feature: Feature,
   index: number
 ): Graphic | null {
+  console.log('[geojsonFeatureToGraphic] incoming feature', feature);
+
   const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
 
-  if (!geometry) return null;
+  console.log(
+    '[geojsonFeatureToGraphic] converted geometry',
+    geometry
+  );
+
+  if (!geometry) {
+    console.warn(
+      '[geojsonFeatureToGraphic] geometry conversion failed',
+      feature
+    );
+
+    return null;
+  }
 
   const props = { ...(feature.properties ?? {}) } as any;
+
+  console.log(
+    '[geojsonFeatureToGraphic] original properties',
+    props
+  );
 
   if (props[this.uniqueIdPropertyName] === undefined) {
     props[this.uniqueIdPropertyName] = index;
@@ -16,39 +35,53 @@ private geojsonFeatureToGraphic(
     props.OBJECTID = index;
   }
 
-  const pointValue = String(
-    props.point ??
-      props.setKey ??
-      props.name ??
-      props.id ??
-      ''
-  ).trim();
-
-  const polygonValue = String(
-    props.polygon ??
-      (pointValue ? `${pointValue}polygon` : '')
-  ).trim();
-
-  if (pointValue) {
-    props.point = pointValue;
-  }
-
-  if (polygonValue) {
-    props.polygon = polygonValue;
-  }
-
   Object.keys(props).forEach((key) => {
     if (typeof props[key] === 'string') {
       props[key] = props[key].trim();
     }
   });
 
+  console.log(
+    '[geojsonFeatureToGraphic] geometry type',
+    feature.geometry?.type
+  );
+
+  console.log(
+    '[geojsonFeatureToGraphic] point field',
+    props.point
+  );
+
+  console.log(
+    '[geojsonFeatureToGraphic] polygon field',
+    props.polygon
+  );
+
+  console.log(
+    '[geojsonFeatureToGraphic] combined renderer key',
+    `${props.point ?? ''}${props.polygon ?? ''}`
+  );
+
   const graphic = new Graphic({
     geometry,
     attributes: props
   });
 
+  console.log(
+    '[geojsonFeatureToGraphic] graphic created',
+    graphic
+  );
+
+  console.log(
+    '[geojsonFeatureToGraphic] graphic attributes',
+    graphic.attributes
+  );
+
   this.applyGraphicDefaults(graphic);
+
+  console.log(
+    '[geojsonFeatureToGraphic] graphic after defaults',
+    graphic
+  );
 
   return graphic;
 }
