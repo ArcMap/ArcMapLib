@@ -1,12 +1,52 @@
-static clonePlain<T>(value: T): T {
-  if (value === undefined || value === null) {
-    return value;
-  }
+private normalizeBasemapName(basemap: string | undefined | null): string {
+  const value = String(basemap || '').trim().toLowerCase();
 
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch (error) {
-    console.warn('clonePlain failed, returning original value', error);
-    return value;
-  }
+  const basemapMap: Record<string, string> = {
+    // old stencil / legacy names
+    gray: 'gray-vector',
+    grey: 'gray-vector',
+    'gray-streets': 'gray-vector',
+    'grey-streets': 'gray-vector',
+
+    streets: 'streets-vector',
+    street: 'streets-vector',
+    'street-map': 'streets-vector',
+
+    topo: 'topo-vector',
+    topographic: 'topo-vector',
+
+    satellite: 'satellite',
+
+    hybrid: 'hybrid',
+    'hybrid-streets': 'hybrid',
+    'streets-hybrid': 'hybrid',
+    'satellite-streets': 'hybrid',
+    'imagery-with-labels': 'hybrid',
+
+    dark: 'dark-gray-vector',
+    'dark-gray': 'dark-gray-vector',
+    'dark-grey': 'dark-gray-vector',
+
+    osm: 'osm',
+    oceans: 'oceans',
+    terrain: 'terrain',
+    'national-geographic': 'national-geographic',
+
+    // newer ArcGIS style ids
+    'arcgis/streets': 'arcgis/streets',
+    'arcgis/navigation': 'arcgis/navigation',
+    'arcgis/topographic': 'arcgis/topographic',
+    'arcgis/outdoor': 'arcgis/outdoor',
+    'arcgis/imagery': 'arcgis/imagery',
+    'arcgis/light-gray': 'arcgis/light-gray',
+    'arcgis/dark-gray': 'arcgis/dark-gray'
+  };
+
+  return basemapMap[value] || value || 'gray-vector';
+}
+
+
+
+if (changedProps.has('basemap') && this.view?.map) {
+  this.view.map.basemap = this.normalizeBasemapName(this.basemap) as any;
 }
