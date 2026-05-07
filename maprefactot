@@ -1,55 +1,14 @@
-<up-geojson-layer
-  id="field1Field2PointTest"
-  name="Field1 Field2 Point Test"
-  geojson='{
-    "type": "FeatureCollection",
-    "features": [
-      {
-        "type": "Feature",
-        "geometry": {
-          "type": "Point",
-          "coordinates": [-84.1402, 34.2073]
-        },
-        "properties": {
-          "point": "test",
-          "polygon": "aditya"
-        }
-      }
-    ]
-  }'
-  renderer='{
-    "type": "uniqueValue",
-    "field1": "point",
-    "field2": "polygon",
-    "fieldDelimiter": "|",
-    "defaultSymbol": {
-      "type": "esriSMS",
-      "style": "esriSMSCircle",
-      "color": [255, 0, 0, 255],
-      "size": 20,
-      "outline": {
-        "type": "esriSLS",
-        "style": "esriSLSSolid",
-        "color": [255, 255, 255, 255],
-        "width": 2
-      }
-    },
-    "uniqueValueInfos": [
-      {
-        "value": "test|aditya",
-        "symbol": {
-          "type": "esriSMS",
-          "style": "esriSMSCircle",
-          "color": [0, 0, 255, 255],
-          "size": 24,
-          "outline": {
-            "type": "esriSLS",
-            "style": "esriSLSSolid",
-            "color": [255, 255, 255, 255],
-            "width": 3
-          }
-        }
-      }
-    ]
-  }'>
-</up-geojson-layer>
+console.log('POINT FIELD', props.point);
+console.log('POLYGON FIELD', props.polygon);
+
+const combinedRendererKey =
+  `${props.point ?? ''}|${props.polygon ?? ''}`;
+
+console.log('COMBINED KEY', combinedRendererKey);
+
+
+
+console.log(
+  'RENDERER VALUES',
+  parsedRendererConfig.uniqueValueInfos.map((x: any) => x.value)
+);
