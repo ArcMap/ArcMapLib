@@ -1,10 +1,3 @@
-jest.mock('@arcgis/core/renderers/ClassBreaksRenderer', () => {
-  return jest.fn().mockImplementation((opts: any) => ({
-    ...opts,
-    __type: 'ClassBreaksRenderer'
-  }));
-});
-
 jest.mock('@arcgis/core/renderers/SimpleRenderer', () => {
   return jest.fn().mockImplementation((opts: any) => ({
     ...opts,
@@ -12,11 +5,18 @@ jest.mock('@arcgis/core/renderers/SimpleRenderer', () => {
   }));
 });
 
-jest.mock('@arcgis/core/renderers/UniqueValueRenderer', () => {
+jest.mock('@arcgis/core/renderers/Renderer', () => {
   return jest.fn().mockImplementation((opts: any) => ({
     ...opts,
-    __type: 'UniqueValueRenderer'
+    __type: 'Renderer'
   }));
 });
 
-import JsonUtils from './json-utils';
+jest.mock('@arcgis/core/core/Handles', () => {
+  return jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    remove: jest.fn(),
+    removeAll: jest.fn(),
+    destroy: jest.fn()
+  }));
+});
