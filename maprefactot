@@ -1,12 +1,57 @@
 static normalizeRendererType(type: string): string {
   const t = String(type || '').trim().toLowerCase();
 
-  if (t === 'uniquevalue' || t === 'unique-value') return 'unique-value';
-  if (t === 'classbreaks' || t === 'class-breaks') return 'class-breaks';
-  if (t === 'simple') return 'simple';
+  switch (t) {
+    case 'uniquevalue':
+    case 'unique-value':
+      return 'unique-value';
 
-  return t;
+    case 'classbreaks':
+    case 'class-breaks':
+      return 'class-breaks';
+
+    case 'simple':
+      return 'simple';
+
+    default:
+      return t;
+  }
 }
+
+
+static normalizePlainSymbol(symbol: any): any {
+  if (!symbol) return symbol;
+
+  const type = String(symbol.type || '').trim().toLowerCase();
+
+  const normalized = {
+    ...symbol
+  };
+
+  if (type === 'esrisms') {
+    normalized.type = 'simple-marker';
+  }
+
+  if (type === 'esrisls') {
+    normalized.type = 'simple-line';
+  }
+
+  if (type === 'esrisfs') {
+    normalized.type = 'simple-fill';
+  }
+
+  if (type === 'esripms') {
+    normalized.type = 'picture-marker';
+  }
+
+  if (normalized.outline) {
+    normalized.outline = JsonUtils.normalizePlainSymbol(normalized.outline);
+  }
+
+  return normalized;
+}
+
+
 
 static updateRenderer(
   newRenderer: any,
@@ -18,6 +63,7 @@ static updateRenderer(
     featureLayer.renderer = new SimpleRenderer({
       symbol: JsonUtils.normalizePlainSymbol(symbolJson)
     });
+
     return;
   }
 
@@ -39,7 +85,6 @@ static updateRenderer(
 
   parsedRendererConfig.type = normalizedType;
 
-  // Normalize simple/default symbol
   if (parsedRendererConfig.symbol) {
     parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
       parsedRendererConfig.symbol
@@ -52,18 +97,20 @@ static updateRenderer(
     );
   }
 
-  // Normalize uniqueValue symbols
   if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
     parsedRendererConfig.uniqueValueInfos =
       parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
         ...info,
+        value:
+          typeof info.value === 'string'
+            ? info.value.trim()
+            : info.value,
         symbol: info.symbol
           ? JsonUtils.normalizePlainSymbol(info.symbol)
           : info.symbol
       }));
   }
 
-  // Normalize classBreak symbols
   if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
     parsedRendererConfig.classBreakInfos =
       parsedRendererConfig.classBreakInfos.map((info: any) => ({
@@ -90,12 +137,152 @@ static updateRenderer(
     default:
       console.error(
         'Unrecognized renderer type',
-        parsedRendererConfig.type,
-        'Must be simple, uniqueValue/unique-value, or classBreaks/class-breaks'
+        parsedRendererConfig.type
       );
+      featureLayer.renderer = new SimpleRenderer({
+        symbol: JsonUtils.normalizePlainSymbol(symbolJson)
+      });
       break;
   }
 }
+
+
+private buildGraphicAttributes(feature: any): any {
+  const properties = feature?.properties ?? {};
+  const geometryType = String(feature?.geometry?.type ?? '').toLowerCase();
+
+  const attributes: any = {
+    ...properties
+  };
+
+  const flattenNameValueArray = (items: any[] | undefined): void => {
+    if (!Array.isArray(items)) return;
+
+    items.forEach((item) => {
+      if (!item?.name) return;
+
+      attributes[item.name] = item.value;
+
+      const cleanName = String(item.name).replace(/^\$/, '');
+      attributes[cleanName] = item.value;
+    });
+  };
+
+  flattenNameValueArray(properties.metadata);
+  flattenNameValueArray(properties.setMetadata);
+
+  const setKey =
+    properties.setKey ??
+    attributes.setKey ??
+    attributes.point ??
+    attributes.polygon;
+
+  /*
+   * Backward compatibility with old Stencil behavior:
+   *
+   * Point feature should match uniqueValueInfos[0]
+   * value = setKey
+   *
+   * Polygon feature should match uniqueValueInfos[1]
+   * value = setKey + 'polygon'
+   */
+
+  if (geometryType === 'point' || geometryType === 'multipoint') {
+    attributes.point = setKey;
+    delete attributes.polygon;
+  }
+
+  if (geometryType === 'polygon' || geometryType === 'multipolygon') {
+    delete attributes.point;
+    attributes.polygon = `${setKey}polygon`;
+  }
+
+  if (geometryType === 'linestring' || geometryType === 'multilinestring' || geometryType === 'polyline') {
+    attributes.polyline = setKey;
+  }
+
+  Object.keys(attributes).forEach((key) => {
+    if (typeof attributes[key] === 'string') {
+      attributes[key] = attributes[key].trim();
+    }
+  });
+
+  return attributes;
+}
+
+
+
+
+
+
+const attributes = this.buildGraphicAttributes(feature);
+
+const graphic = new Graphic({
+  geometry,
+  attributes,
+  symbol: this.getDefaultSymbolForGeometry(geometry, attributes)
+});
+
+
+
+private getDefaultSymbolForGeometry(
+  geometry: Geometry | null | undefined,
+  attributes?: any
+): any {
+  if (!geometry) return null;
+
+  const rendererConfig = this.renderer
+    ? JsonUtils.getJsonFor(this.renderer)
+    : null;
+
+  const parsedRenderer = rendererConfig?.parsedJson;
+
+  if (parsedRenderer?.symbol) {
+    return JsonUtils.normalizePlainSymbol(parsedRenderer.symbol);
+  }
+
+  if (parsedRenderer?.defaultSymbol) {
+    return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
+  }
+
+  if (ArcGeojsonLayer.isPoint(geometry)) {
+    return new SimpleMarkerSymbol({
+      style: 'circle',
+      size: 14,
+      color: this.DEFAULT_SYMBOL_COLOR as any,
+      outline: new SimpleLineSymbol({
+        color: [0, 0, 0, 255],
+        width: 1
+      })
+    });
+  }
+
+  if (ArcGeojsonLayer.isPolyline(geometry)) {
+    return new SimpleLineSymbol({
+      style: 'solid',
+      color: this.DEFAULT_SYMBOL_COLOR as any,
+      width: 2
+    });
+  }
+
+  return new SimpleFillSymbol({
+    style: 'solid',
+    color: [
+      this.DEFAULT_SYMBOL_COLOR[0],
+      this.DEFAULT_SYMBOL_COLOR[1],
+      this.DEFAULT_SYMBOL_COLOR[2],
+      80
+    ] as any,
+    outline: new SimpleLineSymbol({
+      color: [80, 80, 80, 255],
+      width: 2
+    })
+  })
+
+
+
+
+
 
 private readonly rendererTypeToModule = {
   simple: 'simple',
@@ -104,3 +291,21 @@ private readonly rendererTypeToModule = {
   classBreaks: 'class-breaks',
   'class-breaks': 'class-breaks'
 };
+
+
+
+
+private updateRenderer(): void {
+  if (!this.featureLayer) return;
+
+  const symbolJson = this.getDefaultSymbolForGeometryType(
+    this.featureLayer.geometryType
+  );
+
+  JsonUtils.updateRenderer(
+    this.renderer,
+    this.featureLayer,
+    this.rendererTypeToModule,
+    symbolJson
+  );
+}
