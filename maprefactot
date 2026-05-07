@@ -1,116 +1,12 @@
-static updateRenderer(
-  newRenderer: any,
-  featureLayer: FeatureLayer | GeoJSONLayer,
-  rendererTypeToModule: any,
-  symbolJson: any
-): void {
-  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
-
-  if (!newRenderer) {
-    featureLayer.renderer = new SimpleRenderer({
-      symbol: fallbackSymbol
-    });
-    return;
+static clonePlain<T>(value: T): T {
+  if (value === undefined || value === null) {
+    return value;
   }
 
-  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
-
-  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
-    console.warn(
-      'Could not parse new value for renderer, falling back to default symbol',
-      rendererParseResult.error
-    );
-
-    featureLayer.renderer = new SimpleRenderer({
-      symbol: fallbackSymbol
-    });
-    return;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    console.warn('clonePlain failed, returning original value', error);
+    return value;
   }
-
-  const parsedRendererConfig = JsonUtils.clonePlain(
-    rendererParseResult.parsedJson
-  );
-
-  const normalizedRendererType = JsonUtils.normalizeRendererType(
-    parsedRendererConfig.type
-  );
-
-  parsedRendererConfig.type = normalizedRendererType;
-
-  const rendererModuleName =
-    rendererTypeToModule?.[normalizedRendererType] ?? normalizedRendererType;
-
-  // simple renderer symbol
-  if (parsedRendererConfig.symbol) {
-    parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
-      parsedRendererConfig.symbol
-    );
-  }
-
-  // fallback symbol for unique-value / class-breaks
-  if (parsedRendererConfig.defaultSymbol) {
-    parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
-      parsedRendererConfig.defaultSymbol
-    );
-  }
-
-  // unique-value renderer symbols
-  if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
-    parsedRendererConfig.uniqueValueInfos =
-      parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
-        ...info,
-        value:
-          typeof info.value === 'string'
-            ? info.value.trim()
-            : info.value,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-  }
-
-  // class-breaks renderer symbols
-  if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
-    parsedRendererConfig.classBreakInfos =
-      parsedRendererConfig.classBreakInfos.map((info: any) => ({
-        ...info,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-  }
-
-  let renderer: any;
-
-  switch (rendererModuleName) {
-    case 'simple':
-      renderer = new SimpleRenderer(parsedRendererConfig);
-      break;
-
-    case 'unique-value':
-    case 'uniqueValue':
-      renderer = new UniqueValueRenderer(parsedRendererConfig);
-      break;
-
-    case 'class-breaks':
-    case 'classBreaks':
-      renderer = new ClassBreaksRenderer(parsedRendererConfig);
-      break;
-
-    default:
-      console.error(
-        'Unrecognized renderer type',
-        parsedRendererConfig.type,
-        'Must be one of',
-        Object.keys(rendererTypeToModule ?? {})
-      );
-
-      renderer = new SimpleRenderer({
-        symbol: fallbackSymbol
-      });
-
-      break;
-  }
-
-  featureLayer.renderer = renderer;
 }
