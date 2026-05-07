@@ -1,30 +1,54 @@
-private evaluateLabelWhere(
-  where: string | undefined,
-  attributes: any
-): boolean {
+private refreshLabels(): void {
+  if (!this.labelLayer || !this.featureLayer) return;
 
-  if (!where || String(where).trim() === '') {
-    return true;
+  this.labelLayer.removeAll();
+
+  const hasLabelJson =
+    this.labelJson !== undefined &&
+    this.labelJson !== null &&
+    String(this.labelJson).trim() !== '';
+
+  if (!hasLabelJson) {
+    return;
   }
 
-  /*
-   * Supports:
-   * numProp = 5
-   * status = 'ACTIVE'
-   */
-
-  const match = String(where).match(
-    /^\s*([A-Za-z0-9_]+)\s*=\s*['"]?([^'"]+)['"]?\s*$/
+  const labelJson = JsonUtils.getLabelJson(
+    this.labelJson,
+    this.labelColor,
+    this.labelSize
   );
 
-  if (!match) {
-    return true;
-  }
+  const labelRules = Array.isArray(labelJson) ? labelJson : [labelJson];
 
-  const fieldName = match[1];
-  const expectedValue = match[2];
+  this.featureLayer.graphics.forEach((g: Graphic) => {
+    if (!g?.geometry) return;
 
-  const actualValue = attributes?.[fieldName];
+    const labelText = this.resolveLabelTextFromRules(g, labelRules);
 
-  return String(actualValue) === String(expectedValue);
+    if (!labelText) return;
+
+    const pt = ArcGeojsonLayer.getPopupPoint(g.geometry);
+
+    this.labelLayer.add(
+      new Graphic({
+        geometry: pt,
+        attributes: {
+          __labelFor: g.attributes?.[this.uniqueIdPropertyName]
+        },
+        symbol: new TextSymbol({
+          text: labelText,
+          color: JsonUtils.resolveLabelColor(this.labelColor) as any,
+          haloColor: 'black',
+          haloSize: 1,
+          xoffset: 3,
+          yoffset: 3,
+          font: {
+            size: JsonUtils.resolveLabelSize(this.labelSize),
+            family: 'sans-serif',
+            weight: 'bold'
+          }
+        })
+      })
+    );
+  });
 }
