@@ -1,39 +1,155 @@
-private async updateBasemap(
-  newBasemapInput: string,
-  oldBasemapInput?: string
-): Promise<void> {
-  if (!this.view?.map) return;
+static updateRenderer(
+  newRenderer: any,
+  featureLayer: FeatureLayer | GeoJSONLayer,
+  rendererTypeToModule: any,
+  symbolJson: any
+): void {
+  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
 
-  const newBasemap = this.normalizeBasemapName(newBasemapInput);
-  const oldBasemap = this.normalizeBasemapName(oldBasemapInput);
-
-  if (newBasemap === oldBasemap) {
+  if (!newRenderer) {
+    featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
     return;
   }
 
-  try {
-    this.view.map.basemap = newBasemap as any;
-  } catch (error) {
-    console.warn(
-      '[up-map] Failed to update basemap. Falling back to default.',
-      { newBasemapInput, newBasemap, error }
+  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+
+  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
+    featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
+    return;
+  }
+
+  const parsedRendererConfig = JsonUtils.clonePlain(rendererParseResult.parsedJson);
+  const normalizedType = JsonUtils.normalizeRendererType(parsedRendererConfig.type);
+
+  parsedRendererConfig.type = normalizedType;
+
+  if (normalizedType === 'unique-value') {
+    JsonUtils.applyOldGeoJsonUniqueValueCompatibility(
+      parsedRendererConfig,
+      featureLayer
     );
+  }
 
-    this.view.map.basemap = UpMap.DEFAULT_BASEMAP as any;
+  if (parsedRendererConfig.symbol) {
+    parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(parsedRendererConfig.symbol);
+  }
+
+  if (parsedRendererConfig.defaultSymbol) {
+    parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(parsedRendererConfig.defaultSymbol);
+  }
+
+  if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
+    parsedRendererConfig.uniqueValueInfos = parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
+      ...info,
+      value: typeof info.value === 'string' ? info.value.trim() : info.value,
+      symbol: info.symbol ? JsonUtils.normalizePlainSymbol(info.symbol) : info.symbol
+    }));
+  }
+
+  if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
+    parsedRendererConfig.classBreakInfos = parsedRendererConfig.classBreakInfos.map((info: any) => ({
+      ...info,
+      symbol: info.symbol ? JsonUtils.normalizePlainSymbol(info.symbol) : info.symbol
+    }));
+  }
+
+  switch (normalizedType) {
+    case 'simple':
+      featureLayer.renderer = new SimpleRenderer(parsedRendererConfig);
+      break;
+
+    case 'unique-value':
+      featureLayer.renderer = new UniqueValueRenderer(parsedRendererConfig);
+      break;
+
+    case 'class-breaks':
+      featureLayer.renderer = new ClassBreaksRenderer(parsedRendererConfig);
+      break;
+
+    default:
+      featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
+      break;
   }
 }
 
 
-if (changedProperties.has('basemap')) {
-  const oldBasemap = this.normalizeBasemapName(
-    changedProperties.get('basemap') as string
-  );
+private static applyOldGeoJsonUniqueValueCompatibility(
+  rendererConfig: any,
+  featureLayer: FeatureLayer | GeoJSONLayer
+): void {
+  const geometryType = String((featureLayer as any).geometryType || '').toLowerCase();
 
-  const newBasemap = this.normalizeBasemapName(this.basemap);
+  if (!Array.isArray(rendererConfig.uniqueValueInfos)) return;
 
-  if (oldBasemap !== newBasemap) {
-    await this.updateBasemap(newBasemap, oldBasemap);
+  if (geometryType.includes('point')) {
+    rendererConfig.field1 = 'point';
+    delete rendererConfig.field2;
+    delete rendererConfig.field3;
+
+    rendererConfig.uniqueValueInfos = rendererConfig.uniqueValueInfos.filter(
+      (info: any) =>
+        typeof info.value === 'string' &&
+        !info.value.trim().toLowerCase().endsWith('polygon')
+    );
+  }
+
+  if (geometryType.includes('polygon')) {
+    rendererConfig.field1 = 'polygon';
+    delete rendererConfig.field2;
+    delete rendererConfig.field3;
+
+    rendererConfig.uniqueValueInfos = rendererConfig.uniqueValueInfos.filter(
+      (info: any) =>
+        typeof info.value === 'string' &&
+        info.value.trim().toLowerCase().endsWith('polygon')
+    );
+  }
+
+  if (geometryType.includes('polyline')) {
+    rendererConfig.field1 = 'polyline';
+    delete rendererConfig.field2;
+    delete rendererConfig.field3;
   }
 }
 
 
+private geojsonFeatureToGraphic(
+  feature: Feature,
+  index: number
+): Graphic | null {
+  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
+
+  if (!geometry) return null;
+
+  const props = { ...(feature.properties ?? {}) } as any;
+
+  if (props[this.uniqueIdPropertyName] === undefined) {
+    props[this.uniqueIdPropertyName] = index;
+  }
+
+  if (props.OBJECTID === undefined) {
+    props.OBJECTID = index;
+  }
+
+  const geometryType = String(feature.geometry?.type ?? '').toLowerCase();
+  const setKey = props.setKey ?? props.point ?? props.polygon ?? '';
+
+  if (setKey) {
+    if (geometryType === 'point' || geometryType === 'multipoint') {
+      props.point = setKey;
+    }
+
+    if (geometryType === 'polygon' || geometryType === 'multipolygon') {
+      props.polygon = `${setKey}polygon`;
+    }
+  }
+
+  const graphic = new Graphic({
+    geometry,
+    attributes: props
+  });
+
+  this.applyGraphicDefaults(graphic);
+
+  return graphic;
+}
