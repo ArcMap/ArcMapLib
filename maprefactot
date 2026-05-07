@@ -1,53 +1,68 @@
-private async initializeMap(
-  parsedCenter?: number[],
-  parsedExtent?: any
-): Promise<void> {
+private refreshLabels(): void {
+  if (!this.labelLayer || !this.featureLayer) return;
 
-  if (this.view) {
-    return;
+  this.labelLayer.removeAll();
+
+  const labelJson = JsonUtils.getLabelJson(
+    this.labelJson,
+    this.labelColor,
+    this.labelSize
+  );
+
+  const labelRules = Array.isArray(labelJson) ? labelJson : [labelJson];
+
+  this.featureLayer.graphics.forEach((g: Graphic) => {
+    if (!g?.geometry) return;
+
+    const labelText = this.resolveLabelTextFromRules(g, labelRules);
+
+    if (!labelText) return;
+
+    const pt = ArcGeojsonLayer.getPopupPoint(g.geometry);
+
+    this.labelLayer.add(
+      new Graphic({
+        geometry: pt,
+        attributes: {
+          __labelFor: g.attributes?.[this.uniqueIdPropertyName]
+        },
+        symbol: new TextSymbol({
+          text: labelText,
+          color: JsonUtils.resolveLabelColor(this.labelColor) as any,
+          haloColor: 'black',
+          haloSize: 1,
+          xoffset: 3,
+          yoffset: 3,
+          font: {
+            size: JsonUtils.resolveLabelSize(this.labelSize),
+            family: 'sans-serif',
+            weight: 'bold'
+          }
+        })
+      })
+    );
+  });
+}
+
+
+private resolveLabelTextFromRules(
+  graphic: Graphic,
+  labelRules: any[]
+): string {
+  const attributes = graphic.attributes ?? {};
+
+  for (const rule of labelRules) {
+    if (!this.evaluateLabelWhere(rule?.where, attributes)) {
+      continue;
+    }
+
+    const expression = rule?.labelExpressionInfo?.expression;
+    const value = this.evaluateLabelExpression(expression, attributes);
+
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value);
+    }
   }
 
-  const mapEl = this.renderRoot?.querySelector('#upMap') as any;
-
-  if (!mapEl) {
-    console.error('[up-map] arcgis-map element not found');
-    return;
-  }
-
-  mapEl.basemap = this.basemap || 'gray-vector';
-
-  if (parsedCenter) {
-    mapEl.center = parsedCenter;
-  }
-
-  if (typeof this.zoom === 'number') {
-    mapEl.zoom = this.zoom;
-  }
-
-  if (parsedExtent) {
-    mapEl.extent = parsedExtent;
-  }
-
-  await mapEl.componentOnReady?.();
-
-  this.mapElement = mapEl;
-  this.view = mapEl.view;
-
-  if (!this.view) {
-    console.error('[up-map] MapView not available');
-    return;
-  }
-
-  await this.view.when();
-
-  if (parsedExtent) {
-    await this.view.goTo(parsedExtent);
-  } else if (parsedCenter) {
-    await this.view.goTo({
-      center: parsedCenter,
-      zoom: this.zoom
-    });
-  }
-
-  console.log('[up-map] initialized');
+  return attributes.LABEL ?? attributes.label ?? '';
 }
