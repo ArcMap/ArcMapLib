@@ -1,14 +1,54 @@
-console.log('POINT FIELD', props.point);
-console.log('POLYGON FIELD', props.polygon);
+private geojsonFeatureToGraphic(
+  feature: Feature,
+  index: number
+): Graphic | null {
+  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
 
-const combinedRendererKey =
-  `${props.point ?? ''}|${props.polygon ?? ''}`;
+  if (!geometry) return null;
 
-console.log('COMBINED KEY', combinedRendererKey);
+  const props = { ...(feature.properties ?? {}) } as any;
 
+  if (props[this.uniqueIdPropertyName] === undefined) {
+    props[this.uniqueIdPropertyName] = index;
+  }
 
+  if (props.OBJECTID === undefined) {
+    props.OBJECTID = index;
+  }
 
-console.log(
-  'RENDERER VALUES',
-  parsedRendererConfig.uniqueValueInfos.map((x: any) => x.value)
-);
+  const pointValue = String(
+    props.point ??
+      props.setKey ??
+      props.name ??
+      props.id ??
+      ''
+  ).trim();
+
+  const polygonValue = String(
+    props.polygon ??
+      (pointValue ? `${pointValue}polygon` : '')
+  ).trim();
+
+  if (pointValue) {
+    props.point = pointValue;
+  }
+
+  if (polygonValue) {
+    props.polygon = polygonValue;
+  }
+
+  Object.keys(props).forEach((key) => {
+    if (typeof props[key] === 'string') {
+      props[key] = props[key].trim();
+    }
+  });
+
+  const graphic = new Graphic({
+    geometry,
+    attributes: props
+  });
+
+  this.applyGraphicDefaults(graphic);
+
+  return graphic;
+}
