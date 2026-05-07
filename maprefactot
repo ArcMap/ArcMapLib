@@ -1,68 +1,33 @@
-private refreshLabels(): void {
-  if (!this.labelLayer || !this.featureLayer) return;
+private evaluateLabelExpression(
+  expression: string | undefined,
+  attributes: any
+): any {
 
-  this.labelLayer.removeAll();
-
-  const labelJson = JsonUtils.getLabelJson(
-    this.labelJson,
-    this.labelColor,
-    this.labelSize
-  );
-
-  const labelRules = Array.isArray(labelJson) ? labelJson : [labelJson];
-
-  this.featureLayer.graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-
-    const labelText = this.resolveLabelTextFromRules(g, labelRules);
-
-    if (!labelText) return;
-
-    const pt = ArcGeojsonLayer.getPopupPoint(g.geometry);
-
-    this.labelLayer.add(
-      new Graphic({
-        geometry: pt,
-        attributes: {
-          __labelFor: g.attributes?.[this.uniqueIdPropertyName]
-        },
-        symbol: new TextSymbol({
-          text: labelText,
-          color: JsonUtils.resolveLabelColor(this.labelColor) as any,
-          haloColor: 'black',
-          haloSize: 1,
-          xoffset: 3,
-          yoffset: 3,
-          font: {
-            size: JsonUtils.resolveLabelSize(this.labelSize),
-            family: 'sans-serif',
-            weight: 'bold'
-          }
-        })
-      })
-    );
-  });
-}
-
-
-private resolveLabelTextFromRules(
-  graphic: Graphic,
-  labelRules: any[]
-): string {
-  const attributes = graphic.attributes ?? {};
-
-  for (const rule of labelRules) {
-    if (!this.evaluateLabelWhere(rule?.where, attributes)) {
-      continue;
-    }
-
-    const expression = rule?.labelExpressionInfo?.expression;
-    const value = this.evaluateLabelExpression(expression, attributes);
-
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      return String(value);
-    }
+  if (!expression || String(expression).trim() === '') {
+    return undefined;
   }
 
-  return attributes.LABEL ?? attributes.label ?? '';
+  const expressionText = String(expression).trim();
+
+  /*
+   * Handles:
+   * $feature.sampleProp
+   * $feature.otherProp
+   */
+
+  const featureMatch = expressionText.match(
+    /\$feature\.([A-Za-z0-9_]+)/i
+  );
+
+  if (featureMatch) {
+    const fieldName = featureMatch[1];
+
+    return attributes?.[fieldName];
+  }
+
+  /*
+   * Static string fallback
+   */
+
+  return expressionText;
 }
