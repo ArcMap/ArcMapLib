@@ -1,143 +1,39 @@
-static updateRenderer(
-  newRenderer: any,
-  featureLayer: FeatureLayer | GeoJSONLayer,
-  rendererTypeToModule: any,
-  symbolJson: any
-): void {
-  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
+private async updateBasemap(
+  newBasemapInput: string,
+  oldBasemapInput?: string
+): Promise<void> {
+  if (!this.view?.map) return;
 
-  if (!newRenderer) {
-    featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
+  const newBasemap = this.normalizeBasemapName(newBasemapInput);
+  const oldBasemap = this.normalizeBasemapName(oldBasemapInput);
+
+  if (newBasemap === oldBasemap) {
     return;
   }
 
-  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+  try {
+    this.view.map.basemap = newBasemap as any;
+  } catch (error) {
+    console.warn(
+      '[up-map] Failed to update basemap. Falling back to default.',
+      { newBasemapInput, newBasemap, error }
+    );
 
-  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
-    featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
-    return;
+    this.view.map.basemap = UpMap.DEFAULT_BASEMAP as any;
   }
+}
 
-  const parsedRendererConfig = JsonUtils.clonePlain(rendererParseResult.parsedJson);
 
-  const normalizedRendererType = JsonUtils.normalizeRendererType(
-    parsedRendererConfig.type
+if (changedProperties.has('basemap')) {
+  const oldBasemap = this.normalizeBasemapName(
+    changedProperties.get('basemap') as string
   );
 
-  parsedRendererConfig.type = normalizedRendererType;
+  const newBasemap = this.normalizeBasemapName(this.basemap);
 
-  const geometryType = String((featureLayer as any).geometryType || '').toLowerCase();
-
-  if (normalizedRendererType === 'unique-value') {
-    if (geometryType.includes('point')) {
-      parsedRendererConfig.field1 = 'point';
-      delete parsedRendererConfig.field2;
-      delete parsedRendererConfig.field3;
-    }
-
-    if (geometryType.includes('polygon')) {
-      parsedRendererConfig.field1 = 'polygon';
-      delete parsedRendererConfig.field2;
-      delete parsedRendererConfig.field3;
-    }
-
-    if (geometryType.includes('polyline')) {
-      parsedRendererConfig.field1 = 'polyline';
-      delete parsedRendererConfig.field2;
-      delete parsedRendererConfig.field3;
-    }
-  }
-
-  if (parsedRendererConfig.symbol) {
-    parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
-      parsedRendererConfig.symbol
-    );
-  }
-
-  if (parsedRendererConfig.defaultSymbol) {
-    parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
-      parsedRendererConfig.defaultSymbol
-    );
-  }
-
-  if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
-    parsedRendererConfig.uniqueValueInfos =
-      parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
-        ...info,
-        value: typeof info.value === 'string' ? info.value.trim() : info.value,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-  }
-
-  if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
-    parsedRendererConfig.classBreakInfos =
-      parsedRendererConfig.classBreakInfos.map((info: any) => ({
-        ...info,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-  }
-
-  switch (normalizedRendererType) {
-    case 'simple':
-      featureLayer.renderer = new SimpleRenderer(parsedRendererConfig);
-      break;
-
-    case 'unique-value':
-      featureLayer.renderer = new UniqueValueRenderer(parsedRendererConfig);
-      break;
-
-    case 'class-breaks':
-      featureLayer.renderer = new ClassBreaksRenderer(parsedRendererConfig);
-      break;
-
-    default:
-      featureLayer.renderer = new SimpleRenderer({ symbol: fallbackSymbol });
-      break;
+  if (oldBasemap !== newBasemap) {
+    await this.updateBasemap(newBasemap, oldBasemap);
   }
 }
 
 
-private geojsonFeatureToGraphic(
-  feature: Feature,
-  index: number
-): Graphic | null {
-  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
-
-  if (!geometry) return null;
-
-  const props = { ...(feature.properties ?? {}) } as any;
-
-  if (props[this.uniqueIdPropertyName] === undefined) {
-    props[this.uniqueIdPropertyName] = index;
-  }
-
-  if (props.OBJECTID === undefined) {
-    props.OBJECTID = index;
-  }
-
-  const geometryType = String(feature.geometry?.type ?? '').toLowerCase();
-  const setKey = props.setKey ?? props.point ?? props.polygon ?? '';
-
-  if (setKey) {
-    if (geometryType === 'point' || geometryType === 'multipoint') {
-      props.point = setKey;
-    }
-
-    if (geometryType === 'polygon' || geometryType === 'multipolygon') {
-      props.polygon = `${setKey}polygon`;
-    }
-  }
-
-  const graphic = new Graphic({
-    geometry,
-    attributes: props
-  });
-
-  this.applyGraphicDefaults(graphic);
-
-  return graphic;
-}
