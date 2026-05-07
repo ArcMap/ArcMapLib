@@ -1,120 +1,106 @@
+static normalizeRendererType(type: string): string {
+  const t = String(type || '').trim().toLowerCase();
+
+  if (t === 'uniquevalue' || t === 'unique-value') return 'unique-value';
+  if (t === 'classbreaks' || t === 'class-breaks') return 'class-breaks';
+  if (t === 'simple') return 'simple';
+
+  return t;
+}
+
 static updateRenderer(
   newRenderer: any,
   featureLayer: FeatureLayer | GeoJSONLayer,
   rendererTypeToModule: any,
   symbolJson: any
 ): void {
-  if (newRenderer) {
-    const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
-
-    if (rendererParseResult.error) {
-      console.warn(
-        'Could not parse new value for renderer, staying on the previous value',
-        rendererParseResult.error
-      );
-      return;
-    }
-
-    const parsedRendererConfig = rendererParseResult.parsedJson;
-
-    const normalizedRendererType = JsonUtils.normalizeRendererType(
-      parsedRendererConfig.type
-    );
-
-    parsedRendererConfig.type = normalizedRendererType;
-
-    const rendererModuleName = rendererTypeToModule[normalizedRendererType];
-
-    if (rendererModuleName === undefined) {
-      console.error(
-        'Unrecognized renderer type',
-        parsedRendererConfig.type,
-        'Must be one of',
-        Object.keys(rendererTypeToModule)
-      );
-      return;
-    }
-
-    if (parsedRendererConfig.symbol) {
-      parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
-        parsedRendererConfig.symbol
-      );
-    }
-
-    if (parsedRendererConfig.defaultSymbol) {
-      parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
-        parsedRendererConfig.defaultSymbol
-      );
-    }
-
-    if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
-      parsedRendererConfig.uniqueValueInfos =
-        parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
-          ...info,
-          symbol: info.symbol
-            ? JsonUtils.normalizePlainSymbol(info.symbol)
-            : info.symbol
-        }));
-    }
-
-    if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
-      parsedRendererConfig.classBreakInfos =
-        parsedRendererConfig.classBreakInfos.map((info: any) => ({
-          ...info,
-          symbol: info.symbol
-            ? JsonUtils.normalizePlainSymbol(info.symbol)
-            : info.symbol
-        }));
-    }
-
-    let renderer;
-
-    switch (rendererModuleName) {
-      case 'simple':
-        renderer = new SimpleRenderer(parsedRendererConfig);
-        break;
-
-      case 'unique-value':
-        renderer = new UniqueValueRenderer(parsedRendererConfig);
-        break;
-
-      case 'class-breaks':
-        renderer = new ClassBreaksRenderer(parsedRendererConfig);
-        break;
-
-      default:
-        renderer = new SimpleRenderer(parsedRendererConfig);
-        break;
-    }
-
-    featureLayer.renderer = renderer;
+  if (!newRenderer) {
+    featureLayer.renderer = new SimpleRenderer({
+      symbol: JsonUtils.normalizePlainSymbol(symbolJson)
+    });
     return;
   }
 
-  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
+  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
 
-  featureLayer.renderer = new SimpleRenderer({
-    symbol: fallbackSymbol
-  });
-}
+  if (rendererParseResult.error) {
+    console.warn(
+      'Could not parse new value for renderer, staying on previous value',
+      rendererParseResult.error
+    );
+    return;
+  }
 
+  const parsedRendererConfig = rendererParseResult.parsedJson;
 
-static normalizeRendererType(type: string): string {
-  const t = String(type || '').trim().toLowerCase();
+  const normalizedType = JsonUtils.normalizeRendererType(
+    parsedRendererConfig.type
+  );
 
-  switch (t) {
-    case 'uniquevalue':
-    case 'unique-value':
-      return 'unique-value';
+  parsedRendererConfig.type = normalizedType;
 
-    case 'classbreaks':
-    case 'class-breaks':
-      return 'class-breaks';
+  // Normalize simple/default symbol
+  if (parsedRendererConfig.symbol) {
+    parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
+      parsedRendererConfig.symbol
+    );
+  }
 
+  if (parsedRendererConfig.defaultSymbol) {
+    parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
+      parsedRendererConfig.defaultSymbol
+    );
+  }
+
+  // Normalize uniqueValue symbols
+  if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
+    parsedRendererConfig.uniqueValueInfos =
+      parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
+        ...info,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+  }
+
+  // Normalize classBreak symbols
+  if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
+    parsedRendererConfig.classBreakInfos =
+      parsedRendererConfig.classBreakInfos.map((info: any) => ({
+        ...info,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+  }
+
+  switch (normalizedType) {
     case 'simple':
-      return 'simple';
+      featureLayer.renderer = new SimpleRenderer(parsedRendererConfig);
+      break;
+
+    case 'unique-value':
+      featureLayer.renderer = new UniqueValueRenderer(parsedRendererConfig);
+      break;
+
+    case 'class-breaks':
+      featureLayer.renderer = new ClassBreaksRenderer(parsedRendererConfig);
+      break;
 
     default:
-      return t;
+      console.error(
+        'Unrecognized renderer type',
+        parsedRendererConfig.type,
+        'Must be simple, uniqueValue/unique-value, or classBreaks/class-breaks'
+      );
+      break;
   }
 }
+
+private readonly rendererTypeToModule = {
+  simple: 'simple',
+  uniqueValue: 'unique-value',
+  'unique-value': 'unique-value',
+  classBreaks: 'class-breaks',
+  'class-breaks': 'class-breaks'
+};
