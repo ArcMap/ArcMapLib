@@ -1,54 +1,86 @@
-private refreshLabels(): void {
-  if (!this.labelLayer || !this.featureLayer) return;
+private getDefaultSymbolForGeometry(
+  geometry: Geometry | null | undefined,
+  attributes?: any
+): any {
+  if (!geometry) return null;
 
-  this.labelLayer.removeAll();
+  const rendererConfig = this.renderer
+    ? JsonUtils.getJsonFor(this.renderer)
+    : null;
 
-  const hasLabelJson =
-    this.labelJson !== undefined &&
-    this.labelJson !== null &&
-    String(this.labelJson).trim() !== '';
+  const parsedRenderer = rendererConfig?.parsedJson;
 
-  if (!hasLabelJson) {
-    return;
+  if (parsedRenderer?.type === 'uniqueValue' && parsedRenderer?.uniqueValueInfos?.length) {
+    const field1 = parsedRenderer.field1;
+    const field2 = parsedRenderer.field2;
+
+    const attrValue1 = attributes?.[field1];
+    const attrValue2 = attributes?.[field2];
+
+    const geometryKey =
+      geometry.type === 'polygon'
+        ? 'polygon'
+        : geometry.type === 'polyline'
+          ? 'polyline'
+          : 'point';
+
+    const matchedInfo = parsedRenderer.uniqueValueInfos.find((info: any) =>
+      info.value === attrValue1 ||
+      info.value === attrValue2 ||
+      info.value === `${attrValue1},${attrValue2}` ||
+      info.value === `${attrValue1}, ${attrValue2}` ||
+      info.value === geometryKey ||
+      String(info.value).includes(geometryKey)
+    );
+
+    if (matchedInfo?.symbol) {
+      return JsonUtils.normalizePlainSymbol(matchedInfo.symbol);
+    }
+
+    if (parsedRenderer.defaultSymbol) {
+      return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
+    }
   }
 
-  const labelJson = JsonUtils.getLabelJson(
-    this.labelJson,
-    this.labelColor,
-    this.labelSize
-  );
+  if (parsedRenderer?.symbol) {
+    return JsonUtils.normalizePlainSymbol(parsedRenderer.symbol);
+  }
 
-  const labelRules = Array.isArray(labelJson) ? labelJson : [labelJson];
+  if (parsedRenderer?.defaultSymbol) {
+    return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
+  }
 
-  this.featureLayer.graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-
-    const labelText = this.resolveLabelTextFromRules(g, labelRules);
-
-    if (!labelText) return;
-
-    const pt = ArcGeojsonLayer.getPopupPoint(g.geometry);
-
-    this.labelLayer.add(
-      new Graphic({
-        geometry: pt,
-        attributes: {
-          __labelFor: g.attributes?.[this.uniqueIdPropertyName]
-        },
-        symbol: new TextSymbol({
-          text: labelText,
-          color: JsonUtils.resolveLabelColor(this.labelColor) as any,
-          haloColor: 'black',
-          haloSize: 1,
-          xoffset: 3,
-          yoffset: 3,
-          font: {
-            size: JsonUtils.resolveLabelSize(this.labelSize),
-            family: 'sans-serif',
-            weight: 'bold'
-          }
-        })
+  if (ArcGeojsonLayer.isPoint(geometry)) {
+    return new SimpleMarkerSymbol({
+      style: 'circle',
+      size: 14,
+      color: this.DEFAULT_SYMBOL_COLOR as any,
+      outline: new SimpleLineSymbol({
+        color: [0, 0, 0, 255],
+        width: 1
       })
-    );
+    });
+  }
+
+  if (ArcGeojsonLayer.isPolyline(geometry)) {
+    return new SimpleLineSymbol({
+      style: 'solid',
+      color: this.DEFAULT_SYMBOL_COLOR as any,
+      width: 2
+    });
+  }
+
+  return new SimpleFillSymbol({
+    style: 'solid',
+    color: [
+      this.DEFAULT_SYMBOL_COLOR[0],
+      this.DEFAULT_SYMBOL_COLOR[1],
+      this.DEFAULT_SYMBOL_COLOR[2],
+      80
+    ] as any,
+    outline: new SimpleLineSymbol({
+      color: [80, 80, 80, 255],
+      width: 2
+    })
   });
 }
