@@ -1,58 +1,3 @@
-static normalizeRendererType(type: string): string {
-  const t = String(type || '').trim().toLowerCase();
-
-  switch (t) {
-    case 'uniquevalue':
-    case 'unique-value':
-      return 'unique-value';
-
-    case 'classbreaks':
-    case 'class-breaks':
-      return 'class-breaks';
-
-    case 'simple':
-      return 'simple';
-
-    default:
-      return t;
-  }
-}
-
-
-static normalizePlainSymbol(symbol: any): any {
-  if (!symbol) return symbol;
-
-  const type = String(symbol.type || '').trim().toLowerCase();
-
-  const normalized = {
-    ...symbol
-  };
-
-  if (type === 'esrisms') {
-    normalized.type = 'simple-marker';
-  }
-
-  if (type === 'esrisls') {
-    normalized.type = 'simple-line';
-  }
-
-  if (type === 'esrisfs') {
-    normalized.type = 'simple-fill';
-  }
-
-  if (type === 'esripms') {
-    normalized.type = 'picture-marker';
-  }
-
-  if (normalized.outline) {
-    normalized.outline = JsonUtils.normalizePlainSymbol(normalized.outline);
-  }
-
-  return normalized;
-}
-
-
-
 static updateRenderer(
   newRenderer: any,
   featureLayer: FeatureLayer | GeoJSONLayer,
@@ -63,7 +8,6 @@ static updateRenderer(
     featureLayer.renderer = new SimpleRenderer({
       symbol: JsonUtils.normalizePlainSymbol(symbolJson)
     });
-
     return;
   }
 
@@ -71,7 +15,7 @@ static updateRenderer(
 
   if (rendererParseResult.error) {
     console.warn(
-      'Could not parse new value for renderer, staying on previous value',
+      'Could not parse new value for renderer, staying on the previous value',
       rendererParseResult.error
     );
     return;
@@ -79,11 +23,21 @@ static updateRenderer(
 
   const parsedRendererConfig = rendererParseResult.parsedJson;
 
-  const normalizedType = JsonUtils.normalizeRendererType(
+  if (!parsedRendererConfig) {
+    featureLayer.renderer = new SimpleRenderer({
+      symbol: JsonUtils.normalizePlainSymbol(symbolJson)
+    });
+    return;
+  }
+
+  const normalizedRendererType = JsonUtils.normalizeRendererType(
     parsedRendererConfig.type
   );
 
-  parsedRendererConfig.type = normalizedType;
+  parsedRendererConfig.type = normalizedRendererType;
+
+  const rendererModuleName =
+    rendererTypeToModule?.[normalizedRendererType] ?? normalizedRendererType;
 
   if (parsedRendererConfig.symbol) {
     parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
@@ -121,246 +75,37 @@ static updateRenderer(
       }));
   }
 
-  switch (normalizedType) {
+  let renderer: any;
+
+  switch (rendererModuleName) {
     case 'simple':
-      featureLayer.renderer = new SimpleRenderer(parsedRendererConfig);
+      renderer = new SimpleRenderer(parsedRendererConfig);
       break;
 
     case 'unique-value':
-      featureLayer.renderer = new UniqueValueRenderer(parsedRendererConfig);
+    case 'uniqueValue':
+      renderer = new UniqueValueRenderer(parsedRendererConfig);
       break;
 
     case 'class-breaks':
-      featureLayer.renderer = new ClassBreaksRenderer(parsedRendererConfig);
+    case 'classBreaks':
+      renderer = new ClassBreaksRenderer(parsedRendererConfig);
       break;
 
     default:
       console.error(
         'Unrecognized renderer type',
-        parsedRendererConfig.type
+        parsedRendererConfig.type,
+        'Must be one of',
+        Object.keys(rendererTypeToModule ?? {})
       );
-      featureLayer.renderer = new SimpleRenderer({
+
+      renderer = new SimpleRenderer({
         symbol: JsonUtils.normalizePlainSymbol(symbolJson)
       });
+
       break;
   }
-}
 
-
-private buildGraphicAttributes(feature: any): any {
-  const properties = feature?.properties ?? {};
-  const geometryType = String(feature?.geometry?.type ?? '').toLowerCase();
-
-  const attributes: any = {
-    ...properties
-  };
-
-  const flattenNameValueArray = (items: any[] | undefined): void => {
-    if (!Array.isArray(items)) return;
-
-    items.forEach((item) => {
-      if (!item?.name) return;
-
-      attributes[item.name] = item.value;
-
-      const cleanName = String(item.name).replace(/^\$/, '');
-      attributes[cleanName] = item.value;
-    });
-  };
-
-  flattenNameValueArray(properties.metadata);
-  flattenNameValueArray(properties.setMetadata);
-
-  const setKey =
-    properties.setKey ??
-    attributes.setKey ??
-    attributes.point ??
-    attributes.polygon;
-
-  /*
-   * Backward compatibility with old Stencil behavior:
-   *
-   * Point feature should match uniqueValueInfos[0]
-   * value = setKey
-   *
-   * Polygon feature should match uniqueValueInfos[1]
-   * value = setKey + 'polygon'
-   */
-
-  if (geometryType === 'point' || geometryType === 'multipoint') {
-    attributes.point = setKey;
-    delete attributes.polygon;
-  }
-
-  if (geometryType === 'polygon' || geometryType === 'multipolygon') {
-    delete attributes.point;
-    attributes.polygon = `${setKey}polygon`;
-  }
-
-  if (geometryType === 'linestring' || geometryType === 'multilinestring' || geometryType === 'polyline') {
-    attributes.polyline = setKey;
-  }
-
-  Object.keys(attributes).forEach((key) => {
-    if (typeof attributes[key] === 'string') {
-      attributes[key] = attributes[key].trim();
-    }
-  });
-
-  return attributes;
-}
-
-
-
-
-
-
-const attributes = this.buildGraphicAttributes(feature);
-
-const graphic = new Graphic({
-  geometry,
-  attributes,
-  symbol: this.getDefaultSymbolForGeometry(geometry, attributes)
-});
-
-
-
-private getDefaultSymbolForGeometry(
-  geometry: Geometry | null | undefined,
-  attributes?: any
-): any {
-  if (!geometry) return null;
-
-  const rendererConfig = this.renderer
-    ? JsonUtils.getJsonFor(this.renderer)
-    : null;
-
-  const parsedRenderer = rendererConfig?.parsedJson;
-
-  if (parsedRenderer?.symbol) {
-    return JsonUtils.normalizePlainSymbol(parsedRenderer.symbol);
-  }
-
-  if (parsedRenderer?.defaultSymbol) {
-    return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
-  }
-
-  if (ArcGeojsonLayer.isPoint(geometry)) {
-    return new SimpleMarkerSymbol({
-      style: 'circle',
-      size: 14,
-      color: this.DEFAULT_SYMBOL_COLOR as any,
-      outline: new SimpleLineSymbol({
-        color: [0, 0, 0, 255],
-        width: 1
-      })
-    });
-  }
-
-  if (ArcGeojsonLayer.isPolyline(geometry)) {
-    return new SimpleLineSymbol({
-      style: 'solid',
-      color: this.DEFAULT_SYMBOL_COLOR as any,
-      width: 2
-    });
-  }
-
-  return new SimpleFillSymbol({
-    style: 'solid',
-    color: [
-      this.DEFAULT_SYMBOL_COLOR[0],
-      this.DEFAULT_SYMBOL_COLOR[1],
-      this.DEFAULT_SYMBOL_COLOR[2],
-      80
-    ] as any,
-    outline: new SimpleLineSymbol({
-      color: [80, 80, 80, 255],
-      width: 2
-    })
-  })
-
-
-
-
-
-
-private readonly rendererTypeToModule = {
-  simple: 'simple',
-  uniqueValue: 'unique-value',
-  'unique-value': 'unique-value',
-  classBreaks: 'class-breaks',
-  'class-breaks': 'class-breaks'
-};
-
-
-
-
-private updateRenderer(): void {
-  if (!this.featureLayer) return;
-
-  const symbolJson = this.getDefaultSymbolForGeometryType(
-    this.featureLayer.geometryType
-  );
-
-  JsonUtils.updateRenderer(
-    this.renderer,
-    this.featureLayer,
-    this.rendererTypeToModule,
-    symbolJson
-  );
-}
-
-
-private geojsonFeatureToGraphic(
-  feature: Feature,
-  index: number
-): Graphic | null {
-  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
-
-  if (!geometry) return null;
-
-  const props = { ...(feature.properties ?? {}) } as any;
-
-  if (props[this.uniqueIdPropertyName] === undefined) {
-    props[this.uniqueIdPropertyName] = index;
-  }
-
-  if (props.OBJECTID === undefined) {
-    props.OBJECTID = index;
-  }
-
-  const geometryType = String(feature.geometry?.type ?? '').toLowerCase();
-
-  const setKey =
-    props.setKey ??
-    props.point ??
-    props.polygon ??
-    '';
-
-  if (setKey) {
-    if (geometryType === 'point' || geometryType === 'multipoint') {
-      props.point = setKey;
-      delete props.polygon;
-    }
-
-    if (geometryType === 'polygon' || geometryType === 'multipolygon') {
-      props.polygon = `${setKey}polygon`;
-      delete props.point;
-    }
-  }
-
-  Object.keys(props).forEach((key) => {
-    if (typeof props[key] === 'string') {
-      props[key] = props[key].trim();
-    }
-  });
-
-  const graphic = new Graphic({
-    geometry,
-    attributes: props
-  });
-
-  this.applyGraphicDefaults(graphic);
-
-  return graphic;
+  featureLayer.renderer = renderer;
 }
