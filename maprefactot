@@ -1,33 +1,30 @@
-private evaluateLabelExpression(
-  expression: string | undefined,
+private evaluateLabelWhere(
+  where: string | undefined,
   attributes: any
-): any {
+): boolean {
 
-  if (!expression || String(expression).trim() === '') {
-    return undefined;
+  if (!where || String(where).trim() === '') {
+    return true;
   }
 
-  const expressionText = String(expression).trim();
-
   /*
-   * Handles:
-   * $feature.sampleProp
-   * $feature.otherProp
+   * Supports:
+   * numProp = 5
+   * status = 'ACTIVE'
    */
 
-  const featureMatch = expressionText.match(
-    /\$feature\.([A-Za-z0-9_]+)/i
+  const match = String(where).match(
+    /^\s*([A-Za-z0-9_]+)\s*=\s*['"]?([^'"]+)['"]?\s*$/
   );
 
-  if (featureMatch) {
-    const fieldName = featureMatch[1];
-
-    return attributes?.[fieldName];
+  if (!match) {
+    return true;
   }
 
-  /*
-   * Static string fallback
-   */
+  const fieldName = match[1];
+  const expectedValue = match[2];
 
-  return expressionText;
+  const actualValue = attributes?.[fieldName];
+
+  return String(actualValue) === String(expectedValue);
 }
