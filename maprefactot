@@ -309,3 +309,58 @@ private updateRenderer(): void {
     symbolJson
   );
 }
+
+
+private geojsonFeatureToGraphic(
+  feature: Feature,
+  index: number
+): Graphic | null {
+  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
+
+  if (!geometry) return null;
+
+  const props = { ...(feature.properties ?? {}) } as any;
+
+  if (props[this.uniqueIdPropertyName] === undefined) {
+    props[this.uniqueIdPropertyName] = index;
+  }
+
+  if (props.OBJECTID === undefined) {
+    props.OBJECTID = index;
+  }
+
+  const geometryType = String(feature.geometry?.type ?? '').toLowerCase();
+
+  const setKey =
+    props.setKey ??
+    props.point ??
+    props.polygon ??
+    '';
+
+  if (setKey) {
+    if (geometryType === 'point' || geometryType === 'multipoint') {
+      props.point = setKey;
+      delete props.polygon;
+    }
+
+    if (geometryType === 'polygon' || geometryType === 'multipolygon') {
+      props.polygon = `${setKey}polygon`;
+      delete props.point;
+    }
+  }
+
+  Object.keys(props).forEach((key) => {
+    if (typeof props[key] === 'string') {
+      props[key] = props[key].trim();
+    }
+  });
+
+  const graphic = new Graphic({
+    geometry,
+    attributes: props
+  });
+
+  this.applyGraphicDefaults(graphic);
+
+  return graphic;
+}
