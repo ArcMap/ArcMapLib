@@ -1,86 +1,40 @@
-private getDefaultSymbolForGeometry(
-  geometry: Geometry | null | undefined,
-  attributes?: any
-): any {
-  if (!geometry) return null;
+jest.mock('@arcgis/core/symbols/SimpleMarkerSymbol', () => {
+  return jest.fn().mockImplementation((opts: any) => ({
+    ...opts,
+    __type: 'SimpleMarkerSymbol'
+  }));
+});
 
-  const rendererConfig = this.renderer
-    ? JsonUtils.getJsonFor(this.renderer)
-    : null;
+jest.mock('@arcgis/core/symbols/SimpleLineSymbol', () => {
+  return jest.fn().mockImplementation((opts: any) => ({
+    ...opts,
+    __type: 'SimpleLineSymbol'
+  }));
+});
 
-  const parsedRenderer = rendererConfig?.parsedJson;
+jest.mock('@arcgis/core/symbols/SimpleFillSymbol', () => {
+  return jest.fn().mockImplementation((opts: any) => ({
+    ...opts,
+    __type: 'SimpleFillSymbol'
+  }));
+});
 
-  if (parsedRenderer?.type === 'uniqueValue' && parsedRenderer?.uniqueValueInfos?.length) {
-    const field1 = parsedRenderer.field1;
-    const field2 = parsedRenderer.field2;
+jest.mock('@arcgis/core/symbols/PictureMarkerSymbol', () => {
+  return jest.fn().mockImplementation((opts: any) => ({
+    ...opts,
+    __type: 'PictureMarkerSymbol'
+  }));
+});
 
-    const attrValue1 = attributes?.[field1];
-    const attrValue2 = attributes?.[field2];
 
-    const geometryKey =
-      geometry.type === 'polygon'
-        ? 'polygon'
-        : geometry.type === 'polyline'
-          ? 'polyline'
-          : 'point';
-
-    const matchedInfo = parsedRenderer.uniqueValueInfos.find((info: any) =>
-      info.value === attrValue1 ||
-      info.value === attrValue2 ||
-      info.value === `${attrValue1},${attrValue2}` ||
-      info.value === `${attrValue1}, ${attrValue2}` ||
-      info.value === geometryKey ||
-      String(info.value).includes(geometryKey)
-    );
-
-    if (matchedInfo?.symbol) {
-      return JsonUtils.normalizePlainSymbol(matchedInfo.symbol);
-    }
-
-    if (parsedRenderer.defaultSymbol) {
-      return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
-    }
-  }
-
-  if (parsedRenderer?.symbol) {
-    return JsonUtils.normalizePlainSymbol(parsedRenderer.symbol);
-  }
-
-  if (parsedRenderer?.defaultSymbol) {
-    return JsonUtils.normalizePlainSymbol(parsedRenderer.defaultSymbol);
-  }
-
-  if (ArcGeojsonLayer.isPoint(geometry)) {
-    return new SimpleMarkerSymbol({
-      style: 'circle',
-      size: 14,
-      color: this.DEFAULT_SYMBOL_COLOR as any,
-      outline: new SimpleLineSymbol({
-        color: [0, 0, 0, 255],
-        width: 1
-      })
-    });
-  }
-
-  if (ArcGeojsonLayer.isPolyline(geometry)) {
-    return new SimpleLineSymbol({
-      style: 'solid',
-      color: this.DEFAULT_SYMBOL_COLOR as any,
-      width: 2
-    });
-  }
-
-  return new SimpleFillSymbol({
-    style: 'solid',
-    color: [
-      this.DEFAULT_SYMBOL_COLOR[0],
-      this.DEFAULT_SYMBOL_COLOR[1],
-      this.DEFAULT_SYMBOL_COLOR[2],
-      80
-    ] as any,
-    outline: new SimpleLineSymbol({
-      color: [80, 80, 80, 255],
-      width: 2
-    })
-  });
-}
+module.exports = {
+  testEnvironment: 'node',
+  extensionsToTreatAsEsm: ['.ts'],
+  transform: {
+    '^.+\\.(ts|tsx)$': 'babel-jest',
+  },
+  setupFiles: ['<rootDir>/src/test/jest.setup.ts'],
+  transformIgnorePatterns: [
+    '/node_modules/(?!@arcgis/core/)'
+  ],
+};
