@@ -4,97 +4,328 @@ private emitLayerEvent(
   graphic?: Graphic | null,
   extraData?: any
 ): void {
-
-  /**
-   * Prevent invalid event emission
-   */
-  if (!feature && !graphic) {
-    console.warn(
-      "[arc-geojson-layer] emitLayerEvent skipped",
-      eventName
-    );
-    return;
-  }
+  const attributes =
+    feature?.properties ??
+    graphic?.attributes ??
+    {};
 
   const objectId =
-    feature?.properties?.OBJECTID ??
-    graphic?.attributes?.OBJECTID ??
-    graphic?.attributes?.objectid ??
+    attributes?.OBJECTID ??
+    attributes?.objectId ??
+    attributes?.id ??
     null;
 
   const payload = {
     type: eventName,
-
+    OBJECTID: objectId,
     objectId,
+    id: objectId,
 
-    feature: feature ?? null,
+    feature: feature ?? {
+      type: "Feature",
+      geometry: graphic?.geometry
+        ? this.arcGeometryToGeoJson(graphic.geometry)
+        : null,
+      properties: attributes,
+    },
 
     graphic: graphic ?? null,
-
-    attributes:
-      feature?.properties ??
-      graphic?.attributes ??
-      {},
+    attributes,
+    properties: attributes,
 
     geometry:
       feature?.geometry ??
-      graphic?.geometry ??
-      null,
+      (graphic?.geometry ? this.arcGeometryToGeoJson(graphic.geometry) : null),
 
     geojson: this.geojson,
 
-    layerId: this.layerId,
+    layerId:
+      this.featureLayer?.id ??
+      this.name ??
+      "arc-geojson-layer",
 
-    ...extraData
+    ...extraData,
   };
 
   this.dispatchEvent(
     new CustomEvent(eventName, {
       detail: payload,
       bubbles: true,
-      composed: true
+      composed: true,
     })
   );
 }
 
 
-private buildPopupTemplateFromCurrent(
-  graphic: Graphic
-): PopupTemplate | null {
 
-  if (!graphic) {
-    return null;
+
+
+async startDrawing(drawGeometryType: string): Promise<void> {
+  const normalizedType = String(drawGeometryType || "").toLowerCase();
+
+  if (!this.view) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
+    return;
   }
 
-  const attributes =
-    graphic.attributes ?? {};
+  if (!this.featureLayer) {
+    await this.createLayer(this.geojson);
+  }
 
-  const fieldInfos = Object.keys(attributes)
-    .filter((key) => {
-      const value = attributes[key];
+  if (!this.featureLayer) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
+    return;
+  }
 
-      return (
-        value !== undefined &&
-        value !== null &&
-        typeof value !== "object"
-      );
-    })
-    .map((key) => ({
-      fieldName: key,
-      label: key,
-      visible: true
-    }));
+  await this.createEditor();
 
-  return new PopupTemplate({
-    title:
-      this.name ??
-      "Details",
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
+    return;
+  }
 
-    content: [
-      {
-        type: "fields",
-        fieldInfos
+  this._currentDrawGeometryType = normalizedType;
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 1500;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view.popup?.close();
+  } catch {}
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  /**
+   * IMPORTANT:
+   * Only allow one active drawing preview at a time.
+   * Do NOT remove existing saved layer graphics.
+   * Only clear Sketch temporary graphics.
+   */
+  try {
+    this.sketchLayer?.graphics?.removeAll();
+  } catch {}
+
+  console.log("[arc-geojson-layer] startDrawing", {
+    requested: drawGeometryType,
+    normalized: normalizedType,
+  });
+
+  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
+}
+
+
+
+
+private async createEditor(): Promise<void> {
+  if (!this.view || !this.featureLayer) {
+    return;
+  }
+
+  const layerExistsInMap =
+    this.view.map?.layers?.includes(this.featureLayer as any);
+
+  if (!layerExistsInMap) {
+    this.view.map?.add(this.featureLayer);
+  }
+
+  if (this.graphicsEditor) {
+    try {
+      this.graphicsEditor.cancel();
+    } catch {}
+
+    try {
+      this.graphicsEditor.destroy();
+    } catch {}
+  }
+
+  this.graphicsEditor = new SketchViewModel({
+    view: this.view,
+    layer: this.featureLayer,
+    updateOnGraphicClick: false,
+    defaultUpdateOptions: {
+      tool: "reshape",
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    },
+  });
+
+  this.editorHandles?.forEach((h) => {
+    try {
+      h.remove();
+    } catch {}
+  });
+
+  this.editorHandles = [];
+
+  const createHandle = this.graphicsEditor.on("create", (event: any) => {
+    if (event.state === "start" || event.state === "active") {
+      this.inDrawingMode = true;
+      this._isStartingDraw = true;
+      this._editorOpen = false;
+      this.enableInfoPopupWindow(false);
+
+      /**
+       * Only keep the current sketch graphic while drawing.
+       */
+      const activeGraphic = event.graphic;
+
+      this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
+        if (
+          g !== activeGraphic &&
+          g.attributes?.__isTemporaryDrawing === true
+        ) {
+          this.featureLayer?.remove(g);
+        }
+      });
+
+      if (activeGraphic) {
+        activeGraphic.attributes = {
+          ...(activeGraphic.attributes ?? {}),
+          __isTemporaryDrawing: true,
+        };
       }
-    ]
+    }
+
+    if (event.state === "complete") {
+      const completedGraphic = event.graphic as Graphic;
+
+      if (!completedGraphic) {
+        return;
+      }
+
+      completedGraphic.attributes = {
+        ...(completedGraphic.attributes ?? {}),
+        __isTemporaryDrawing: false,
+      };
+
+      this.handleCreateComplete(completedGraphic);
+    }
+
+    if (event.state === "cancel") {
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this._editorOpen = false;
+      this.enableInfoPopupWindow(true);
+    }
+  });
+
+  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+    if (event.state === "start" || event.state === "active") {
+      this._editorOpen = true;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this.enableInfoPopupWindow(false);
+    }
+
+    if (event.state === "complete") {
+      this.finishActiveEditor();
+    }
+
+    if (event.state === "cancel") {
+      this._editorOpen = false;
+      this.enableInfoPopupWindow(true);
+    }
+  });
+
+  this.editorHandles.push(createHandle, updateHandle);
+
+  console.log("[arc-geojson-layer] createEditor DONE", {
+    layer: this.featureLayer,
+    layerId: this.featureLayer.id,
+    layerExistsInMap,
+    graphicCount: this.featureLayer.graphics.length,
   });
 }
+
+
+
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 700;
+
+  if (!graphic?.geometry) {
+    return;
+  }
+
+  graphic.attributes = {
+    ...(graphic.attributes ?? {}),
+    __isTemporaryDrawing: false,
+  };
+
+  const drawGeometryType =
+    this._currentDrawGeometryType ??
+    graphic.attributes.drawGeometryType ??
+    graphic.attributes.shapeType ??
+    graphic.attributes.geometryType ??
+    graphic.geometry.type;
+
+  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+    graphic.attributes.isCircle = true;
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+    this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+
+  /**
+   * Make sure only this completed graphic is stored from current drawing.
+   * Do not duplicate preview graphics.
+   */
+  const objectId = graphic.attributes?.OBJECTID;
+
+  this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
+    if (
+      g !== graphic &&
+      g.attributes?.__isTemporaryDrawing === true
+    ) {
+      this.featureLayer?.remove(g);
+    }
+
+    if (
+      g !== graphic &&
+      objectId !== undefined &&
+      g.attributes?.OBJECTID === objectId
+    ) {
+      this.featureLayer?.remove(g);
+    }
+  });
+
+  if (
+    this.featureLayer &&
+    !this.featureLayer.graphics.includes(graphic)
+  ) {
+    this.featureLayer.add(graphic);
+  }
+
+  this.updateGeoJsonWithChanges(graphic);
+
+  this.enableInfoPopupWindow(true);
+
+  console.log("[arc-geojson-layer] create complete", {
+    geometryType: graphic.geometry?.type,
+    drawGeometryType: graphic.attributes.drawGeometryType,
+    shapeType: graphic.attributes.shapeType,
+    attributes: graphic.attributes,
+  });
+}
+
+
+
+
+
