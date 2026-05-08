@@ -1,54 +1,52 @@
-private async createLayer(
-  geojson?: string | object
-): Promise<void> {
+private cursorMoveHandle: IHandle | null = null;
 
-  console.log('[up-geojson-layer] createLayer START', {
-    existingFeatureLayer: this.featureLayer,
-    existingLayerId: this.featureLayer?.id,
-    mapLayersBefore: this.view?.map?.layers?.length
-  });
-
-  if (this.featureLayer) {
-    console.log('[up-geojson-layer] removing old featureLayer', {
-      id: this.featureLayer.id
-    });
-
-    this.view?.map?.remove(this.featureLayer);
+private setMapCursor(): void {
+  if (!this.view) {
+    console.warn('[up-geojson-layer] setMapCursor skipped: view missing');
+    return;
   }
 
-  this.featureLayer = new GraphicsLayer({
-    id: this.internalLayerUid
-  });
+  this.cursorMoveHandle?.remove();
+  this.cursorMoveHandle = null;
 
-  console.log('[up-geojson-layer] new featureLayer created', {
-    id: this.featureLayer.id
-  });
+  this.cursorMoveHandle = this.view.on('pointer-move', async (event: any) => {
+    if (!this.view || !this.featureLayer) {
+      return;
+    }
 
-  this.view?.map?.add(this.featureLayer);
+    try {
+      const hitResponse = await this.view.hitTest(event);
 
-  console.log('[up-geojson-layer] featureLayer added to map', {
-    mapLayersAfter: this.view?.map?.layers?.length,
-    layerExistsInMap: this.view?.map?.layers?.includes(this.featureLayer)
-  });
+      const hasLayerHit = hitResponse.results?.some((result: any) => {
+        const graphic = result.graphic;
+        return graphic?.layer === this.featureLayer;
+      });
 
-  const fsInfo = this.getUpGISJson(
-    geojson ?? { type: 'FeatureCollection', features: [] }
-  );
-
-  fsInfo?.graphics?.forEach((g: Graphic) => {
-
-    console.log('[up-geojson-layer] adding graphic to layer', {
-      layerId: this.featureLayer?.id,
-      geometryType: g.geometry?.type
-    });
-
-    this.applyGraphicDefaults(g);
-
-    this.featureLayer.add(g);
-  });
-
-  console.log('[up-geojson-layer] createLayer END', {
-    finalGraphicsCount: this.featureLayer.graphics.length,
-    layerExistsInMap: this.view?.map?.layers?.includes(this.featureLayer)
+      this.view.container.style.cursor = hasLayerHit ? 'pointer' : '';
+    } catch {
+      if (this.view?.container) {
+        this.view.container.style.cursor = '';
+      }
+    }
   });
 }
+
+
+
+private clearMapCursor(): void {
+  this.cursorMoveHandle?.remove();
+  this.cursorMoveHandle = null;
+
+  if (this.view?.container) {
+    this.view.container.style.cursor = '';
+  }
+}
+
+
+disconnectedCallback(): void {
+  super.disconnectedCallback();
+
+  this.clearMapCursor();
+}
+
+
