@@ -1,52 +1,22 @@
-private cursorMoveHandle: IHandle | null = null;
-
-private setMapCursor(): void {
-  if (!this.view) {
-    console.warn('[up-geojson-layer] setMapCursor skipped: view missing');
-    return;
-  }
+private setupMapCursorHover(): void {
+  if (!this.view) return;
 
   this.cursorMoveHandle?.remove();
-  this.cursorMoveHandle = null;
 
-  this.cursorMoveHandle = this.view.on('pointer-move', async (event: any) => {
-    if (!this.view || !this.featureLayer) {
-      return;
-    }
+  this.cursorMoveHandle = this.view.on('pointer-move', async (evt: any) => {
+    if (!this.view || !this.featureLayer) return;
 
-    try {
-      const hitResponse = await this.view.hitTest(event);
+    const hit = await this.view.hitTest(evt);
 
-      const hasLayerHit = hitResponse.results?.some((result: any) => {
-        const graphic = result.graphic;
-        return graphic?.layer === this.featureLayer;
-      });
+    const isOverThisLayer = hit.results?.some((result: any) => {
+      return result.graphic?.layer === this.featureLayer;
+    });
 
-      this.view.container.style.cursor = hasLayerHit ? 'pointer' : '';
-    } catch {
-      if (this.view?.container) {
-        this.view.container.style.cursor = '';
-      }
-    }
+    this.setMapCursor(isOverThisLayer ? 'pointer' : 'default', evt);
   });
 }
 
-
-
-private clearMapCursor(): void {
-  this.cursorMoveHandle?.remove();
-  this.cursorMoveHandle = null;
-
-  if (this.view?.container) {
-    this.view.container.style.cursor = '';
-  }
-}
-
-
 disconnectedCallback(): void {
   super.disconnectedCallback();
-
-  this.clearMapCursor();
+  this.cursorMoveHandle?.remove();
 }
-
-
