@@ -6,20 +6,25 @@ private async getHitGraphic(evt: any): Promise<Graphic | null> {
       include: [this.featureLayer]
     });
 
-    const result = (hit?.results ?? []).find((r: any) => {
-      const g = r?.graphic as Graphic | undefined;
+    const results: any[] = Array.isArray(hit?.results) ? hit.results : [];
 
-      return (
+    for (const r of results) {
+      const g = r?.graphic as Graphic | undefined;
+      const layerId = (g?.layer as any)?.id;
+
+      if (
         g &&
         g.geometry &&
         (
           g.layer === this.featureLayer ||
-          (g.layer as any)?.id === this.featureLayer.id
+          layerId === this.featureLayer.id
         )
-      );
-    });
+      ) {
+        return g;
+      }
+    }
 
-    return (result?.graphic as Graphic) ?? null;
+    return null;
   } catch (error) {
     console.warn("[up-geojson-layer] hitTest failed", error);
     return null;
