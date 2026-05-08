@@ -1,112 +1,202 @@
-private handleCreateComplete(graphic: Graphic): void {
-
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-
-  this._suppressPopupUntil = Date.now() + 700;
-
-  if (!graphic) {
+private enableInfoPopupWindow(enable: boolean): void {
+  if (!this.view) {
     return;
   }
 
-  if (!graphic.attributes) {
-    graphic.attributes = {};
+  try {
+    this.view.popupEnabled = enable;
+  } catch {}
+
+  try {
+    this.view.popup?.close();
+  } catch {}
+
+  if (!this.featureLayer) {
+    return;
   }
 
-  const drawGeometryType =
-    graphic.attributes.drawGeometryType ??
-    graphic.attributes.shapeType ??
-    graphic.attributes.geometryType ??
-    this._currentDrawGeometryType ??
-    graphic.geometry?.type;
+  this.featureLayer.graphics.forEach((graphic: Graphic) => {
+    if (!graphic) {
+      return;
+    }
 
-  /**
-   * IMPORTANT:
-   * Never mutate geometry.type.
-   * Store custom circle metadata ONLY in attributes.
-   */
-  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
-
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  }
-
-  this.applyGraphicDefaults(graphic);
-
-  graphic.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, graphic)
-    ??
-    this.getDefaultSymbolForGeometry(
-      graphic.geometry,
-      graphic.attributes
-    );
-
-  /**
-   * Add into feature layer FIRST
-   */
-  if (
-    this.featureLayer &&
-    !this.featureLayer.graphics.includes(graphic)
-  ) {
-    this.featureLayer.add(graphic);
-  }
-
-  /**
-   * Sync GeoJSON
-   */
-  this.updateGeoJsonWithChanges(graphic);
-
-  /**
-   * Re-enable popup
-   */
-  this.enableInfoPopupWindow(!this.enableUserEdit);
-
-  console.log("[arc-geojson-layer] create complete", {
-    geometryType: graphic.geometry?.type,
-    drawGeometryType: graphic.attributes.drawGeometryType,
-    shapeType: graphic.attributes.shapeType,
-    attributes: graphic.attributes,
+    graphic.popupTemplate = enable
+      ? this.buildPopupTemplateFromCurrent(graphic)
+      : null as any;
   });
 }
 
 
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) {
+    return;
+  }
+
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 1500;
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.popupTemplate = null as any;
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  try {
+    await this.graphicsEditor.update(graphic, {
+      tool: this.resolveUpdateTool(graphic),
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    } as any);
+
+    console.log("[arc-geojson-layer] editor opened", {
+      geometryType: graphic.geometry?.type,
+      attributes: graphic.attributes,
+      tool: this.resolveUpdateTool(graphic),
+    });
+  } catch (error) {
+    this._editorOpen = false;
+    console.error("[arc-geojson-layer] activateGraphicsEditor failed", error);
+  }
+}
 
 
-private updateGeoJsonWithChanges(
-  graphicToUpdate: Graphic
+private showGraphicPopup(
+  graphic: Graphic,
+  mapPoint?: Point
 ): void {
-
-  if (!graphicToUpdate?.geometry) {
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    try {
+      this.view?.popup?.close();
+    } catch {}
     return;
   }
 
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  this.blockGeoJsonUpdate = true;
-
-  this.geojson =
-    this.toFeatureCollectionFromLayer();
-
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  const feature =
-    this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  /**
-   * Prevent undefined feature emission
-   */
-  if (!feature) {
+  if (!graphic?.geometry || !this.view?.popup) {
     return;
   }
 
-  this.emitLayerEvent(
-    "userEditItemUpdated",
-    feature
-  );
+  const location =
+    mapPoint ??
+    this.getPopupPoint(graphic.geometry) ??
+    undefined;
+
+  if (!location) {
+    return;
+  }
+
+  const popupTemplate =
+    graphic.popupTemplate ??
+    this.buildPopupTemplateFromCurrent(graphic);
+
+  if (!popupTemplate) {
+    return;
+  }
+
+  graphic.popupTemplate = popupTemplate;
+
+  try {
+    this.view.popupEnabled = true;
+
+    this.view.popup.open({
+      location,
+      features: [graphic],
+    });
+  } catch (error) {
+    console.warn("[arc-geojson-layer] popup open failed", error);
+  }
+}
+
+
+async startDrawing(drawGeometryType: string): Promise<void> {
+  const normalizedType = String(drawGeometryType || "").toLowerCase();
+
+  if (!this.view) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
+    return;
+  }
+
+  if (!this.featureLayer) {
+    await this.createLayer(this.geojson);
+  }
+
+  if (!this.featureLayer) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
+    return;
+  }
+
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
+    return;
+  }
+
+  this._currentDrawGeometryType = normalizedType;
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 1500;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view.popup?.close();
+  } catch {}
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  console.log("[arc-geojson-layer] startDrawing", {
+    requested: drawGeometryType,
+    normalized: normalizedType,
+  });
+
+  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
+}
+
+
+private normalizeLineStyle(style: any): any {
+  const value = String(style ?? "solid").toLowerCase();
+
+  const allowed = new Set([
+    "dash",
+    "dash-dot",
+    "dot",
+    "long-dash",
+    "long-dash-dot",
+    "long-dash-dot-dot",
+    "none",
+    "short-dash",
+    "short-dash-dot",
+    "short-dash-dot-dot",
+    "short-dot",
+    "solid",
+  ]);
+
+  return allowed.has(value) ? value : "solid";
 }
