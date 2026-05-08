@@ -1,15 +1,25 @@
+private emitLayerEvent(name: string, detail: any): void {
+  this.dispatchEvent(
+    new CustomEvent(name, {
+      detail,
+      bubbles: true,
+      composed: true,
+    })
+  );
+}
+
 private addToGeoJSON(newGraphic: Graphic): void {
   if (this._isStartingDraw) {
     return;
   }
 
   if (!this.featureLayer) {
-    console.warn("[up-geojson-layer] addToGeoJSON skipped: featureLayer missing");
+    console.warn("[arc-geojson-layer] addToGeoJSON skipped: featureLayer missing");
     return;
   }
 
   if (!newGraphic.geometry) {
-    console.warn("[up-geojson-layer] addToGeoJSON skipped: geometry missing", newGraphic);
+    console.warn("[arc-geojson-layer] addToGeoJSON skipped: geometry missing", newGraphic);
     return;
   }
 
@@ -58,11 +68,70 @@ private addToGeoJSON(newGraphic: Graphic): void {
 
   this.refreshLabels();
 
-  const feature = {
-    type: "Feature",
-    geometry: this.arcGeometryToGeoJsonGeometry(newGraphic.geometry),
-    properties: { ...(newGraphic.attributes ?? {}) }
-  };
+  const feature = this.graphicToGeoJsonFeature(newGraphic);
 
   this.emitLayerEvent("userDrawnItemAdded", feature);
+}
+
+private removeFromGeoJSON(graphicToRemove: Graphic): void {
+  if (!this.featureLayer || !graphicToRemove) {
+    return;
+  }
+
+  const feature = this.graphicToGeoJsonFeature(graphicToRemove);
+
+  this.featureLayer.remove(graphicToRemove);
+
+  if (this.sketchLayer?.graphics?.includes(graphicToRemove)) {
+    this.sketchLayer.remove(graphicToRemove);
+  }
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+  this.resetEditorStateOnly();
+
+  this.emitLayerEvent("userEditItemRemoved", feature);
+}
+
+
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
+    return;
+  }
+
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  this.emitLayerEvent("userEditItemUpdated", feature);
+}
+
+private graphicToGeoJsonFeature(graphic: Graphic): Feature {
+  return {
+    type: "Feature",
+    geometry: this.arcGeometryToGeoJsonGeometry(graphic.geometry),
+    properties: {
+      ...(graphic.attributes ?? {}),
+    },
+  };
+}
+
+
+private toFeatureCollectionFromLayer(): FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: this.featureLayer.graphics
+      .toArray()
+      .map((graphic: Graphic) => this.graphicToGeoJsonFeature(graphic))
+      .filter((feature: Feature | null): feature is Feature => feature !== null),
+  };
 }
