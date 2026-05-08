@@ -1,18 +1,26 @@
-private updateRenderer(): void {
+private updateRenderer(newRenderer: any = this.renderer): void {
   if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing');
+    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing', {
+      renderer: newRenderer
+    });
     return;
   }
 
   console.log('[up-geojson-layer] calling JsonUtils.updateRenderer', {
-    renderer: this.renderer,
-    geometryType: (this.featureLayer as any).geometryType
+    renderer: newRenderer,
+    thisRenderer: this.renderer,
+    geometryType: (this.featureLayer as any).geometryType,
+    featureLayer: this.featureLayer
   });
 
   JsonUtils.updateRenderer(
-    this.renderer,
+    newRenderer,
     this.featureLayer,
     this.rendererTypeToModule,
     this.getSymbolJson((this.featureLayer as any).geometryType)
   );
+
+  console.log('[up-geojson-layer] renderer after JsonUtils.updateRenderer', {
+    renderer: this.featureLayer.renderer
+  });
 }
