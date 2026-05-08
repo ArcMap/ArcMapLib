@@ -1,116 +1,39 @@
-private bindEditorEvents(): void {
-  this.cleanupEditorEvents();
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
 
   if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] bindEditorEvents skipped: graphicsEditor missing");
+    console.error("[arc-geojson-layer] graphicsEditor missing");
     return;
   }
 
-  const createHandle = this.graphicsEditor.on("create", (event: any) => {
-    console.log("[arc-geojson-layer] Sketch create event", {
-      state: event.state,
-      tool: event.tool,
-      graphic: event.graphic
-    });
+  this.inDrawingMode = true;
+  this.isStartingDraw = true;
+  this.editorOpen = false;
 
-    if (event.state !== "complete") {
-      return;
-    }
+  this._currentDrawGeometryType = drawGeometryType;
 
-    const graphic = event.graphic as Graphic;
+  this.enableInfoPopupWindow(false);
 
-    if (!graphic) {
-      console.warn("[arc-geojson-layer] create complete but graphic missing");
-      this.inDrawingMode = false;
-      this.isStartingDraw = false;
-      this.editorOpen = false;
-      this.enableInfoPopupWindow(!this.enableUserEdit);
-      return;
-    }
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
 
-    if (!graphic.attributes) {
-      graphic.attributes = {};
-    }
+  const normalized = this.normalizeSketchTool(drawGeometryType);
 
-    /**
-     * 2026-05-08
-     * Purpose:
-     * Preserve original drawing tool type.
-     * ArcGIS stores circle/rectangle as polygon geometry internally.
-     * Without this metadata, circle edit is treated as polygon reshape.
-     */
-    if (this._currentDrawGeometryType) {
-      graphic.attributes.drawGeometryType = this._currentDrawGeometryType;
-      graphic.attributes.shapeType = this._currentDrawGeometryType;
-      graphic.attributes.geometryType = this._currentDrawGeometryType;
-    }
+  console.log("[arc-geojson-layer] startDrawing", {
+    requested: drawGeometryType,
+    normalized
+  });
 
-    this.addToGeoJSON(graphic);
+  try {
+    this.graphicsEditor.create(normalized as any);
+  } catch (error) {
+    console.error("[arc-geojson-layer] startDrawing failed", error);
 
     this.inDrawingMode = false;
     this.isStartingDraw = false;
-    this.editorOpen = false;
     this._currentDrawGeometryType = undefined;
-    this.suppressPopupUntil = Date.now() + 700;
-
-    this.enableInfoPopupWindow(!this.enableUserEdit);
-
-    console.log("[arc-geojson-layer] Sketch create complete handled", {
-      geometryType: graphic.geometry?.type,
-      drawGeometryType: graphic.attributes.drawGeometryType,
-      attributes: graphic.attributes
-    });
-  });
-
-  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
-    console.log("[arc-geojson-layer] Sketch update event", {
-      state: event.state,
-      tool: event.tool,
-      graphicsCount: event.graphics?.length
-    });
-
-    if (event.state === "complete") {
-      event.graphics?.forEach((graphic: Graphic) => {
-        if (!graphic.attributes) {
-          graphic.attributes = {};
-        }
-
-        graphic.symbol =
-          this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-          this.getDefaultSymbolForGeometry(graphic.geometry);
-
-        this.updateGeojsonWithChanges(graphic);
-      });
-
-      this.editorOpen = false;
-      this.suppressPopupUntil = Date.now() + 700;
-      this.enableInfoPopupWindow(!this.enableUserEdit);
-
-      console.log("[arc-geojson-layer] Sketch update complete handled");
-      return;
-    }
-
-    if (event.state === "cancel" || event.aborted) {
-      this.editorOpen = false;
-      this.enableInfoPopupWindow(!this.enableUserEdit);
-
-      console.log("[arc-geojson-layer] Sketch update cancelled");
-    }
-  });
-
-  const deleteHandle = this.graphicsEditor.on("delete", (event: any) => {
-    console.log("[arc-geojson-layer] Sketch delete event", {
-      graphicsCount: event.graphics?.length
-    });
-
-    event.graphics?.forEach((graphic: Graphic) => {
-      this.removeFromGeojson(graphic);
-    });
-
-    this.editorOpen = false;
-    this.suppressPopupUntil = Date.now() + 700;
-    this.enableInfoPopupWindow(!this.enableUserEdit);
-  });
-
-  this.editorHandles.push(createHandle, updateHandle, deleteHandle);
+  }
 }
