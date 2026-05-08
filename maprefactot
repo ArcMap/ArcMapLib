@@ -1,12 +1,128 @@
-console.log('[JsonUtils.updateRenderer] final renderer applied', {
-  layerGeometryType: (featureLayer as any).geometryType,
-  rendererType: renderer?.type,
-  field: renderer?.field,
-  field1: (renderer as any)?.field1,
-  field2: (renderer as any)?.field2,
-  fieldDelimiter: (renderer as any)?.fieldDelimiter,
-  uniqueValueInfos: (renderer as any)?.uniqueValueInfos?.map((info: any) => ({
-    value: info.value,
-    symbol: info.symbol
-  }))
-});
+static updateRenderer(
+  newRenderer: any,
+  featureLayer: FeatureLayer | GeoJSONLayer,
+  rendererTypeToModule: any,
+  symbolJson: any
+): void {
+  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
+
+  if (!newRenderer) {
+    const renderer = new SimpleRenderer({
+      symbol: fallbackSymbol
+    });
+
+    featureLayer.renderer = renderer;
+
+    console.log('[JsonUtils.updateRenderer] default renderer applied', {
+      layerGeometryType: (featureLayer as any).geometryType,
+      renderer
+    });
+
+    return;
+  }
+
+  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+
+  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
+    console.warn(
+      '[JsonUtils.updateRenderer] Could not parse renderer, using fallback',
+      rendererParseResult.error
+    );
+
+    const renderer = new SimpleRenderer({
+      symbol: fallbackSymbol
+    });
+
+    featureLayer.renderer = renderer;
+    return;
+  }
+
+  const parsedRendererConfig = JsonUtils.clonePlain(
+    rendererParseResult.parsedJson
+  );
+
+  parsedRendererConfig.type = JsonUtils.normalizeRendererType(
+    parsedRendererConfig.type
+  );
+
+  if (parsedRendererConfig.symbol) {
+    parsedRendererConfig.symbol = JsonUtils.normalizePlainSymbol(
+      parsedRendererConfig.symbol
+    );
+  }
+
+  if (parsedRendererConfig.defaultSymbol) {
+    parsedRendererConfig.defaultSymbol = JsonUtils.normalizePlainSymbol(
+      parsedRendererConfig.defaultSymbol
+    );
+  }
+
+  if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
+    parsedRendererConfig.uniqueValueInfos =
+      parsedRendererConfig.uniqueValueInfos.map((info: any) => ({
+        ...info,
+        value:
+          typeof info.value === 'string'
+            ? info.value.trim()
+            : info.value,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+  }
+
+  if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
+    parsedRendererConfig.classBreakInfos =
+      parsedRendererConfig.classBreakInfos.map((info: any) => ({
+        ...info,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+  }
+
+  let renderer: any;
+
+  switch (parsedRendererConfig.type) {
+    case 'simple':
+      renderer = new SimpleRenderer(parsedRendererConfig);
+      break;
+
+    case 'unique-value':
+      renderer = new UniqueValueRenderer(parsedRendererConfig);
+      break;
+
+    case 'class-breaks':
+      renderer = new ClassBreaksRenderer(parsedRendererConfig);
+      break;
+
+    default:
+      console.warn(
+        '[JsonUtils.updateRenderer] Unsupported renderer type, using fallback',
+        parsedRendererConfig.type
+      );
+
+      renderer = new SimpleRenderer({
+        symbol: fallbackSymbol
+      });
+
+      break;
+  }
+
+  featureLayer.renderer = renderer;
+
+  console.log('[JsonUtils.updateRenderer] final renderer applied', {
+    layerGeometryType: (featureLayer as any).geometryType,
+    parsedRendererConfig,
+    rendererType: renderer?.type,
+    field: renderer?.field,
+    field1: (renderer as any)?.field1,
+    field2: (renderer as any)?.field2,
+    field3: (renderer as any)?.field3,
+    fieldDelimiter: (renderer as any)?.fieldDelimiter,
+    uniqueValueInfos: (renderer as any)?.uniqueValueInfos?.map((info: any) => ({
+      value: info.value,
+      symbol: info.symbol
+    }))
+  });
+}
