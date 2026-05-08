@@ -1,139 +1,22 @@
-private bindViewEvents(): void {
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (
-      this.enableUserEdit ||
-      this._editorOpen ||
-      this.inDrawingMode ||
-      this._isStartingDraw
-    ) {
-      evt.stopPropagation?.();
-      return;
-    }
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
-    }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      const graphic = await this.getHitGraphic(evt);
-
-      if (!graphic) {
-        return;
-      }
-
-      if (
-        this.enableUserEdit ||
-        this._editorOpen ||
-        this.inDrawingMode ||
-        this._isStartingDraw ||
-        this.shouldSuppressPopup()
-      ) {
-        return;
-      }
-
-      this.showGraphicPopup(graphic, evt.mapPoint);
-
-      this.emitLayerEvent("layerClick", {
-        graphic,
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: graphic.attributes ?? {},
-        },
-      });
-    }, 280);
-  });
-
-  const dblClickHandle = this.view.on("double-click", async (evt: any) => {
-    evt.stopPropagation?.();
-    evt.preventDefault?.();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1000;
-    this.enableInfoPopupWindow(false);
-
-    try {
-      this.view.popup?.close();
-    } catch {}
-
-    await this.handleEditorDoubleClick(evt.mapPoint, "arcgis-double-click");
-  });
-
-  const nativeDblClick = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1000;
-    this.enableInfoPopupWindow(false);
-
-    try {
-      this.view.popup?.close();
-    } catch {}
-
-    const rect = this.view.container.getBoundingClientRect();
-
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    const mapPoint = this.view.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(mapPoint, "native-dblclick");
-  };
-
-  this.view.container?.addEventListener("dblclick", nativeDblClick, true);
-
-  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
-    if (!this.view || !this.featureLayer || this._editorOpen || this.inDrawingMode) {
-      this.setMapCursor("default", evt);
-      return;
-    }
-
-    try {
-      const graphic = await this.getHitGraphic(evt);
-
-      if (!graphic) {
-        this.hoveredGraphicUid = undefined;
-        this.setMapCursor("default", evt);
-        return;
-      }
-
-      this.hoveredGraphicUid =
-        graphic.attributes?.[this.uniqueIdPropertyName] ??
-        graphic.attributes?.OBJECTID;
-
-      this.setMapCursor("pointer", evt);
-    } catch {
-      this.setMapCursor("default", evt);
-    }
-  });
-
-  this.eventHandles.push(
-    clickHandle,
-    dblClickHandle,
-    pointerMoveHandle,
-    {
-      remove: () => {
-        this.view.container?.removeEventListener("dblclick", nativeDblClick, true);
-      },
-    }
-  );
-}
+this.eventHandles.push(
+  {
+    remove: (): void => {
+      clickHandle?.remove();
+    },
+  },
+  {
+    remove: (): void => {
+      dblClickHandle?.remove();
+    },
+  },
+  {
+    remove: (): void => {
+      pointerMoveHandle?.remove();
+    },
+  },
+  {
+    remove: (): void => {
+      this.view?.container?.removeEventListener("dblclick", nativeDblClick, true);
+    },
+  }
+);
