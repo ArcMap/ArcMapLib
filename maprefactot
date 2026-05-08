@@ -2,37 +2,150 @@ private updateRenderer(newRenderer: any = this.renderer): void {
   this.renderer = newRenderer;
 
   if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing');
+    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing', {
+      renderer: newRenderer
+    });
     return;
   }
 
   const graphicsLayer = this.featureLayer as any;
 
   if (!graphicsLayer.graphics) {
-    console.warn('[up-geojson-layer] graphics missing on layer');
+    console.warn('[up-geojson-layer] updateRenderer skipped: graphics missing');
     return;
   }
 
-  console.log('[up-geojson-layer] manually applying renderer to graphics');
+  const rendererResult = JsonUtils.getJsonFor(newRenderer);
+  const rendererConfig = rendererResult?.parsedJson;
 
-  graphicsLayer.graphics.forEach((graphic: any) => {
-    const geometryType = graphic.geometry?.type;
-
-    console.log('[up-geojson-layer] processing graphic', {
-      geometryType,
-      attributes: graphic.attributes
+  if (rendererResult?.error || !rendererConfig) {
+    console.warn('[up-geojson-layer] renderer parse failed, using default symbols', {
+      error: rendererResult?.error,
+      renderer: newRenderer
     });
 
-    if (geometryType === 'point') {
-      graphic.symbol = this.getDefaultSymbolForGeometry('point');
-    } else if (geometryType === 'polygon') {
-      graphic.symbol = this.getDefaultSymbolForGeometry('polygon');
-    } else if (geometryType === 'polyline') {
-      graphic.symbol = this.getDefaultSymbolForGeometry('polyline');
-    }
+    graphicsLayer.graphics.forEach((graphic: any) => {
+      graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+    });
 
-    console.log('[up-geojson-layer] symbol applied', graphic.symbol);
+    graphicsLayer.refresh?.();
+    return;
+  }
+
+  console.log('[up-geojson-layer] applying renderer manually to GraphicsLayer', {
+    rendererConfig,
+    graphicsCount: graphicsLayer.graphics.length
+  });
+
+  graphicsLayer.graphics.forEach((graphic: any) => {
+    const matchedSymbol = this.getSymbolFromRendererConfig(
+      rendererConfig,
+      graphic
+    );
+
+    graphic.symbol =
+      matchedSymbol ??
+      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+
+    console.log('[up-geojson-layer] graphic symbol resolved', {
+      geometryType: graphic.geometry?.type,
+      attributes: graphic.attributes,
+      symbol: graphic.symbol
+    });
   });
 
   graphicsLayer.refresh?.();
 }
+
+
+
+private getSymbolFromRendererConfig(
+  rendererConfig: any,
+  graphic: Graphic
+): any {
+  if (!rendererConfig || !graphic?.attributes) {
+    return null;
+  }
+
+  const attributes = graphic.attributes;
+
+  const field1 = rendererConfig.field1 ?? rendererConfig.field;
+  const field2 = rendererConfig.field2;
+  const field3 = rendererConfig.field3;
+
+  const hasExplicitDelimiter =
+    rendererConfig.fieldDelimiter !== undefined &&
+    rendererConfig.fieldDelimiter !== null;
+
+  const explicitDelimiter = hasExplicitDelimiter
+    ? String(rendererConfig.fieldDelimiter)
+    : undefined;
+
+  const fields = [field1, field2, field3].filter(Boolean);
+
+  const values = fields.map((fieldName: string) =>
+    String(attributes[fieldName] ?? '').trim()
+  );
+
+  const candidateKeys = new Set<string>();
+
+  // Case 1: user passed fieldDelimiter explicitly.
+  // Example: fieldDelimiter: '|'
+  // key = pointValue|polygonValue
+  if (hasExplicitDelimiter) {
+    candidateKeys.add(values.join(explicitDelimiter));
+  }
+
+  // Case 2: old library behavior / no delimiter.
+  // Example: key = pointValue + polygonValue
+  candidateKeys.add(values.join(''));
+
+  // Case 3: ArcGIS common default delimiter.
+  // Example: key = pointValue, polygonValue
+  candidateKeys.add(values.join(', '));
+  candidateKeys.add(values.join(','));
+
+  // Case 4: single-field values should still work.
+  // Example: point field alone matches uniqueValueInfo value.
+  values.forEach((value) => {
+    if (value) {
+      candidateKeys.add(value);
+    }
+  });
+
+  const normalizedCandidateKeys = Array.from(candidateKeys).map((value) =>
+    String(value ?? '').trim()
+  );
+
+  console.log('[up-geojson-layer] renderer key candidates', {
+    field1,
+    field2,
+    field3,
+    explicitDelimiter,
+    values,
+    normalizedCandidateKeys,
+    uniqueValues: rendererConfig.uniqueValueInfos?.map((x: any) => x.value)
+  });
+
+  const matchedInfo = rendererConfig.uniqueValueInfos?.find((info: any) => {
+    const rendererValue = String(info.value ?? '').trim();
+
+    return normalizedCandidateKeys.includes(rendererValue);
+  });
+
+  if (matchedInfo?.symbol) {
+    return JsonUtils.normalizePlainSymbol(matchedInfo.symbol);
+  }
+
+  if (rendererConfig.defaultSymbol) {
+    return JsonUtils.normalizePlainSymbol(rendererConfig.defaultSymbol);
+  }
+
+  if (rendererConfig.symbol) {
+    return JsonUtils.normalizePlainSymbol(rendererConfig.symbol);
+  }
+
+  return null;
+}
+
+
