@@ -1,157 +1,64 @@
-async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.enableUserEdit || !graphic?.geometry) return;
-
-  if (!this.graphicsEditor) {
-    await this.createEditor();
+private async createLayer(): Promise<void> {
+  if (this.featureLayer) {
+    this.view?.map?.remove(this.featureLayer);
   }
 
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  // Edit the original GraphicsLayer graphic directly.
-  // Do not move it to sketchLayer.
-  this.graphicsEditor.layer = this.featureLayer;
-
-  graphic.popupTemplate = null as any;
-
-  if (!graphic.symbol) {
-    graphic.symbol =
-      this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
-  }
-
-  const tool = this.resolveUpdateTool(graphic);
-
-  console.log('[up-geojson-layer] opening editor', {
-    geometryType: graphic.geometry.type,
-    tool,
-    attributes: graphic.attributes,
-    symbol: graphic.symbol
+  this.featureLayer = new GraphicsLayer({
+    id: this.internalLayerUid
   });
 
-  try {
-    this.graphicsEditor.update([graphic], {
-      tool,
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false
-    });
-
-    this._editorOpen = true;
-
-    console.log('[up-geojson-layer] editor opened');
-  } catch (error) {
-    this._editorOpen = false;
-    console.error('[up-geojson-layer] editor activation failed', error);
-  }
-}
-
-
-private finishActiveEditor(): void {
-  if (!this._editorOpen) return;
-
-  const graphics = this.featureLayer?.graphics?.toArray?.() ?? [];
-
-  graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) return;
-
-    this.updateGeojsonWithChanges(g);
-
-    // Restore display symbol after editing finishes.
-    g.symbol =
-      this.getSymbolFromRendererConfig(this.renderer, g) ??
-      this.getDefaultSymbolForGeometry(g.geometry, g.attributes);
+  console.log('[up-geojson-layer] new featureLayer created', {
+    id: this.featureLayer.id
   });
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
+  this.view?.map?.add(this.featureLayer);
 
-  this._editorOpen = false;
+  this.setupMapCursorHover();
 
-  this.enableInfoPopupWindow(!this.enableUserEdit);
+  console.log('[up-geojson-layer] featureLayer added to map', {
+    mapLayersAfter: this.view?.map?.layers?.length,
+    layerExistsInMap: this.view?.map?.layers?.includes(this.featureLayer)
+  });
 
-  console.log('[up-geojson-layer] editor closed');
-}
-
-
-private bindViewEvents(): void {
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on('click', async (evt: any) => {
-    if (this.enableUserEdit) {
-      return;
+  const fsInfo = this.getUpGISJson(
+    this.geojson ?? {
+      type: 'FeatureCollection',
+      features: []
     }
+  );
 
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer]
+  fsInfo?.graphics?.forEach((g: Graphic) => {
+    console.log('[up-geojson-layer] adding graphic to layer', {
+      layerId: this.featureLayer?.id,
+      geometryType: g.geometry?.type,
+      attributes: g.attributes
     });
 
-    const graphic = this.getLayerGraphicFromHit(hit);
+    this.applyGraphicDefaults(g);
 
-    if (!graphic) return;
+    if (!this.enableUserEdit && !this._editorOpen) {
+      const matchedSymbol = this.getSymbolFromRendererConfig(this.renderer, g);
 
-    if (!this.inDrawingMode) {
-      this.showGraphicPopup(graphic, evt.mapPoint);
-    }
-
-    setTimeout(() => {
-      this.emitLayerEvent(
-        'layerClick',
-        this.buildMouseEvent(graphic, evt.mapPoint)
+      const fallbackSymbol = this.getDefaultSymbolForGeometry(
+        g.geometry,
+        g.attributes
       );
-    }, 0);
+
+      g.symbol = matchedSymbol ?? fallbackSymbol;
+
+      console.log('[up-geojson-layer] symbol assigned before add', {
+        geometryType: g.geometry?.type,
+        matchedSymbol,
+        fallbackSymbol,
+        finalSymbol: g.symbol
+      });
+    }
+
+    this.featureLayer.add(g);
   });
 
-  const dblClickHandle = this.view.on('double-click', async (evt: any) => {
-    evt.stopPropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    if (!this.enableUserEdit) return;
-
-    if (this.isEditorActive()) {
-      this.finishActiveEditor();
-      return;
-    }
-
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer]
-    });
-
-    let graphic = this.getLayerGraphicFromHit(hit);
-
-    if (!graphic) {
-      graphic = this.findNearestEditableGraphic(evt.mapPoint);
-    }
-
-    console.log('[up-geojson-layer] double-click editor target', {
-      found: !!graphic,
-      geometryType: graphic?.geometry?.type,
-      attributes: graphic?.attributes
-    });
-
-    if (!graphic) return;
-
-    await this.activateGraphicsEditor(graphic);
+  console.log('[up-geojson-layer] createLayer END', {
+    finalGraphicsCount: this.featureLayer.graphics.length,
+    layerExistsInMap: this.view?.map?.layers?.includes(this.featureLayer)
   });
-
-  this.eventHandles.push(clickHandle, dblClickHandle);
-}
-
-
-
-
-if (!this.enableUserEdit && !this._editorOpen) {
-  g.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, g) ??
-    this.getDefaultSymbolForGeometry(g.geometry, g.attributes);
 }
