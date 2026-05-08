@@ -1,45 +1,30 @@
-private resetEditorStateOnly(): void {
-  try {
-    this.sketchLayer?.graphics?.removeAll();
-  } catch (error) {
-    console.warn(
-      "[arc-geojson-layer] resetEditorStateOnly removeAll failed",
-      error
-    );
+private graphicToGeoJsonFeature(graphic: Graphic): Feature | null {
+  if (!graphic || !graphic.geometry) {
+    return null;
   }
 
-  try {
-    if (this.graphicsEditor) {
-      this.graphicsEditor.cancel();
+  const geometry = this.arcGeometryToGeoJson(graphic.geometry);
+
+  if (!geometry) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    geometry,
+    properties: {
+      ...(graphic.attributes ?? {})
     }
-  } catch (error) {
-    console.warn(
-      "[arc-geojson-layer] resetEditorStateOnly cancel failed",
-      error
-    );
-  }
+  };
+}
 
-  try {
-    if (this.graphicsEditor) {
-      this.graphicsEditor.destroy();
-    }
-  } catch (error) {
-    console.warn(
-      "[arc-geojson-layer] resetEditorStateOnly destroy failed",
-      error
-    );
-  }
+private toFeatureCollectionFromLayer(): FeatureCollection {
+  const graphics = this.featureLayer?.graphics?.toArray?.() ?? [];
 
-  this.graphicsEditor = undefined;
-  this.editorOpen = false;
-
-  try {
-    this.editorHandles.forEach((handle: any) => {
-      try {
-        handle?.remove?.();
-      } catch (_) {}
-    });
-  } catch (_) {}
-
-  this.editorHandles = [];
+  return {
+    type: "FeatureCollection",
+    features: graphics
+      .map((graphic: Graphic) => this.graphicToGeoJsonFeature(graphic))
+      .filter((feature: Feature | null): feature is Feature => feature !== null)
+  };
 }
