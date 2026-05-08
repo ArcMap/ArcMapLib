@@ -1,34 +1,62 @@
-private async finishActiveEditor(): Promise<void> {
-  if (!this._editorOpen) {
+private updateGeoJsonWithChanges(
+  graphicToUpdate: Graphic
+): void {
+  if (!graphicToUpdate?.geometry) {
     return;
   }
 
-  const graphics = this.featureLayer?.graphics?.toArray?.() ?? [];
+  this.applyGraphicDefaults(graphicToUpdate);
 
-  graphics.forEach((graphic: Graphic) => {
-    if (!graphic.geometry) {
-      return;
-    }
+  // Restore popup after editing
+  graphicToUpdate.popupTemplate =
+    this.enableUserEdit && this._editorOpen
+      ? null as any
+      : this.buildPopupTemplateFromCurrent(graphicToUpdate);
 
-    // Save edited geometry back into geojson
-    this.updateGeoJSONWithChanges(graphic);
+  // Preserve circle metadata
+  const drawGeometryType =
+    graphicToUpdate.attributes?.drawGeometryType ??
+    graphicToUpdate.attributes?.shapeType ??
+    graphicToUpdate.attributes?.geometryType;
 
-    // Restore symbol after edit is completed
-    graphic.symbol =
-      this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
-  });
+  if (
+    String(drawGeometryType).toUpperCase() ===
+    DrawGeometryTypes.CIRCLE
+  ) {
+    graphicToUpdate.attributes.shapeType =
+      DrawGeometryTypes.CIRCLE;
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {
-    // ignore ArcGIS cancel error
+    graphicToUpdate.attributes.geometryType =
+      DrawGeometryTypes.CIRCLE;
+
+    graphicToUpdate.attributes.drawGeometryType =
+      DrawGeometryTypes.CIRCLE;
   }
 
-  this._editorOpen = false;
+  this.blockGeoJsonUpdate = true;
 
-  // Re-enable popup after editor closes
-  this.enableInfoPopupWindow(this.enableUserEdit);
+  this.geojson =
+    this.toFeatureCollectionFromLayer();
 
-  console.log("[arc-geojson-layer] editor closed");
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature =
+    this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    feature
+  );
+
+  this.dispatchEvent(
+    new CustomEvent("geojson-change", {
+      detail: {
+        geojson: this.geojson
+      },
+      bubbles: true,
+      composed: true
+    })
+  );
 }
