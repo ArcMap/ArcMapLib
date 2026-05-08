@@ -1,53 +1,117 @@
-private showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point
-): void {
-
-  if (
-    this.enableUserEdit ||
-    this.editorOpen ||
-    this.inDrawingMode ||
-    this.shouldSuppressPopup()
-  ) {
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  if (!this.enableUserEdit) {
     return;
   }
 
-  if (!graphic?.geometry || !this.view?.popup) {
-    return;
-  }
-
-  const location =
-    mapPoint ??
-    this.getPopupPoint(graphic.geometry) ??
-    undefined;
-
-  if (!location) {
-    return;
-  }
-
-  const popupTemplate =
-    graphic.popupTemplate ??
-    this.buildPopupTemplateFromCurrent(graphic);
-
-  if (!popupTemplate) {
-    return;
-  }
-
-  graphic.popupTemplate = popupTemplate;
+  this._suppressPopupUntil = Date.now() + 1000;
+  this.enableInfoPopupWindow(false);
 
   try {
+    this.view?.popup?.close();
+  } catch {}
 
-    this.view.popupEnabled = true;
-
-    this.view.popup.open({
-      location,
-      features: [graphic]
-    });
-
-  } catch (error) {
-    console.warn(
-      "[arc-geojson-layer] popup open failed",
-      error
-    );
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
   }
+
+  let graphic: Graphic | null = null;
+
+  // First preference: exact hitTest graphic under cursor
+  if (evtOrMapPoint && evtOrMapPoint.x !== undefined && evtOrMapPoint.y !== undefined) {
+    graphic = await this.getHitGraphic(evtOrMapPoint);
+  }
+
+  // Second preference: ArcGIS event with mapPoint
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = await this.getHitGraphic(evtOrMapPoint);
+  }
+
+  // Last fallback only: nearest geometry
+  if (!graphic) {
+    const mapPoint = evtOrMapPoint?.mapPoint ?? evtOrMapPoint;
+    graphic = this.findNearestEditableGraphic(mapPoint);
+  }
+
+  console.log("[arc-geojson-layer] double-click target", {
+    source,
+    found: !!graphic,
+    geometryType: graphic?.geometry?.type,
+    attributes: graphic?.attributes,
+  });
+
+  if (!graphic) {
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
 }
+
+
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  if (!this.enableUserEdit) {
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 1000;
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
+  }
+
+  let graphic: Graphic | null = null;
+
+  // First preference: exact hitTest graphic under cursor
+  if (evtOrMapPoint && evtOrMapPoint.x !== undefined && evtOrMapPoint.y !== undefined) {
+    graphic = await this.getHitGraphic(evtOrMapPoint);
+  }
+
+  // Second preference: ArcGIS event with mapPoint
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = await this.getHitGraphic(evtOrMapPoint);
+  }
+
+  // Last fallback only: nearest geometry
+  if (!graphic) {
+    const mapPoint = evtOrMapPoint?.mapPoint ?? evtOrMapPoint;
+    graphic = this.findNearestEditableGraphic(mapPoint);
+  }
+
+  console.log("[arc-geojson-layer] double-click target", {
+    source,
+    found: !!graphic,
+    geometryType: graphic?.geometry?.type,
+    attributes: graphic?.attributes,
+  });
+
+  if (!graphic) {
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
+}
+
+
+
+
+
+await this.handleEditorDoubleClick(
+  {
+    x: screenPoint.x,
+    y: screenPoint.y,
+    mapPoint,
+  },
+  "native-dblclick"
+);
