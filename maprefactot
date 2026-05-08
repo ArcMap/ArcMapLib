@@ -1,53 +1,226 @@
-private async updateRenderer(): Promise<void> {
-  if (!this.layer) {
-    console.warn('[GeoJSONLayer.updateRenderer] layer missing');
+static updateRenderer(
+  newRenderer: any,
+  featureLayer: FeatureLayer | GeoJSONLayer,
+  rendererTypeToModule: any,
+  symbolJson: any
+): void {
+
+  console.log('[JsonUtils.updateRenderer] START', {
+    incomingRenderer: newRenderer,
+    featureLayer,
+    geometryType: (featureLayer as any)?.geometryType,
+    existingRenderer: (featureLayer as any)?.renderer
+  });
+
+  const fallbackSymbol = JsonUtils.normalizePlainSymbol(symbolJson);
+
+  if (!newRenderer) {
+
+    console.warn('[JsonUtils.updateRenderer] renderer missing, using fallback');
+
+    const renderer = new SimpleRenderer({
+      symbol: fallbackSymbol
+    });
+
+    featureLayer.renderer = renderer;
+
+    console.log('[JsonUtils.updateRenderer] fallback renderer applied', {
+      renderer: featureLayer.renderer
+    });
+
     return;
   }
 
+  const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+
+  console.log('[JsonUtils.updateRenderer] renderer parse result', {
+    rendererParseResult
+  });
+
+  if (
+    rendererParseResult.error ||
+    !rendererParseResult.parsedJson
+  ) {
+
+    console.warn(
+      '[JsonUtils.updateRenderer] renderer parse failed'
+    );
+
+    const renderer = new SimpleRenderer({
+      symbol: fallbackSymbol
+    });
+
+    featureLayer.renderer = renderer;
+
+    console.log('[JsonUtils.updateRenderer] fallback renderer applied after parse failure', {
+      renderer: featureLayer.renderer
+    });
+
+    return;
+  }
+
+  const parsedRendererConfig = JsonUtils.clonePlain(
+    rendererParseResult.parsedJson
+  );
+
+  console.log('[JsonUtils.updateRenderer] parsed renderer BEFORE normalize', {
+    parsedRendererConfig
+  });
+
+  parsedRendererConfig.type =
+    JsonUtils.normalizeRendererType(
+      parsedRendererConfig.type
+    );
+
+  if (parsedRendererConfig.symbol) {
+    parsedRendererConfig.symbol =
+      JsonUtils.normalizePlainSymbol(
+        parsedRendererConfig.symbol
+      );
+  }
+
+  if (parsedRendererConfig.defaultSymbol) {
+    parsedRendererConfig.defaultSymbol =
+      JsonUtils.normalizePlainSymbol(
+        parsedRendererConfig.defaultSymbol
+      );
+  }
+
+  if (
+    Array.isArray(parsedRendererConfig.uniqueValueInfos)
+  ) {
+
+    parsedRendererConfig.uniqueValueInfos =
+      parsedRendererConfig.uniqueValueInfos.map(
+        (info: any) => {
+
+          const normalizedInfo = {
+            ...info,
+
+            value:
+              typeof info.value === 'string'
+                ? info.value.trim()
+                : info.value,
+
+            symbol: info.symbol
+              ? JsonUtils.normalizePlainSymbol(
+                  info.symbol
+                )
+              : info.symbol
+          };
+
+          console.log(
+            '[JsonUtils.updateRenderer] normalized uniqueValueInfo',
+            normalizedInfo
+          );
+
+          return normalizedInfo;
+        }
+      );
+  }
+
+  if (
+    Array.isArray(parsedRendererConfig.classBreakInfos)
+  ) {
+
+    parsedRendererConfig.classBreakInfos =
+      parsedRendererConfig.classBreakInfos.map(
+        (info: any) => ({
+          ...info,
+
+          symbol: info.symbol
+            ? JsonUtils.normalizePlainSymbol(
+                info.symbol
+              )
+            : info.symbol
+        })
+      );
+  }
+
   console.log(
-    '[GeoJSONLayer.updateRenderer] incoming renderer config',
-    this.renderer
+    '[JsonUtils.updateRenderer] parsed renderer AFTER normalize',
+    parsedRendererConfig
+  );
+
+  let renderer: any;
+
+  switch (parsedRendererConfig.type) {
+
+    case 'simple':
+
+      renderer = new SimpleRenderer(
+        parsedRendererConfig
+      );
+
+      break;
+
+    case 'unique-value':
+
+      renderer = new UniqueValueRenderer(
+        parsedRendererConfig
+      );
+
+      break;
+
+    case 'class-breaks':
+
+      renderer = new ClassBreaksRenderer(
+        parsedRendererConfig
+      );
+
+      break;
+
+    default:
+
+      console.warn(
+        '[JsonUtils.updateRenderer] unsupported renderer type',
+        parsedRendererConfig.type
+      );
+
+      renderer = new SimpleRenderer({
+        symbol: fallbackSymbol
+      });
+
+      break;
+  }
+
+  console.log(
+    '[JsonUtils.updateRenderer] renderer BEFORE apply',
+    renderer
+  );
+
+  featureLayer.renderer = renderer;
+
+  console.log(
+    '[JsonUtils.updateRenderer] renderer AFTER apply',
+    featureLayer.renderer
   );
 
   console.log(
-    '[GeoJSONLayer.updateRenderer] layer geometry type BEFORE',
-    (this.layer as any).geometryType
-  );
+    '[JsonUtils.updateRenderer] FINAL CHECK',
+    {
+      rendererType:
+        (featureLayer.renderer as any)?.type,
 
-  JsonUtils.updateRenderer(
-    this.renderer,
-    this.layer,
-    rendererTypeToModule,
-    this.symbolJSON
-  );
+      field:
+        (featureLayer.renderer as any)?.field,
 
-  console.log(
-    '[GeoJSONLayer.updateRenderer] layer renderer AFTER',
-    this.layer.renderer
-  );
+      field1:
+        (featureLayer.renderer as any)?.field1,
 
-  console.log(
-    '[GeoJSONLayer.updateRenderer] renderer unique infos',
-    (this.layer.renderer as any)?.uniqueValueInfos
-  );
+      field2:
+        (featureLayer.renderer as any)?.field2,
 
-  console.log(
-    '[GeoJSONLayer.updateRenderer] renderer field',
-    (this.layer.renderer as any)?.field
-  );
+      field3:
+        (featureLayer.renderer as any)?.field3,
 
-  console.log(
-    '[GeoJSONLayer.updateRenderer] renderer field1',
-    (this.layer.renderer as any)?.field1
-  );
+      fieldDelimiter:
+        (featureLayer.renderer as any)
+          ?.fieldDelimiter,
 
-  console.log(
-    '[GeoJSONLayer.updateRenderer] renderer field2',
-    (this.layer.renderer as any)?.field2
-  );
-
-  console.log(
-    '[GeoJSONLayer.updateRenderer] renderer fieldDelimiter',
-    (this.layer.renderer as any)?.fieldDelimiter
+      uniqueValueInfos:
+        (featureLayer.renderer as any)
+          ?.uniqueValueInfos
+    }
   );
 }
