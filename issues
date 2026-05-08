@@ -1,149 +1,112 @@
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  if (!this.enableUserEdit) {
-    return;
-  }
+private handleCreateComplete(graphic: Graphic): void {
 
-  this._suppressPopupUntil = Date.now() + 1000;
-  this.enableInfoPopupWindow(false);
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
+  this._suppressPopupUntil = Date.now() + 700;
 
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  let graphic: Graphic | null = null;
-
-  // First preference: exact hitTest graphic under cursor
-  if (evtOrMapPoint && evtOrMapPoint.x !== undefined && evtOrMapPoint.y !== undefined) {
-    graphic = await this.getHitGraphic(evtOrMapPoint);
-  }
-
-  // Second preference: ArcGIS event with mapPoint
-  if (!graphic && evtOrMapPoint?.mapPoint) {
-    graphic = await this.getHitGraphic(evtOrMapPoint);
-  }
-
-  // Last fallback only: nearest geometry
   if (!graphic) {
-    const mapPoint = evtOrMapPoint?.mapPoint ?? evtOrMapPoint;
-    graphic = this.findNearestEditableGraphic(mapPoint);
+    return;
   }
 
-  console.log("[arc-geojson-layer] double-click target", {
-    source,
-    found: !!graphic,
-    geometryType: graphic?.geometry?.type,
-    attributes: graphic?.attributes,
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const drawGeometryType =
+    graphic.attributes.drawGeometryType ??
+    graphic.attributes.shapeType ??
+    graphic.attributes.geometryType ??
+    this._currentDrawGeometryType ??
+    graphic.geometry?.type;
+
+  /**
+   * IMPORTANT:
+   * Never mutate geometry.type.
+   * Store custom circle metadata ONLY in attributes.
+   */
+  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
+
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+    graphic.attributes.isCircle = true;
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic)
+    ??
+    this.getDefaultSymbolForGeometry(
+      graphic.geometry,
+      graphic.attributes
+    );
+
+  /**
+   * Add into feature layer FIRST
+   */
+  if (
+    this.featureLayer &&
+    !this.featureLayer.graphics.includes(graphic)
+  ) {
+    this.featureLayer.add(graphic);
+  }
+
+  /**
+   * Sync GeoJSON
+   */
+  this.updateGeoJsonWithChanges(graphic);
+
+  /**
+   * Re-enable popup
+   */
+  this.enableInfoPopupWindow(!this.enableUserEdit);
+
+  console.log("[arc-geojson-layer] create complete", {
+    geometryType: graphic.geometry?.type,
+    drawGeometryType: graphic.attributes.drawGeometryType,
+    shapeType: graphic.attributes.shapeType,
+    attributes: graphic.attributes,
   });
-
-  if (!graphic) {
-    return;
-  }
-
-  await this.activateGraphicsEditor(graphic);
-}
-
-
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  if (!this.enableUserEdit) {
-    return;
-  }
-
-  this._suppressPopupUntil = Date.now() + 1000;
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  let graphic: Graphic | null = null;
-
-  // First preference: exact hitTest graphic under cursor
-  if (evtOrMapPoint && evtOrMapPoint.x !== undefined && evtOrMapPoint.y !== undefined) {
-    graphic = await this.getHitGraphic(evtOrMapPoint);
-  }
-
-  // Second preference: ArcGIS event with mapPoint
-  if (!graphic && evtOrMapPoint?.mapPoint) {
-    graphic = await this.getHitGraphic(evtOrMapPoint);
-  }
-
-  // Last fallback only: nearest geometry
-  if (!graphic) {
-    const mapPoint = evtOrMapPoint?.mapPoint ?? evtOrMapPoint;
-    graphic = this.findNearestEditableGraphic(mapPoint);
-  }
-
-  console.log("[arc-geojson-layer] double-click target", {
-    source,
-    found: !!graphic,
-    geometryType: graphic?.geometry?.type,
-    attributes: graphic?.attributes,
-  });
-
-  if (!graphic) {
-    return;
-  }
-
-  await this.activateGraphicsEditor(graphic);
 }
 
 
 
 
+private updateGeoJsonWithChanges(
+  graphicToUpdate: Graphic
+): void {
 
-await this.handleEditorDoubleClick(
-  {
-    x: screenPoint.x,
-    y: screenPoint.y,
-    mapPoint,
-  },
-  "native-dblclick"
-);
-
-
-
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer) {
-    return null;
+  if (!graphicToUpdate?.geometry) {
+    return;
   }
 
-  try {
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer],
-    });
+  this.applyGraphicDefaults(graphicToUpdate);
 
-    const result = hit.results.find((r: any) => {
-      const graphic = r.graphic as Graphic | undefined;
+  this.blockGeoJsonUpdate = true;
 
-      return (
-        graphic &&
-        graphic.geometry &&
-        (
-          graphic.layer === this.featureLayer ||
-          (graphic.layer as any)?.id === this.featureLayer?.id
-        )
-      );
-    }) as any;
+  this.geojson =
+    this.toFeatureCollectionFromLayer();
 
-    return result?.graphic ?? null;
-  } catch (error) {
-    console.warn("[arc-geojson-layer] hitTest failed", error);
-    return null;
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature =
+    this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  /**
+   * Prevent undefined feature emission
+   */
+  if (!feature) {
+    return;
   }
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    feature
+  );
 }
