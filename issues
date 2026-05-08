@@ -1,4 +1,6 @@
 async startDrawing(drawGeometryType: string): Promise<void> {
+  const normalizedType = String(drawGeometryType || "").toLowerCase();
+
   if (!this.view) {
     console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
     return;
@@ -15,19 +17,15 @@ async startDrawing(drawGeometryType: string): Promise<void> {
 
   await this.createEditor();
 
-  if (!this.graphicsEditor?.layer) {
-    console.error("[arc-geojson-layer] startDrawing failed: SketchViewModel layer missing", {
-      graphicsEditor: this.graphicsEditor,
-      featureLayer: this.featureLayer,
-    });
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
     return;
   }
-
-  const normalizedType = String(drawGeometryType || "").toLowerCase();
 
   this._currentDrawGeometryType = normalizedType;
   this.inDrawingMode = true;
   this._isStartingDraw = true;
+  this._editorOpen = false;
 
   this.enableInfoPopupWindow(false);
 
@@ -40,60 +38,16 @@ async startDrawing(drawGeometryType: string): Promise<void> {
     normalized: normalizedType,
   });
 
-  this.graphicsEditor.create(this.toSketchCreateTool(normalizedType) as any);
+  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
 }
 
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._suppressPopupUntil = Date.now() + 700;
 
-  if (!graphic?.geometry) {
-    this._currentDrawGeometryType = undefined;
-    return;
-  }
 
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const drawType = String(
-    this._currentDrawGeometryType ??
-    graphic.attributes.drawGeometryType ??
-    graphic.attributes.shapeType ??
-    graphic.attributes.geometryType ??
-    graphic.geometry.type
-  ).toLowerCase();
-
-  if (drawType === "circle") {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-  } else {
-    graphic.attributes.drawGeometryType = drawType;
-    graphic.attributes.shapeType = drawType;
-    graphic.attributes.geometryType = drawType;
-  }
-
-  this.applyGraphicDefaults(graphic);
-
-  graphic.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
-
-  this.updateGeojsonWithChanges(graphic);
-
-  this.enableInfoPopupWindow(this.enableUserEdit);
-
-  console.log("[arc-geojson-layer] create complete", {
-    geometryType: graphic.geometry.type,
-    drawGeometryType: graphic.attributes.drawGeometryType,
-    shapeType: graphic.attributes.shapeType,
-    attributes: graphic.attributes,
-  });
-
-  this._currentDrawGeometryType = undefined;
-}
-
+const drawType = String(
+  this._currentDrawGeometryType ||
+  graphic.attributes?.drawGeometryType ||
+  graphic.attributes?.shapeType ||
+  graphic.attributes?.geometryType ||
+  graphic.geometry?.type ||
+  ""
+).toLowerCase();
