@@ -1,81 +1,116 @@
-private addToGeoJSON(newGraphic: Graphic): void {
-  if (!newGraphic) return;
+private bindEditorEvents(): void {
+  this.cleanupEditorEvents();
 
-  if (!newGraphic.attributes) {
-    newGraphic.attributes = {};
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] bindEditorEvents skipped: graphicsEditor missing");
+    return;
   }
 
-  const now = Date.now();
+  const createHandle = this.graphicsEditor.on("create", (event: any) => {
+    console.log("[arc-geojson-layer] Sketch create event", {
+      state: event.state,
+      tool: event.tool,
+      graphic: event.graphic
+    });
 
-  // Fix: Graphic does not have uid in ArcGIS typing.
-  // Use attributes as stable id storage.
-  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    newGraphic.attributes[this.uniqueIdPropertyName] = now;
-  }
+    if (event.state !== "complete") {
+      return;
+    }
 
-  if (newGraphic.attributes.OBJECTID === undefined) {
-    newGraphic.attributes.OBJECTID = now;
-  }
+    const graphic = event.graphic as Graphic;
 
-  // Important for circle editing:
-  // Circle drawn by Sketch becomes polygon geometry,
-  // so we must store original draw shape metadata.
-  if (!newGraphic.attributes.drawGeometryType) {
-    newGraphic.attributes.drawGeometryType =
-      newGraphic.attributes.shapeType ??
-      newGraphic.attributes.geometryType ??
-      newGraphic.geometry?.type;
-  }
+    if (!graphic) {
+      console.warn("[arc-geojson-layer] create complete but graphic missing");
+      this.inDrawingMode = false;
+      this.isStartingDraw = false;
+      this.editorOpen = false;
+      this.enableInfoPopupWindow(!this.enableUserEdit);
+      return;
+    }
 
-  if (
-    String(newGraphic.attributes.drawGeometryType).toUpperCase() === DrawGeometryTypes.CIRCLE
-  ) {
-    newGraphic.attributes.shapeType = DrawGeometryTypes.CIRCLE;
-    newGraphic.attributes.geometryType = DrawGeometryTypes.CIRCLE;
-  }
+    if (!graphic.attributes) {
+      graphic.attributes = {};
+    }
 
-  this.applyGraphicDefaults(newGraphic);
+    /**
+     * 2026-05-08
+     * Purpose:
+     * Preserve original drawing tool type.
+     * ArcGIS stores circle/rectangle as polygon geometry internally.
+     * Without this metadata, circle edit is treated as polygon reshape.
+     */
+    if (this._currentDrawGeometryType) {
+      graphic.attributes.drawGeometryType = this._currentDrawGeometryType;
+      graphic.attributes.shapeType = this._currentDrawGeometryType;
+      graphic.attributes.geometryType = this._currentDrawGeometryType;
+    }
 
-  if (this.enableUserEdit) {
-    newGraphic.popupTemplate = null as any;
-  }
+    this.addToGeoJSON(graphic);
 
-  if (!this.featureLayer.graphics.includes(newGraphic)) {
-    this.featureLayer.add(newGraphic);
-  }
+    this.inDrawingMode = false;
+    this.isStartingDraw = false;
+    this.editorOpen = false;
+    this._currentDrawGeometryType = undefined;
+    this.suppressPopupUntil = Date.now() + 700;
 
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
+    this.enableInfoPopupWindow(!this.enableUserEdit);
 
-  this.refreshLabels();
+    console.log("[arc-geojson-layer] Sketch create complete handled", {
+      geometryType: graphic.geometry?.type,
+      drawGeometryType: graphic.attributes.drawGeometryType,
+      attributes: graphic.attributes
+    });
+  });
 
-  this.emitLayerEvent("userDrawnItemAdded", this.graphicToGeoJsonFeature(newGraphic));
-}
+  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+    console.log("[arc-geojson-layer] Sketch update event", {
+      state: event.state,
+      tool: event.tool,
+      graphicsCount: event.graphics?.length
+    });
 
+    if (event.state === "complete") {
+      event.graphics?.forEach((graphic: Graphic) => {
+        if (!graphic.attributes) {
+          graphic.attributes = {};
+        }
 
+        graphic.symbol =
+          this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+          this.getDefaultSymbolForGeometry(graphic.geometry);
 
-if (event.state === "complete") {
-  const graphic = event.graphic as Graphic;
+        this.updateGeojsonWithChanges(graphic);
+      });
 
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
+      this.editorOpen = false;
+      this.suppressPopupUntil = Date.now() + 700;
+      this.enableInfoPopupWindow(!this.enableUserEdit);
 
-  /**
-   * Preserve original draw type.
-   * ArcGIS converts circle/rectangle to polygon internally.
-   */
-  graphic.attributes.drawGeometryType =
-    this.currentDrawType;
+      console.log("[arc-geojson-layer] Sketch update complete handled");
+      return;
+    }
 
-  graphic.attributes.shapeType =
-    this.currentDrawType;
+    if (event.state === "cancel" || event.aborted) {
+      this.editorOpen = false;
+      this.enableInfoPopupWindow(!this.enableUserEdit);
 
-  graphic.attributes.geometryType =
-    this.currentDrawType;
+      console.log("[arc-geojson-layer] Sketch update cancelled");
+    }
+  });
 
-  this.addToGeoJSON(graphic);
+  const deleteHandle = this.graphicsEditor.on("delete", (event: any) => {
+    console.log("[arc-geojson-layer] Sketch delete event", {
+      graphicsCount: event.graphics?.length
+    });
 
-  this.resetEditorStateOnly();
+    event.graphics?.forEach((graphic: Graphic) => {
+      this.removeFromGeojson(graphic);
+    });
+
+    this.editorOpen = false;
+    this.suppressPopupUntil = Date.now() + 700;
+    this.enableInfoPopupWindow(!this.enableUserEdit);
+  });
+
+  this.editorHandles.push(createHandle, updateHandle, deleteHandle);
 }
