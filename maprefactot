@@ -5,37 +5,56 @@ private updateRenderer(newRenderer: any = this.renderer): void {
   }
 
   const graphicsLayer = this.featureLayer as any;
-  const graphics: Graphic[] = graphicsLayer.graphics?.toArray?.() ?? [];
+
+  const graphics = graphicsLayer.graphics?.toArray?.() || [];
 
   if (!graphics.length) {
     console.warn('[up-geojson-layer] updateRenderer skipped - no graphics yet');
+
+    requestAnimationFrame(() => {
+      this.updateRenderer(newRenderer);
+    });
+
     return;
   }
 
-  console.log('[up-geojson-layer] applying renderer to graphics', {
-    graphicsCount: graphics.length,
-    renderer: newRenderer
-  });
+  console.log('[up-geojson-layer] applying renderer to graphics', graphics.length);
 
   graphics.forEach((graphic: any) => {
-    const matchedSymbol = this.getSymbolFromRendererConfig(
-      newRenderer,
-      graphic
-    );
+    const geometryType = graphic.geometry?.type;
 
-    const fallbackSymbol = this.getDefaultSymbolForGeometry(
-      graphic.geometry,
-      graphic.attributes
-    );
+    let symbol: any = null;
 
-    graphic.symbol = matchedSymbol ?? fallbackSymbol;
+    if (geometryType === 'point') {
+      symbol = this.getDefaultSymbolForGeometry(
+        graphic.geometry,
+        graphic.attributes
+      );
+    } else if (geometryType === 'polygon') {
+      symbol = this.getDefaultSymbolForGeometry(
+        graphic.geometry,
+        graphic.attributes
+      );
+    } else if (geometryType === 'polyline') {
+      symbol = this.getDefaultSymbolForGeometry(
+        graphic.geometry,
+        graphic.attributes
+      );
+    }
 
     console.log('[up-geojson-layer] final graphic symbol applied', {
-      geometryType: graphic.geometry?.type,
+      geometryType,
       attributes: graphic.attributes,
-      matchedSymbol,
-      fallbackSymbol,
-      finalSymbol: graphic.symbol
+      matchedSymbol: symbol,
+      finalSymbol: symbol
     });
+
+    if (symbol) {
+      graphic.symbol = symbol;
+    }
   });
+
+  graphicsLayer.refresh?.();
+
+  this.requestUpdate();
 }
