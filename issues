@@ -1,22 +1,24 @@
-this.eventHandles.push(
-  {
-    remove: (): void => {
-      clickHandle?.remove();
-    },
-  },
-  {
-    remove: (): void => {
-      dblClickHandle?.remove();
-    },
-  },
-  {
-    remove: (): void => {
-      pointerMoveHandle?.remove();
-    },
-  },
-  {
-    remove: (): void => {
-      this.view?.container?.removeEventListener("dblclick", nativeDblClick, true);
-    },
+private getPopupPoint(geometry: any): Point | null {
+  if (!geometry) {
+    return null;
   }
-);
+
+  try {
+    if (geometry.type === "point") {
+      return geometry as Point;
+    }
+
+    if (geometry.extent?.center) {
+      return geometry.extent.center as Point;
+    }
+
+    if (geometry.centroid) {
+      return geometry.centroid as Point;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("[arc-geojson-layer] getPopupPoint failed", error);
+    return null;
+  }
+}
