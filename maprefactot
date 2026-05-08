@@ -1,75 +1,359 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.view) {
-    console.warn('[up-geojson-layer] startDrawing skipped: view missing');
-    return;
-  }
+import SimpleRenderer from '@arcgis/core/renderers/SimpleRenderer';
+import UniqueValueRenderer from '@arcgis/core/renderers/UniqueValueRenderer';
+import ClassBreaksRenderer from '@arcgis/core/renderers/ClassBreaksRenderer';
 
-  if (!this.featureLayer) {
-    await this.createLayer(this.geojson);
-  }
+import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
+import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
+import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
+import PictureMarkerSymbol from '@arcgis/core/symbols/PictureMarkerSymbol';
 
-  if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] startDrawing skipped: featureLayer still missing');
-    return;
-  }
+export default class JsonUtils {
+  static getJsonFor(value: any): { parsedJson: any | null; error: any | null } {
+    if (value === undefined || value === null || value === '') {
+      return {
+        parsedJson: null,
+        error: null
+      };
+    }
 
-  await this.createEditor();
-
-  if (!this.graphicsEditor?.layer) {
-    console.error('[up-geojson-layer] startDrawing failed: SketchViewModel layer missing', {
-      graphicsEditor: this.graphicsEditor,
-      featureLayer: this.featureLayer
-    });
-    return;
-  }
-
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  console.log('[up-geojson-layer] startDrawing', {
-    drawGeometryType,
-    sketchLayer: this.graphicsEditor.layer,
-    featureLayer: this.featureLayer
-  });
-
-  this.graphicsEditor.create(drawGeometryType as any);
-}
-
-
-private setupMapCursorHover(): void {
-  if (!this.view) {
-    return;
-  }
-
-  if (this.cursorMoveHandle) {
-    this.cursorMoveHandle.remove();
-    this.cursorMoveHandle = undefined;
-  }
-
-  this.cursorMoveHandle = this.view.on('pointer-move', async (evt: any) => {
-    if (!this.view || !this.featureLayer) {
-      this.setMapCursor('default', evt);
-      return;
+    if (typeof value === 'object') {
+      return {
+        parsedJson: value,
+        error: null
+      };
     }
 
     try {
-      const hit = await this.view.hitTest(evt);
-
-      const isOverThisLayer = hit.results?.some((result: any) => {
-        const graphic = result?.graphic;
-        return !!graphic && graphic.layer === this.featureLayer;
+      return {
+        parsedJson: JSON.parse(value),
+        error: null
+      };
+    } catch (error) {
+      console.warn('[JsonUtils.getJsonFor] JSON parse failed', {
+        value,
+        error
       });
 
-      this.setMapCursor(isOverThisLayer ? 'pointer' : 'default', evt);
-    } catch {
-      this.setMapCursor('default', evt);
+      return {
+        parsedJson: null,
+        error
+      };
     }
-  });
-}
+  }
 
+  static clonePlain<T = any>(value: T): T {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  }
+
+  static normalizeRendererType(type: any): string {
+    const rendererType = String(type ?? 'simple')
+      .trim()
+      .toLowerCase();
+
+    const map: Record<string, string> = {
+      simple: 'simple',
+      simplerenderer: 'simple',
+
+      uniquevalue: 'unique-value',
+      'unique-value': 'unique-value',
+      uniquevaluerenderer: 'unique-value',
+
+      classbreaks: 'class-breaks',
+      'class-breaks': 'class-breaks',
+      classbreaksrenderer: 'class-breaks'
+    };
+
+    return map[rendererType] ?? rendererType;
+  }
+
+  static normalizeSymbolType(type: any): string {
+    const symbolType = String(type ?? '')
+      .trim()
+      .toLowerCase();
+
+    const map: Record<string, string> = {
+      esrisms: 'simple-marker',
+      simplemarkersymbol: 'simple-marker',
+      'simple-marker': 'simple-marker',
+
+      esrisls: 'simple-line',
+      simplelinesymbol: 'simple-line',
+      'simple-line': 'simple-line',
+
+      esrisfs: 'simple-fill',
+      simplefillsymbol: 'simple-fill',
+      'simple-fill': 'simple-fill',
+
+      esripms: 'picture-marker',
+      picturemarkersymbol: 'picture-marker',
+      'picture-marker': 'picture-marker'
+    };
+
+    return map[symbolType] ?? symbolType;
+  }
+
+  static normalizeMarkerStyle(style: any): string {
+    const markerStyle = String(style ?? 'circle')
+      .trim()
+      .toLowerCase();
+
+    const map: Record<string, string> = {
+      esrismscircle: 'circle',
+      circle: 'circle',
+
+      esrismssquare: 'square',
+      square: 'square',
+
+      esrismscross: 'cross',
+      cross: 'cross',
+
+      esrismsx: 'x',
+      x: 'x',
+
+      esrismsdiamond: 'diamond',
+      diamond: 'diamond',
+
+      esrismstriangle: 'triangle',
+      triangle: 'triangle'
+    };
+
+    return map[markerStyle] ?? 'circle';
+  }
+
+  static normalizeLineStyle(style: any): string {
+    const lineStyle = String(style ?? 'solid')
+      .trim()
+      .toLowerCase();
+
+    const map: Record<string, string> = {
+      esrislssolid: 'solid',
+      solid: 'solid',
+
+      esrislsdash: 'dash',
+      dash: 'dash',
+
+      esrislsdot: 'dot',
+      dot: 'dot',
+
+      esrislsdashdot: 'dash-dot',
+      'dash-dot': 'dash-dot',
+
+      esrislsdashdotdot: 'long-dash-dot-dot',
+      'long-dash-dot-dot': 'long-dash-dot-dot',
+
+      esrislsnone: 'none',
+      none: 'none'
+    };
+
+    return map[lineStyle] ?? 'solid';
+  }
+
+  static normalizeFillStyle(style: any): string {
+    const fillStyle = String(style ?? 'solid')
+      .trim()
+      .toLowerCase();
+
+    const map: Record<string, string> = {
+      esrisfssolid: 'solid',
+      solid: 'solid',
+
+      esrisfsnone: 'none',
+      none: 'none',
+
+      esrisfshorizontal: 'horizontal',
+      horizontal: 'horizontal',
+
+      esrisfsvertical: 'vertical',
+      vertical: 'vertical',
+
+      esrisfsforwarddiagonal: 'forward-diagonal',
+      'forward-diagonal': 'forward-diagonal',
+
+      esrisfsbackwarddiagonal: 'backward-diagonal',
+      'backward-diagonal': 'backward-diagonal',
+
+      esrisfscross: 'cross',
+      cross: 'cross',
+
+      esrisfsdiagonalcross: 'diagonal-cross',
+      'diagonal-cross': 'diagonal-cross'
+    };
+
+    return map[fillStyle] ?? 'solid';
+  }
+
+  static normalizeColor(color: any, fallback: number[] = [0, 120, 255, 255]): any {
+    if (!Array.isArray(color)) {
+      return fallback;
+    }
+
+    if (color.length === 3) {
+      return [color[0], color[1], color[2], 255];
+    }
+
+    if (color.length === 4) {
+      const alpha = color[3];
+
+      return [
+        color[0],
+        color[1],
+        color[2],
+        alpha <= 1 ? Math.round(alpha * 255) : alpha
+      ];
+    }
+
+    return fallback;
+  }
+
+  static normalizePlainSymbol(symbolJson: any): any {
+    if (!symbolJson) {
+      return null;
+    }
+
+    const symbol = JsonUtils.clonePlain(symbolJson);
+    const type = JsonUtils.normalizeSymbolType(symbol.type);
+
+    if (type === 'picture-marker') {
+      return new PictureMarkerSymbol({
+        url: symbol.url || symbol.href,
+        width: symbol.width ?? symbol.size ?? 18,
+        height: symbol.height ?? symbol.size ?? 18,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        angle: symbol.angle ?? 0
+      });
+    }
+
+    if (type === 'simple-marker') {
+      return new SimpleMarkerSymbol({
+        style: JsonUtils.normalizeMarkerStyle(symbol.style),
+        size: symbol.size ?? 14,
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 255]),
+        outline: symbol.outline
+          ? JsonUtils.normalizePlainSymbol({
+              ...symbol.outline,
+              type: symbol.outline.type ?? 'esriSLS'
+            })
+          : new SimpleLineSymbol({
+              color: [255, 255, 255, 255],
+              width: 1,
+              style: 'solid'
+            })
+      });
+    }
+
+    if (type === 'simple-line') {
+      return new SimpleLineSymbol({
+        style: JsonUtils.normalizeLineStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 255]),
+        width: symbol.width ?? 2
+      });
+    }
+
+    if (type === 'simple-fill') {
+      return new SimpleFillSymbol({
+        style: JsonUtils.normalizeFillStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 80]),
+        outline: symbol.outline
+          ? JsonUtils.normalizePlainSymbol({
+              ...symbol.outline,
+              type: symbol.outline.type ?? 'esriSLS'
+            })
+          : new SimpleLineSymbol({
+              color: [0, 120, 255, 255],
+              width: 1,
+              style: 'solid'
+            })
+      });
+    }
+
+    return symbol;
+  }
+
+  static normalizeRendererConfig(renderer: any): any {
+    const parsed = JsonUtils.getJsonFor(renderer);
+
+    if (parsed.error || !parsed.parsedJson) {
+      return null;
+    }
+
+    const config = JsonUtils.clonePlain(parsed.parsedJson);
+
+    config.type = JsonUtils.normalizeRendererType(config.type);
+
+    if (config.symbol) {
+      config.symbol = JsonUtils.normalizePlainSymbol(config.symbol);
+    }
+
+    if (config.defaultSymbol) {
+      config.defaultSymbol = JsonUtils.normalizePlainSymbol(config.defaultSymbol);
+    }
+
+    if (Array.isArray(config.uniqueValueInfos)) {
+      config.uniqueValueInfos = config.uniqueValueInfos.map((info: any) => ({
+        ...info,
+        value:
+          typeof info.value === 'string'
+            ? info.value.trim()
+            : info.value,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+    }
+
+    if (Array.isArray(config.classBreakInfos)) {
+      config.classBreakInfos = config.classBreakInfos.map((info: any) => ({
+        ...info,
+        symbol: info.symbol
+          ? JsonUtils.normalizePlainSymbol(info.symbol)
+          : info.symbol
+      }));
+    }
+
+    return config;
+  }
+
+  static updateRenderer(
+    newRenderer: any,
+    layer: any,
+    _rendererTypeToModule?: any,
+    fallbackSymbolJson?: any
+  ): void {
+    if (!layer) {
+      console.warn('[JsonUtils.updateRenderer] skipped: layer missing');
+      return;
+    }
+
+    const config = JsonUtils.normalizeRendererConfig(newRenderer);
+    const fallbackSymbol = JsonUtils.normalizePlainSymbol(fallbackSymbolJson);
+
+    if (!config) {
+      layer.renderer = new SimpleRenderer({
+        symbol: fallbackSymbol
+      });
+
+      return;
+    }
+
+    if (config.type === 'unique-value') {
+      layer.renderer = new UniqueValueRenderer(config);
+      return;
+    }
+
+    if (config.type === 'class-breaks') {
+      layer.renderer = new ClassBreaksRenderer(config);
+      return;
+    }
+
+    layer.renderer = new SimpleRenderer(config);
+  }
+}
