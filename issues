@@ -1,331 +1,178 @@
-private emitLayerEvent(
-  eventName: string,
-  feature?: Feature | null,
-  graphic?: Graphic | null,
-  extraData?: any
-): void {
-  const attributes =
-    feature?.properties ??
-    graphic?.attributes ??
-    {};
+private bindViewEvents(): void {
+  let clickTimer: any = null;
 
-  const objectId =
-    attributes?.OBJECTID ??
-    attributes?.objectId ??
-    attributes?.id ??
-    null;
+  const clickHandle = this.view.on("click", async (evt: any) => {
+    if (this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
+      evt.stopPropagation?.();
+      return;
+    }
 
-  const payload = {
-    type: eventName,
-    OBJECTID: objectId,
-    objectId,
-    id: objectId,
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
 
-    feature: feature ?? {
-      type: "Feature",
-      geometry: graphic?.geometry
-        ? this.arcGeometryToGeoJson(graphic.geometry)
-        : null,
-      properties: attributes,
-    },
+    clickTimer = setTimeout(async () => {
+      clickTimer = null;
 
-    graphic: graphic ?? null,
-    attributes,
-    properties: attributes,
+      const graphic = await this.getHitGraphic(evt);
+      if (!graphic) return;
 
-    geometry:
-      feature?.geometry ??
-      (graphic?.geometry ? this.arcGeometryToGeoJson(graphic.geometry) : null),
+      if (
+        this._editorOpen ||
+        this.inDrawingMode ||
+        this._isStartingDraw ||
+        this.shouldSuppressPopup()
+      ) {
+        return;
+      }
 
-    geojson: this.geojson,
+      this.showGraphicPopup(graphic, evt.mapPoint);
 
-    layerId:
-      this.featureLayer?.id ??
-      this.name ??
-      "arc-geojson-layer",
+      this.emitLayerEvent(
+        "layerClick",
+        this.graphicToGeoJsonFeature(graphic),
+        graphic,
+        {
+          event: {
+            coordinates: {
+              latitude: evt.mapPoint?.latitude ?? 0,
+              longitude: evt.mapPoint?.longitude ?? 0,
+            },
+            attributes: graphic.attributes ?? {},
+          },
+        }
+      );
+    }, 280);
+  });
 
-    ...extraData,
+  const dblClickHandle = this.view.on("double-click", async (evt: any) => {
+    evt.stopPropagation?.();
+    evt.preventDefault?.();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    await this.handleEditorDoubleClick(evt, "arcgis-double-click");
+  });
+
+  const nativeDblClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    const rect = this.view.container.getBoundingClientRect();
+
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const mapPoint = this.view.toMap(screenPoint) as Point;
+
+    await this.handleEditorDoubleClick(
+      {
+        x: screenPoint.x,
+        y: screenPoint.y,
+        mapPoint,
+      },
+      "native-dblclick"
+    );
   };
 
-  this.dispatchEvent(
-    new CustomEvent(eventName, {
-      detail: payload,
-      bubbles: true,
-      composed: true,
-    })
+  this.view.container?.addEventListener("dblclick", nativeDblClick, true);
+
+  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+    if (!this.view || !this.featureLayer || this._editorOpen || this.inDrawingMode) {
+      this.setMapCursor("default", evt);
+      return;
+    }
+
+    try {
+      const graphic = await this.getHitGraphic(evt);
+
+      if (!graphic) {
+        this.hoveredGraphicUid = undefined;
+        this.setMapCursor("default", evt);
+        return;
+      }
+
+      this.hoveredGraphicUid =
+        graphic.attributes?.[this.uniqueIdPropertyName] ??
+        graphic.attributes?.OBJECTID;
+
+      this.setMapCursor("pointer", evt);
+    } catch {
+      this.setMapCursor("default", evt);
+    }
+  });
+
+  this.eventHandles.push(
+    { remove: () => clickHandle?.remove() },
+    { remove: () => dblClickHandle?.remove() },
+    { remove: () => pointerMoveHandle?.remove() },
+    {
+      remove: () => {
+        this.view?.container?.removeEventListener("dblclick", nativeDblClick, true);
+      },
+    }
   );
 }
 
 
 
-
-
-async startDrawing(drawGeometryType: string): Promise<void> {
-  const normalizedType = String(drawGeometryType || "").toLowerCase();
-
-  if (!this.view) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  if (!this.enableUserEdit) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false");
     return;
   }
 
-  if (!this.featureLayer) {
-    await this.createLayer(this.geojson);
-  }
-
-  if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
-    return;
-  }
-
-  await this.createEditor();
-
-  if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
-    return;
-  }
-
-  this._currentDrawGeometryType = normalizedType;
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
-  this._editorOpen = false;
   this._suppressPopupUntil = Date.now() + 1500;
-
   this.enableInfoPopupWindow(false);
 
   try {
-    this.view.popup?.close();
+    this.view?.popup?.close();
   } catch {}
 
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  /**
-   * IMPORTANT:
-   * Only allow one active drawing preview at a time.
-   * Do NOT remove existing saved layer graphics.
-   * Only clear Sketch temporary graphics.
-   */
-  try {
-    this.sketchLayer?.graphics?.removeAll();
-  } catch {}
-
-  console.log("[arc-geojson-layer] startDrawing", {
-    requested: drawGeometryType,
-    normalized: normalizedType,
-  });
-
-  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
-}
-
-
-
-
-private async createEditor(): Promise<void> {
-  if (!this.view || !this.featureLayer) {
+  if (this._editorOpen) {
+    this.finishActiveEditor();
     return;
   }
 
-  const layerExistsInMap =
-    this.view.map?.layers?.includes(this.featureLayer as any);
+  let graphic: Graphic | null = null;
 
-  if (!layerExistsInMap) {
-    this.view.map?.add(this.featureLayer);
+  graphic = await this.getHitGraphic(evtOrMapPoint);
+
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
   }
 
-  if (this.graphicsEditor) {
-    try {
-      this.graphicsEditor.cancel();
-    } catch {}
-
-    try {
-      this.graphicsEditor.destroy();
-    } catch {}
-  }
-
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    updateOnGraphicClick: false,
-    defaultUpdateOptions: {
-      tool: "reshape",
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false,
-    },
-  });
-
-  this.editorHandles?.forEach((h) => {
-    try {
-      h.remove();
-    } catch {}
-  });
-
-  this.editorHandles = [];
-
-  const createHandle = this.graphicsEditor.on("create", (event: any) => {
-    if (event.state === "start" || event.state === "active") {
-      this.inDrawingMode = true;
-      this._isStartingDraw = true;
-      this._editorOpen = false;
-      this.enableInfoPopupWindow(false);
-
-      /**
-       * Only keep the current sketch graphic while drawing.
-       */
-      const activeGraphic = event.graphic;
-
-      this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
-        if (
-          g !== activeGraphic &&
-          g.attributes?.__isTemporaryDrawing === true
-        ) {
-          this.featureLayer?.remove(g);
-        }
-      });
-
-      if (activeGraphic) {
-        activeGraphic.attributes = {
-          ...(activeGraphic.attributes ?? {}),
-          __isTemporaryDrawing: true,
-        };
-      }
-    }
-
-    if (event.state === "complete") {
-      const completedGraphic = event.graphic as Graphic;
-
-      if (!completedGraphic) {
-        return;
-      }
-
-      completedGraphic.attributes = {
-        ...(completedGraphic.attributes ?? {}),
-        __isTemporaryDrawing: false,
-      };
-
-      this.handleCreateComplete(completedGraphic);
-    }
-
-    if (event.state === "cancel") {
-      this.inDrawingMode = false;
-      this._isStartingDraw = false;
-      this._editorOpen = false;
-      this.enableInfoPopupWindow(true);
-    }
-  });
-
-  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
-    if (event.state === "start" || event.state === "active") {
-      this._editorOpen = true;
-      this.inDrawingMode = false;
-      this._isStartingDraw = false;
-      this.enableInfoPopupWindow(false);
-    }
-
-    if (event.state === "complete") {
-      this.finishActiveEditor();
-    }
-
-    if (event.state === "cancel") {
-      this._editorOpen = false;
-      this.enableInfoPopupWindow(true);
-    }
-  });
-
-  this.editorHandles.push(createHandle, updateHandle);
-
-  console.log("[arc-geojson-layer] createEditor DONE", {
-    layer: this.featureLayer,
-    layerId: this.featureLayer.id,
-    layerExistsInMap,
-    graphicCount: this.featureLayer.graphics.length,
-  });
-}
-
-
-
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._suppressPopupUntil = Date.now() + 700;
-
-  if (!graphic?.geometry) {
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] double-click editor target not found", {
+      source,
+      evtOrMapPoint,
+    });
     return;
   }
 
-  graphic.attributes = {
-    ...(graphic.attributes ?? {}),
-    __isTemporaryDrawing: false,
-  };
-
-  const drawGeometryType =
-    this._currentDrawGeometryType ??
-    graphic.attributes.drawGeometryType ??
-    graphic.attributes.shapeType ??
-    graphic.attributes.geometryType ??
-    graphic.geometry.type;
-
-  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  }
-
-  this.applyGraphicDefaults(graphic);
-
-  graphic.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-    this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
-
-  /**
-   * Make sure only this completed graphic is stored from current drawing.
-   * Do not duplicate preview graphics.
-   */
-  const objectId = graphic.attributes?.OBJECTID;
-
-  this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
-    if (
-      g !== graphic &&
-      g.attributes?.__isTemporaryDrawing === true
-    ) {
-      this.featureLayer?.remove(g);
-    }
-
-    if (
-      g !== graphic &&
-      objectId !== undefined &&
-      g.attributes?.OBJECTID === objectId
-    ) {
-      this.featureLayer?.remove(g);
-    }
-  });
-
-  if (
-    this.featureLayer &&
-    !this.featureLayer.graphics.includes(graphic)
-  ) {
-    this.featureLayer.add(graphic);
-  }
-
-  this.updateGeoJsonWithChanges(graphic);
-
-  this.enableInfoPopupWindow(true);
-
-  console.log("[arc-geojson-layer] create complete", {
+  console.log("[arc-geojson-layer] double-click editor target", {
+    source,
     geometryType: graphic.geometry?.type,
-    drawGeometryType: graphic.attributes.drawGeometryType,
-    shapeType: graphic.attributes.shapeType,
     attributes: graphic.attributes,
   });
+
+  await this.activateGraphicsEditor(graphic);
 }
-
-
-
 
 
