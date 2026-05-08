@@ -1,12 +1,60 @@
-if (!featureLayer) {
-  return;
+static updateRenderer(
+  newRenderer: string | object | undefined,
+  featureLayer: __esri.FeatureLayer | undefined,
+  rendererTypeToModule: Record<string, any>,
+  symbolJson?: any
+): void {
+  if (!featureLayer) {
+    return;
+  }
+
+  const rendererParseResult = JsonUtils.getJsonFor<any>(newRenderer);
+
+  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
+    console.warn(
+      '[ArcGeoJSON][json-util] Could not parse renderer value. Staying on previous renderer.',
+      rendererParseResult.error
+    );
+    return;
+  }
+
+  const parsedRendererConfig = rendererParseResult.parsedJson;
+
+  if (!parsedRendererConfig) {
+    return;
+  }
+
+  try {
+    const rendererType = String(parsedRendererConfig.type || '').toLowerCase();
+
+    if (rendererType === 'simple') {
+      const symbol =
+        parsedRendererConfig.symbol
+          ? JsonUtils.createSymbolFromJson(parsedRendererConfig.symbol, featureLayer.geometryType)
+          : JsonUtils.createSymbolFromJson(symbolJson, featureLayer.geometryType);
+
+      featureLayer.renderer = new SimpleRenderer({
+        ...parsedRendererConfig,
+        symbol,
+      }) as __esri.Renderer;
+
+      featureLayer.refresh?.();
+      return;
+    }
+
+    if (rendererTypeToModule?.[parsedRendererConfig.type]) {
+      const RendererModule = rendererTypeToModule[parsedRendererConfig.type];
+
+      featureLayer.renderer = new RendererModule(parsedRendererConfig) as __esri.Renderer;
+      featureLayer.refresh?.();
+      return;
+    }
+
+    console.warn(
+      '[ArcGeoJSON][json-util] Unsupported renderer type.',
+      parsedRendererConfig.type
+    );
+  } catch (error) {
+    console.error('[ArcGeoJSON][json-util] updateRenderer failed.', error);
+  }
 }
-
-featureLayer.renderer = new SimpleRenderer({
-  ...parsedRendererConfig,
-  symbol,
-}) as Renderer;
-
-featureLayer.refresh?.();
-
-return;
