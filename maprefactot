@@ -1,50 +1,75 @@
-private async createEditor(): Promise<void> {
+async startDrawing(drawGeometryType: string): Promise<void> {
   if (!this.view) {
-    console.warn('[up-geojson-layer] createEditor skipped: view missing');
+    console.warn('[up-geojson-layer] startDrawing skipped: view missing');
     return;
   }
 
   if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] createEditor skipped: featureLayer missing');
+    await this.createLayer(this.geojson);
+  }
+
+  if (!this.featureLayer) {
+    console.warn('[up-geojson-layer] startDrawing skipped: featureLayer still missing');
     return;
   }
 
-  const layerExistsInMap = this.view.map?.layers?.includes(this.featureLayer as any);
+  await this.createEditor();
 
-  if (!layerExistsInMap) {
-    this.view.map?.add(this.featureLayer);
+  if (!this.graphicsEditor?.layer) {
+    console.error('[up-geojson-layer] startDrawing failed: SketchViewModel layer missing', {
+      graphicsEditor: this.graphicsEditor,
+      featureLayer: this.featureLayer
+    });
+    return;
   }
 
-  if (this.graphicsEditor) {
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  console.log('[up-geojson-layer] startDrawing', {
+    drawGeometryType,
+    sketchLayer: this.graphicsEditor.layer,
+    featureLayer: this.featureLayer
+  });
+
+  this.graphicsEditor.create(drawGeometryType as any);
+}
+
+
+private setupMapCursorHover(): void {
+  if (!this.view) {
+    return;
+  }
+
+  if (this.cursorMoveHandle) {
+    this.cursorMoveHandle.remove();
+    this.cursorMoveHandle = undefined;
+  }
+
+  this.cursorMoveHandle = this.view.on('pointer-move', async (evt: any) => {
+    if (!this.view || !this.featureLayer) {
+      this.setMapCursor('default', evt);
+      return;
+    }
+
     try {
-      this.graphicsEditor.cancel();
-    } catch {}
+      const hit = await this.view.hitTest(evt);
 
-    this.graphicsEditor.destroy?.();
-    this.graphicsEditor = undefined;
-  }
+      const isOverThisLayer = hit.results?.some((result: any) => {
+        const graphic = result?.graphic;
+        return !!graphic && graphic.layer === this.featureLayer;
+      });
 
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    updateOnGraphicClick: false,
-    defaultCreateOptions: {
-      mode: 'click'
-    },
-    defaultUpdateOptions: {
-      tool: 'reshape',
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false
+      this.setMapCursor(isOverThisLayer ? 'pointer' : 'default', evt);
+    } catch {
+      this.setMapCursor('default', evt);
     }
   });
-
-  console.log('[up-geojson-layer] createEditor DONE', {
-    layer: this.graphicsEditor.layer,
-    layerId: this.featureLayer.id,
-    layerExistsInMap: this.view.map?.layers?.includes(this.featureLayer as any),
-    graphicsCount: this.featureLayer.graphics?.length
-  });
 }
+
