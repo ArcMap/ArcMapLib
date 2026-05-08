@@ -1,47 +1,99 @@
-private resolveUpdateTool(graphic: Graphic): "move" | "reshape" | "transform" {
-  const drawGeometryType =
-    graphic.attributes?.drawGeometryType ??
-    graphic.attributes?.shapeType ??
-    graphic.attributes?.geometryType ??
-    graphic.attributes?.shape;
-
-  const geometryType = String(graphic.geometry?.type ?? "").toLowerCase();
-  const shapeType = String(drawGeometryType ?? "").toLowerCase();
-
-  /**
-   * Circle is stored by ArcGIS as polygon geometry.
-   * If we allow reshape, ArcGIS exposes all polygon vertices and circle becomes broken.
-   * So circle must always use transform.
-   */
-  if (shapeType === "circle") {
-    return "transform";
+async startDrawing(drawGeometryType: string): Promise<void> {
+  if (!this.view) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
+    return;
   }
 
-  if (
-    geometryType === "polygon" &&
-    (
-      this.enableUserEditVertices ||
-      this.enableUserEditAddVertices ||
-      this.enableUserEditDeleteVertices
-    )
-  ) {
-    return "reshape";
+  if (!this.featureLayer) {
+    await this.createLayer(this.geojson);
   }
 
-  if (this.enableUserEditScaling || this.enableUserEditRotating) {
-    return "transform";
+  if (!this.featureLayer) {
+    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
+    return;
   }
 
-  return "move";
+  await this.createEditor();
+
+  if (!this.graphicsEditor?.layer) {
+    console.error("[arc-geojson-layer] startDrawing failed: SketchViewModel layer missing", {
+      graphicsEditor: this.graphicsEditor,
+      featureLayer: this.featureLayer,
+    });
+    return;
+  }
+
+  const normalizedType = String(drawGeometryType || "").toLowerCase();
+
+  this._currentDrawGeometryType = normalizedType;
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  console.log("[arc-geojson-layer] startDrawing", {
+    requested: drawGeometryType,
+    normalized: normalizedType,
+  });
+
+  this.graphicsEditor.create(this.toSketchCreateTool(normalizedType) as any);
 }
 
-const tool = this.resolveUpdateTool(graphic);
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 700;
 
-await this.graphicsEditor.update([graphic], {
-  tool,
-  enableRotation: this.enableUserEditRotating,
-  enableScaling: this.enableUserEditScaling,
-  preserveAspectRatio: this.enableUserEditUniformScaling,
-  multipleSelectionEnabled: false,
-  toggleToolOnClick: false,
-} as any);
+  if (!graphic?.geometry) {
+    this._currentDrawGeometryType = undefined;
+    return;
+  }
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const drawType = String(
+    this._currentDrawGeometryType ??
+    graphic.attributes.drawGeometryType ??
+    graphic.attributes.shapeType ??
+    graphic.attributes.geometryType ??
+    graphic.geometry.type
+  ).toLowerCase();
+
+  if (drawType === "circle") {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+  } else {
+    graphic.attributes.drawGeometryType = drawType;
+    graphic.attributes.shapeType = drawType;
+    graphic.attributes.geometryType = drawType;
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
+
+  this.updateGeojsonWithChanges(graphic);
+
+  this.enableInfoPopupWindow(this.enableUserEdit);
+
+  console.log("[arc-geojson-layer] create complete", {
+    geometryType: graphic.geometry.type,
+    drawGeometryType: graphic.attributes.drawGeometryType,
+    shapeType: graphic.attributes.shapeType,
+    attributes: graphic.attributes,
+  });
+
+  this._currentDrawGeometryType = undefined;
+}
+
