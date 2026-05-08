@@ -1,359 +1,436 @@
-import SimpleRenderer from '@arcgis/core/renderers/SimpleRenderer';
-import UniqueValueRenderer from '@arcgis/core/renderers/UniqueValueRenderer';
-import ClassBreaksRenderer from '@arcgis/core/renderers/ClassBreaksRenderer';
+import Graphic from "@arcgis/core/Graphic";
+import LabelClass from "@arcgis/core/layers/support/LabelClass";
+import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
+import Renderer from "@arcgis/core/renderers/Renderer";
+import SimpleRenderer from "@arcgis/core/renderers/SimpleRenderer";
+import SimpleFillSymbol from "@arcgis/core/symbols/SimpleFillSymbol";
+import SimpleLineSymbol from "@arcgis/core/symbols/SimpleLineSymbol";
+import SimpleMarkerSymbol from "@arcgis/core/symbols/SimpleMarkerSymbol";
+import TextSymbol from "@arcgis/core/symbols/TextSymbol";
 
-import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
-import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
-import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol';
-import PictureMarkerSymbol from '@arcgis/core/symbols/PictureMarkerSymbol';
+export type JsonParseResult<T = any> =
+  | { parsedJson: T; error?: never }
+  | { error: Error; parsedJson?: never };
 
-export default class JsonUtils {
-  static getJsonFor(value: any): { parsedJson: any | null; error: any | null } {
-    if (value === undefined || value === null || value === '') {
+export default class JsonUtil {
+  static readonly DEFAULT_LABEL_SIZE = 10;
+  static readonly DEFAULT_SYMBOL_COLOR: number[] = JsonUtil.getRandomColor();
+
+  static readonly DEFAULT_POINT_SIZE = 10;
+  static readonly DEFAULT_LINE_WIDTH = 3;
+  static readonly DEFAULT_POLYGON_OUTLINE_WIDTH = 2;
+
+  /**
+   * Change log vs old Stencil code:
+   * 1. Works with ArcGIS Core ESM imports.
+   * 2. Accepts old symbol JSON and new ArcGIS symbol JSON.
+   * 3. Accepts renderer as string/object.
+   * 4. Accepts label JSON as string/object/array.
+   * 5. Normalizes symbol type names for ArcGIS 4.x/5.x-style APIs.
+   * 6. Keeps fallback symbols so fences still render even when old apps pass incomplete style.
+   */
+
+  static getJsonFor<T = any>(jsonObj: string | object | undefined | null): JsonParseResult<T> {
+    if (jsonObj === undefined || jsonObj === null || jsonObj === "") {
+      return { error: new Error("Json value is null/undefined/empty.") };
+    }
+
+    if (typeof jsonObj === "string") {
+      try {
+        return { parsedJson: JSON.parse(jsonObj) as T };
+      } catch (e: any) {
+        return {
+          error: e instanceof Error ? e : new Error(String(e)),
+        };
+      }
+    }
+
+    return { parsedJson: jsonObj as T };
+  }
+
+  static getEsriGeometryType(jsonGeometry: any): string {
+    if (!jsonGeometry) return "point";
+
+    if (jsonGeometry.type) {
+      const type = String(jsonGeometry.type).toLowerCase();
+
+      if (type === "point" || type === "multipoint") return "point";
+      if (type === "polyline" || type === "linestring" || type === "multilinestring") return "polyline";
+      if (
+        type === "polygon" ||
+        type === "multipolygon" ||
+        type === "extent" ||
+        type === "circle" ||
+        type === "rectangle"
+      ) {
+        return "polygon";
+      }
+    }
+
+    if (jsonGeometry.paths) return "polyline";
+    if (jsonGeometry.rings) return "polygon";
+    if (jsonGeometry.points) return "multipoint";
+    if (
+      jsonGeometry.x !== undefined &&
+      jsonGeometry.y !== undefined
+    ) {
+      return "point";
+    }
+
+    return "point";
+  }
+
+  static getSymbolJson(
+    geomType: string,
+    defaultColor: number[] = JsonUtil.DEFAULT_SYMBOL_COLOR,
+    defaultSymbolMarkerSize: number = JsonUtil.DEFAULT_POINT_SIZE,
+    widthGeomLine: number = JsonUtil.DEFAULT_LINE_WIDTH,
+    widthGeomPolygon: number = JsonUtil.DEFAULT_POLYGON_OUTLINE_WIDTH,
+  ): any {
+    const geometryType = String(geomType || "").toLowerCase();
+
+    const color = JsonUtil.resolveColor(defaultColor, [0, 120, 255, 255]);
+    const polygonFillColor = [color[0], color[1], color[2], 80];
+    const outlineColor = [color[0], color[1], color[2], 255];
+
+    if (
+      geometryType === "point" ||
+      geometryType === "multipoint" ||
+      geometryType === "esrigeometrypoint" ||
+      geometryType === "esrigeometrymultipoint"
+    ) {
       return {
-        parsedJson: null,
-        error: null
+        type: "simple-marker",
+        style: "circle",
+        size: defaultSymbolMarkerSize,
+        color,
+        outline: {
+          type: "simple-line",
+          color: [255, 255, 255, 255],
+          width: 2,
+          style: "solid",
+        },
       };
     }
 
-    if (typeof value === 'object') {
+    if (
+      geometryType === "polyline" ||
+      geometryType === "line" ||
+      geometryType === "linestring" ||
+      geometryType === "esrigeometrypolyline"
+    ) {
       return {
-        parsedJson: value,
-        error: null
+        type: "simple-line",
+        style: "solid",
+        color,
+        width: widthGeomLine,
       };
+    }
+
+    return {
+      type: "simple-fill",
+      style: "solid",
+      color: polygonFillColor,
+      outline: {
+        type: "simple-line",
+        color: outlineColor,
+        width: widthGeomPolygon,
+        style: "solid",
+      },
+    };
+  }
+
+  static normalizePlainSymbol(symbolJson: any): any {
+    if (!symbolJson) return symbolJson;
+
+    const parsed = JsonUtil.getJsonFor(symbolJson);
+    if (parsed.error) {
+      console.warn("[ArcGeoJSON][json-util] Could not parse symbol json", parsed.error);
+      return symbolJson;
+    }
+
+    const symbol = { ...(parsed.parsedJson as any) };
+
+    const rawType = String(symbol.type || "").toLowerCase();
+
+    const typeMap: Record<string, string> = {
+      esrisms: "simple-marker",
+      simplemarkersymbol: "simple-marker",
+      "simple-marker-symbol": "simple-marker",
+      "simple-marker": "simple-marker",
+
+      esrisls: "simple-line",
+      simplelinesymbol: "simple-line",
+      "simple-line-symbol": "simple-line",
+      "simple-line": "simple-line",
+
+      esrisfs: "simple-fill",
+      simplefillsymbol: "simple-fill",
+      "simple-fill-symbol": "simple-fill",
+      "simple-fill": "simple-fill",
+
+      textsymbol: "text",
+      "text-symbol": "text",
+      text: "text",
+    };
+
+    if (typeMap[rawType]) {
+      symbol.type = typeMap[rawType];
+    }
+
+    if (Array.isArray(symbol.color)) {
+      symbol.color = JsonUtil.resolveColor(symbol.color);
+    }
+
+    if (symbol.outline) {
+      symbol.outline = JsonUtil.normalizePlainSymbol(symbol.outline);
+    }
+
+    return symbol;
+  }
+
+  static createSymbolFromJson(symbolJson: any, geometryType?: string): any {
+    const normalized = JsonUtil.normalizePlainSymbol(
+      symbolJson || JsonUtil.getSymbolJson(geometryType || "polygon"),
+    );
+
+    if (!normalized?.type) {
+      return JsonUtil.createSymbolFromJson(JsonUtil.getSymbolJson(geometryType || "polygon"));
+    }
+
+    switch (normalized.type) {
+      case "simple-marker":
+        return new SimpleMarkerSymbol(normalized);
+
+      case "simple-line":
+        return new SimpleLineSymbol(normalized);
+
+      case "simple-fill":
+        return new SimpleFillSymbol(normalized);
+
+      case "text":
+        return new TextSymbol(normalized);
+
+      default:
+        console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", normalized);
+        return JsonUtil.createSymbolFromJson(JsonUtil.getSymbolJson(geometryType || "polygon"));
+    }
+  }
+
+  static updateRenderer(
+    newRenderer: any,
+    featureLayer: FeatureLayer,
+    rendererTypeToModule?: any,
+    symbolJson?: any,
+  ): void {
+    if (!featureLayer) return;
+
+    const rendererParseResult = JsonUtil.getJsonFor(newRenderer);
+
+    if (rendererParseResult.error) {
+      console.warn(
+        "[ArcGeoJSON][json-util] Could not parse renderer value. Staying on previous renderer.",
+        rendererParseResult.error,
+      );
+      return;
+    }
+
+    const parsedRendererConfig = rendererParseResult.parsedJson;
+
+    if (!parsedRendererConfig) {
+      return;
     }
 
     try {
-      return {
-        parsedJson: JSON.parse(value),
-        error: null
-      };
+      const rendererType = String(parsedRendererConfig.type || "").toLowerCase();
+
+      if (rendererType === "simple") {
+        const symbol =
+          parsedRendererConfig.symbol
+            ? JsonUtil.createSymbolFromJson(parsedRendererConfig.symbol, featureLayer.geometryType)
+            : JsonUtil.createSymbolFromJson(symbolJson, featureLayer.geometryType);
+
+        featureLayer.renderer = new SimpleRenderer({
+          ...parsedRendererConfig,
+          symbol,
+        }) as Renderer;
+
+        featureLayer.redraw?.();
+        return;
+      }
+
+      if (rendererTypeToModule?.[parsedRendererConfig.type]) {
+        const RendererModule = rendererTypeToModule[parsedRendererConfig.type];
+        featureLayer.renderer = new RendererModule(parsedRendererConfig);
+        featureLayer.redraw?.();
+        return;
+      }
+
+      console.warn("[ArcGeoJSON][json-util] Unsupported renderer type", parsedRendererConfig.type);
     } catch (error) {
-      console.warn('[JsonUtils.getJsonFor] JSON parse failed', {
-        value,
-        error
+      console.error("[ArcGeoJSON][json-util] updateRenderer failed", error);
+    }
+  }
+
+  static getLabelJson(
+    userLabel: string | object | object[] | undefined,
+    userColor: string | number[] | undefined,
+    userSize: number | undefined,
+  ): any[] {
+    const labelJson = JsonUtil.getJsonFor(userLabel as any);
+
+    if (!labelJson.error && labelJson.parsedJson) {
+      const parsed = labelJson.parsedJson;
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+
+    const labelColor = JsonUtil.resolveLabelColor(userColor);
+    const labelSize = JsonUtil.resolveLabelSize(userSize);
+
+    return [
+      {
+        labelExpressionInfo: {
+          expression: "$feature.LABEL",
+        },
+        symbol: {
+          type: "text",
+          color: labelColor,
+          haloColor: "black",
+          haloSize: 1,
+          xoffset: 3,
+          yoffset: 3,
+          font: {
+            size: labelSize,
+            family: "sans-serif",
+            weight: "bold",
+          },
+        },
+      },
+    ];
+  }
+
+  static updateLabelJson(
+    newLabelJsonArg: string | object | object[],
+    featureLayer: FeatureLayer,
+  ): void {
+    if (!featureLayer) return;
+
+    const jsonParseResult = JsonUtil.getJsonFor(newLabelJsonArg as any);
+
+    if (jsonParseResult.error) {
+      console.warn(
+        "[ArcGeoJSON][json-util] Could not parse new label json. Staying on previous value.",
+        jsonParseResult.error,
+      );
+      return;
+    }
+
+    const parsed = jsonParseResult.parsedJson;
+    const labelClasses = Array.isArray(parsed) ? parsed : [parsed];
+
+    featureLayer.labelingInfo = labelClasses.map((labelClassJson: any) => {
+      return new LabelClass(labelClassJson);
+    });
+
+    featureLayer.labelsVisible = true;
+  }
+
+  static buildPopupTemplateFromCurrent(input: {
+    graphic: Graphic;
+    infoTemplate?: any;
+    uniqueIdPropertyName?: string;
+    fallbackTitle?: string;
+  }): any {
+    const { graphic, infoTemplate, uniqueIdPropertyName = "id", fallbackTitle = "Details" } = input;
+
+    const parsed = JsonUtil.getJsonFor(infoTemplate);
+
+    if (!parsed.error && parsed.parsedJson) {
+      const template = parsed.parsedJson;
+
+      return {
+        title:
+          template.title ||
+          template.listItem ||
+          template.listitem ||
+          fallbackTitle,
+        content:
+          template.content ||
+          template.details ||
+          JsonUtil.buildAttributesHtml(graphic.attributes),
+      };
+    }
+
+    return {
+      title:
+        graphic.attributes?.name ||
+        graphic.attributes?.LABEL ||
+        graphic.attributes?.label ||
+        graphic.attributes?.[uniqueIdPropertyName] ||
+        fallbackTitle,
+      content: JsonUtil.buildAttributesHtml(graphic.attributes),
+    };
+  }
+
+  static buildAttributesHtml(attributes: any): string {
+    if (!attributes) return "No Details Available";
+
+    const rows = Object.keys(attributes)
+      .filter((key) => attributes[key] !== undefined && attributes[key] !== null)
+      .map((key) => {
+        return `<div style="display:flex;gap:8px;margin-bottom:4px;">
+          <strong>${key}</strong>
+          <span>${String(attributes[key])}</span>
+        </div>`;
       });
 
-      return {
-        parsedJson: null,
-        error
-      };
-    }
+    return rows.length ? rows.join("") : "No Details Available";
   }
 
-  static clonePlain<T = any>(value: T): T {
-    if (value === undefined || value === null) {
-      return value;
-    }
-
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
-    }
+  static getRandomColor(): number[] {
+    const r = Math.floor(Math.random() * 256);
+    const g = Math.floor(Math.random() * 256);
+    const b = Math.floor(Math.random() * 256);
+    return [r, g, b, 255];
   }
 
-  static normalizeRendererType(type: any): string {
-    const rendererType = String(type ?? 'simple')
-      .trim()
-      .toLowerCase();
+  static resolveColor(value: any, fallback: number[] = [0, 120, 255, 255]): number[] {
+    if (Array.isArray(value)) {
+      const color = [...value];
 
-    const map: Record<string, string> = {
-      simple: 'simple',
-      simplerenderer: 'simple',
-
-      uniquevalue: 'unique-value',
-      'unique-value': 'unique-value',
-      uniquevaluerenderer: 'unique-value',
-
-      classbreaks: 'class-breaks',
-      'class-breaks': 'class-breaks',
-      classbreaksrenderer: 'class-breaks'
-    };
-
-    return map[rendererType] ?? rendererType;
-  }
-
-  static normalizeSymbolType(type: any): string {
-    const symbolType = String(type ?? '')
-      .trim()
-      .toLowerCase();
-
-    const map: Record<string, string> = {
-      esrisms: 'simple-marker',
-      simplemarkersymbol: 'simple-marker',
-      'simple-marker': 'simple-marker',
-
-      esrisls: 'simple-line',
-      simplelinesymbol: 'simple-line',
-      'simple-line': 'simple-line',
-
-      esrisfs: 'simple-fill',
-      simplefillsymbol: 'simple-fill',
-      'simple-fill': 'simple-fill',
-
-      esripms: 'picture-marker',
-      picturemarkersymbol: 'picture-marker',
-      'picture-marker': 'picture-marker'
-    };
-
-    return map[symbolType] ?? symbolType;
-  }
-
-  static normalizeMarkerStyle(style: any): string {
-    const markerStyle = String(style ?? 'circle')
-      .trim()
-      .toLowerCase();
-
-    const map: Record<string, string> = {
-      esrismscircle: 'circle',
-      circle: 'circle',
-
-      esrismssquare: 'square',
-      square: 'square',
-
-      esrismscross: 'cross',
-      cross: 'cross',
-
-      esrismsx: 'x',
-      x: 'x',
-
-      esrismsdiamond: 'diamond',
-      diamond: 'diamond',
-
-      esrismstriangle: 'triangle',
-      triangle: 'triangle'
-    };
-
-    return map[markerStyle] ?? 'circle';
-  }
-
-  static normalizeLineStyle(style: any): string {
-    const lineStyle = String(style ?? 'solid')
-      .trim()
-      .toLowerCase();
-
-    const map: Record<string, string> = {
-      esrislssolid: 'solid',
-      solid: 'solid',
-
-      esrislsdash: 'dash',
-      dash: 'dash',
-
-      esrislsdot: 'dot',
-      dot: 'dot',
-
-      esrislsdashdot: 'dash-dot',
-      'dash-dot': 'dash-dot',
-
-      esrislsdashdotdot: 'long-dash-dot-dot',
-      'long-dash-dot-dot': 'long-dash-dot-dot',
-
-      esrislsnone: 'none',
-      none: 'none'
-    };
-
-    return map[lineStyle] ?? 'solid';
-  }
-
-  static normalizeFillStyle(style: any): string {
-    const fillStyle = String(style ?? 'solid')
-      .trim()
-      .toLowerCase();
-
-    const map: Record<string, string> = {
-      esrisfssolid: 'solid',
-      solid: 'solid',
-
-      esrisfsnone: 'none',
-      none: 'none',
-
-      esrisfshorizontal: 'horizontal',
-      horizontal: 'horizontal',
-
-      esrisfsvertical: 'vertical',
-      vertical: 'vertical',
-
-      esrisfsforwarddiagonal: 'forward-diagonal',
-      'forward-diagonal': 'forward-diagonal',
-
-      esrisfsbackwarddiagonal: 'backward-diagonal',
-      'backward-diagonal': 'backward-diagonal',
-
-      esrisfscross: 'cross',
-      cross: 'cross',
-
-      esrisfsdiagonalcross: 'diagonal-cross',
-      'diagonal-cross': 'diagonal-cross'
-    };
-
-    return map[fillStyle] ?? 'solid';
-  }
-
-  static normalizeColor(color: any, fallback: number[] = [0, 120, 255, 255]): any {
-    if (!Array.isArray(color)) {
-      return fallback;
-    }
-
-    if (color.length === 3) {
-      return [color[0], color[1], color[2], 255];
-    }
-
-    if (color.length === 4) {
-      const alpha = color[3];
+      while (color.length < 4) {
+        color.push(255);
+      }
 
       return [
-        color[0],
-        color[1],
-        color[2],
-        alpha <= 1 ? Math.round(alpha * 255) : alpha
+        Number(color[0]) || fallback[0],
+        Number(color[1]) || fallback[1],
+        Number(color[2]) || fallback[2],
+        Number(color[3]) >= 0 ? Number(color[3]) : fallback[3],
       ];
     }
 
     return fallback;
   }
 
-  static normalizePlainSymbol(symbolJson: any): any {
-    if (!symbolJson) {
-      return null;
+  static resolveLabelColor(value: any): string | number[] {
+    if (!value) return "white";
+
+    if (Array.isArray(value)) {
+      return JsonUtil.resolveColor(value);
     }
 
-    const symbol = JsonUtils.clonePlain(symbolJson);
-    const type = JsonUtils.normalizeSymbolType(symbol.type);
+    const parsed = JsonUtil.getJsonFor(value);
 
-    if (type === 'picture-marker') {
-      return new PictureMarkerSymbol({
-        url: symbol.url || symbol.href,
-        width: symbol.width ?? symbol.size ?? 18,
-        height: symbol.height ?? symbol.size ?? 18,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-        angle: symbol.angle ?? 0
-      });
+    if (!parsed.error && Array.isArray(parsed.parsedJson)) {
+      return JsonUtil.resolveColor(parsed.parsedJson);
     }
 
-    if (type === 'simple-marker') {
-      return new SimpleMarkerSymbol({
-        style: JsonUtils.normalizeMarkerStyle(symbol.style),
-        size: symbol.size ?? 14,
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 255]),
-        outline: symbol.outline
-          ? JsonUtils.normalizePlainSymbol({
-              ...symbol.outline,
-              type: symbol.outline.type ?? 'esriSLS'
-            })
-          : new SimpleLineSymbol({
-              color: [255, 255, 255, 255],
-              width: 1,
-              style: 'solid'
-            })
-      });
-    }
-
-    if (type === 'simple-line') {
-      return new SimpleLineSymbol({
-        style: JsonUtils.normalizeLineStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 255]),
-        width: symbol.width ?? 2
-      });
-    }
-
-    if (type === 'simple-fill') {
-      return new SimpleFillSymbol({
-        style: JsonUtils.normalizeFillStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 80]),
-        outline: symbol.outline
-          ? JsonUtils.normalizePlainSymbol({
-              ...symbol.outline,
-              type: symbol.outline.type ?? 'esriSLS'
-            })
-          : new SimpleLineSymbol({
-              color: [0, 120, 255, 255],
-              width: 1,
-              style: 'solid'
-            })
-      });
-    }
-
-    return symbol;
+    return value;
   }
 
-  static normalizeRendererConfig(renderer: any): any {
-    const parsed = JsonUtils.getJsonFor(renderer);
-
-    if (parsed.error || !parsed.parsedJson) {
-      return null;
-    }
-
-    const config = JsonUtils.clonePlain(parsed.parsedJson);
-
-    config.type = JsonUtils.normalizeRendererType(config.type);
-
-    if (config.symbol) {
-      config.symbol = JsonUtils.normalizePlainSymbol(config.symbol);
-    }
-
-    if (config.defaultSymbol) {
-      config.defaultSymbol = JsonUtils.normalizePlainSymbol(config.defaultSymbol);
-    }
-
-    if (Array.isArray(config.uniqueValueInfos)) {
-      config.uniqueValueInfos = config.uniqueValueInfos.map((info: any) => ({
-        ...info,
-        value:
-          typeof info.value === 'string'
-            ? info.value.trim()
-            : info.value,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-    }
-
-    if (Array.isArray(config.classBreakInfos)) {
-      config.classBreakInfos = config.classBreakInfos.map((info: any) => ({
-        ...info,
-        symbol: info.symbol
-          ? JsonUtils.normalizePlainSymbol(info.symbol)
-          : info.symbol
-      }));
-    }
-
-    return config;
-  }
-
-  static updateRenderer(
-    newRenderer: any,
-    layer: any,
-    _rendererTypeToModule?: any,
-    fallbackSymbolJson?: any
-  ): void {
-    if (!layer) {
-      console.warn('[JsonUtils.updateRenderer] skipped: layer missing');
-      return;
-    }
-
-    const config = JsonUtils.normalizeRendererConfig(newRenderer);
-    const fallbackSymbol = JsonUtils.normalizePlainSymbol(fallbackSymbolJson);
-
-    if (!config) {
-      layer.renderer = new SimpleRenderer({
-        symbol: fallbackSymbol
-      });
-
-      return;
-    }
-
-    if (config.type === 'unique-value') {
-      layer.renderer = new UniqueValueRenderer(config);
-      return;
-    }
-
-    if (config.type === 'class-breaks') {
-      layer.renderer = new ClassBreaksRenderer(config);
-      return;
-    }
-
-    layer.renderer = new SimpleRenderer(config);
+  static resolveLabelSize(value: any): number {
+    const size = Number(value);
+    return Number.isFinite(size) && size > 0 ? size : JsonUtil.DEFAULT_LABEL_SIZE;
   }
 }
