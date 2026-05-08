@@ -1,86 +1,41 @@
-private async createEditor(): Promise<void> {
-  if (!this.view) {
-    console.warn("[arc-geojson-layer] createEditor skipped: view missing");
-    return;
+private resolveUpdateTool(
+  graphic: Graphic,
+): "move" | "reshape" | "transform" {
+
+  /**
+   * IMPORTANT:
+   * ArcGIS converts circles into polygons internally.
+   * So we MUST detect original circle metadata.
+   */
+  const isCircle = this.isCircleGraphic(graphic);
+
+  if (isCircle) {
+    /**
+     * Circles should use transform.
+     * Reshape breaks circle geometry.
+     */
+    return "transform";
   }
 
-  if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] createEditor skipped: featureLayer missing");
-    return;
+  /**
+   * Polygon / polyline vertex editing
+   */
+  if (
+    this.enableUserEditAddVertices ||
+    this.enableUserEditDeleteVertices
+  ) {
+    return "reshape";
   }
 
-  const layerExistsInMap = this.view.map?.layers?.includes(this.featureLayer as any);
-
-  if (!layerExistsInMap) {
-    this.view.map?.add(this.featureLayer);
+  /**
+   * Scale / rotate
+   */
+  if (
+    this.enableUserEditScaling ||
+    this.enableUserEditRotating
+  ) {
+    return "transform";
   }
 
-  if (this.graphicsEditor) {
-    try {
-      this.graphicsEditor.cancel();
-    } catch {
-      // ignore cancel issue
-    }
-
-    try {
-      this.graphicsEditor.destroy();
-    } catch {
-      // ignore destroy issue
-    }
-  }
-
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    updateOnGraphicClick: false,
-    defaultCreateOptions: {
-      mode: "click",
-    },
-    defaultUpdateOptions: {
-      tool: "reshape",
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false,
-    },
-  });
-
-  const createHandle = this.graphicsEditor.on("create", (event: any) => {
-    if (event.state !== "complete") {
-      return;
-    }
-
-    const graphic = event.graphic as Graphic;
-
-    if (!graphic) {
-      return;
-    }
-
-    this.handleCreateComplete(graphic);
-  });
-
-  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
-    if (event.state !== "complete") {
-      return;
-    }
-
-    const graphic = event.graphics?.[0] as Graphic;
-
-    if (!graphic) {
-      return;
-    }
-
-    this.updateGeoJsonWithChanges(graphic);
-    this.finishActiveEditor();
-  });
-
-  this.editorHandles.push(createHandle, updateHandle);
-
-  console.log("[arc-geojson-layer] createEditor DONE", {
-    layer: this.graphicsEditor.layer,
-    layerId: this.featureLayer.id,
-    layerExistsInMap: this.view.map?.layers?.includes(this.featureLayer as any),
-    graphicsCount: this.featureLayer.graphics.length,
-  });
+  return "move";
 }
