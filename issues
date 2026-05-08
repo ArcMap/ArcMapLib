@@ -1,0 +1,40 @@
+private applyGraphicDefaults(graphic: Graphic): void {
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const graphicId =
+    graphic.attributes[this.uniqueIdPropertyName] ??
+    graphic.attributes.OBJECTID ??
+    Date.now() + Math.floor(Math.random() * 100000);
+
+  if (
+    graphic.attributes[this.uniqueIdPropertyName] ===
+    undefined
+  ) {
+    graphic.attributes[this.uniqueIdPropertyName] =
+      graphicId;
+  }
+
+  if (graphic.attributes.OBJECTID === undefined) {
+    graphic.attributes.OBJECTID = graphicId;
+  }
+
+  if (!graphic.symbol) {
+    graphic.symbol =
+      this.getSymbolFromRendererConfig(
+        this.renderer,
+        graphic
+      ) ??
+      this.getDefaultSymbolForGeometry(
+        graphic.geometry
+      );
+  }
+
+  graphic.popupTemplate =
+    this.enableUserEdit ||
+    this.inDrawingMode ||
+    this.editorOpen
+      ? null
+      : this.buildPopupTemplateFromCurrent(graphic);
+}
