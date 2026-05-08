@@ -1,202 +1,100 @@
-private enableInfoPopupWindow(enable: boolean): void {
-  if (!this.view) {
-    return;
-  }
-
-  try {
-    this.view.popupEnabled = enable;
-  } catch {}
-
-  try {
-    this.view.popup?.close();
-  } catch {}
-
-  if (!this.featureLayer) {
-    return;
-  }
-
-  this.featureLayer.graphics.forEach((graphic: Graphic) => {
-    if (!graphic) {
-      return;
-    }
-
-    graphic.popupTemplate = enable
-      ? this.buildPopupTemplateFromCurrent(graphic)
-      : null as any;
-  });
-}
-
-
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.enableUserEdit || !graphic?.geometry) {
-    return;
-  }
-
-  await this.createEditor();
-
-  if (!this.graphicsEditor) {
-    return;
-  }
-
-  this._suppressPopupUntil = Date.now() + 1500;
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  this.applyGraphicDefaults(graphic);
-
-  graphic.popupTemplate = null as any;
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  try {
-    await this.graphicsEditor.update(graphic, {
-      tool: this.resolveUpdateTool(graphic),
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false,
-    } as any);
-
-    console.log("[arc-geojson-layer] editor opened", {
-      geometryType: graphic.geometry?.type,
-      attributes: graphic.attributes,
-      tool: this.resolveUpdateTool(graphic),
-    });
-  } catch (error) {
-    this._editorOpen = false;
-    console.error("[arc-geojson-layer] activateGraphicsEditor failed", error);
-  }
-}
-
-
-private showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point
+private emitLayerEvent(
+  eventName: string,
+  feature?: Feature | null,
+  graphic?: Graphic | null,
+  extraData?: any
 ): void {
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    try {
-      this.view?.popup?.close();
-    } catch {}
+
+  /**
+   * Prevent invalid event emission
+   */
+  if (!feature && !graphic) {
+    console.warn(
+      "[arc-geojson-layer] emitLayerEvent skipped",
+      eventName
+    );
     return;
   }
 
-  if (!graphic?.geometry || !this.view?.popup) {
-    return;
-  }
+  const objectId =
+    feature?.properties?.OBJECTID ??
+    graphic?.attributes?.OBJECTID ??
+    graphic?.attributes?.objectid ??
+    null;
 
-  const location =
-    mapPoint ??
-    this.getPopupPoint(graphic.geometry) ??
-    undefined;
+  const payload = {
+    type: eventName,
 
-  if (!location) {
-    return;
-  }
+    objectId,
 
-  const popupTemplate =
-    graphic.popupTemplate ??
-    this.buildPopupTemplateFromCurrent(graphic);
+    feature: feature ?? null,
 
-  if (!popupTemplate) {
-    return;
-  }
+    graphic: graphic ?? null,
 
-  graphic.popupTemplate = popupTemplate;
+    attributes:
+      feature?.properties ??
+      graphic?.attributes ??
+      {},
 
-  try {
-    this.view.popupEnabled = true;
+    geometry:
+      feature?.geometry ??
+      graphic?.geometry ??
+      null,
 
-    this.view.popup.open({
-      location,
-      features: [graphic],
-    });
-  } catch (error) {
-    console.warn("[arc-geojson-layer] popup open failed", error);
-  }
+    geojson: this.geojson,
+
+    layerId: this.layerId,
+
+    ...extraData
+  };
+
+  this.dispatchEvent(
+    new CustomEvent(eventName, {
+      detail: payload,
+      bubbles: true,
+      composed: true
+    })
+  );
 }
 
 
-async startDrawing(drawGeometryType: string): Promise<void> {
-  const normalizedType = String(drawGeometryType || "").toLowerCase();
+private buildPopupTemplateFromCurrent(
+  graphic: Graphic
+): PopupTemplate | null {
 
-  if (!this.view) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
-    return;
+  if (!graphic) {
+    return null;
   }
 
-  if (!this.featureLayer) {
-    await this.createLayer(this.geojson);
-  }
+  const attributes =
+    graphic.attributes ?? {};
 
-  if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
-    return;
-  }
+  const fieldInfos = Object.keys(attributes)
+    .filter((key) => {
+      const value = attributes[key];
 
-  await this.createEditor();
+      return (
+        value !== undefined &&
+        value !== null &&
+        typeof value !== "object"
+      );
+    })
+    .map((key) => ({
+      fieldName: key,
+      label: key,
+      visible: true
+    }));
 
-  if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
-    return;
-  }
+  return new PopupTemplate({
+    title:
+      this.name ??
+      "Details",
 
-  this._currentDrawGeometryType = normalizedType;
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
-  this._editorOpen = false;
-  this._suppressPopupUntil = Date.now() + 1500;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view.popup?.close();
-  } catch {}
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  console.log("[arc-geojson-layer] startDrawing", {
-    requested: drawGeometryType,
-    normalized: normalizedType,
+    content: [
+      {
+        type: "fields",
+        fieldInfos
+      }
+    ]
   });
-
-  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
-}
-
-
-private normalizeLineStyle(style: any): any {
-  const value = String(style ?? "solid").toLowerCase();
-
-  const allowed = new Set([
-    "dash",
-    "dash-dot",
-    "dot",
-    "long-dash",
-    "long-dash-dot",
-    "long-dash-dot-dot",
-    "none",
-    "short-dash",
-    "short-dash-dot",
-    "short-dash-dot-dot",
-    "short-dot",
-    "solid",
-  ]);
-
-  return allowed.has(value) ? value : "solid";
 }
