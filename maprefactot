@@ -1,46 +1,38 @@
-private getDefaultSymbolForGeometry(
-  geometry: Geometry | string | null | undefined,
-  attributes?: any
-): any {
-  if (!geometry) return null;
-
-  const geometryType =
-    typeof geometry === 'string'
-      ? geometry.toLowerCase()
-      : String((geometry as any)?.type ?? '').toLowerCase();
-
-  if (geometryType === 'point' || geometryType === 'multipoint') {
-    return new SimpleMarkerSymbol({
-      style: 'circle',
-      size: 18,
-      color: [0, 120, 255, 255],
-      outline: new SimpleLineSymbol({
-        color: [255, 255, 255, 255],
-        width: 2,
-        style: 'solid'
-      })
-    });
+private updateRenderer(newRenderer: any = this.renderer): void {
+  if (!this.featureLayer) {
+    console.warn('[up-geojson-layer] featureLayer missing');
+    return;
   }
 
-  if (geometryType === 'polyline') {
-    return new SimpleLineSymbol({
-      style: 'solid',
-      color: [0, 120, 255, 255],
-      width: 3
-    });
+  const graphicsLayer = this.featureLayer as any;
+
+  const graphics = graphicsLayer?.graphics?.toArray?.() ?? [];
+
+  if (!graphics.length) {
+    console.warn(
+      '[up-geojson-layer] updateRenderer skipped - no graphics yet'
+    );
+    return;
   }
 
-  if (geometryType === 'polygon' || geometryType === 'extent') {
-    return new SimpleFillSymbol({
-      style: 'solid',
-      color: [0, 120, 255, 80],
-      outline: new SimpleLineSymbol({
-        color: [0, 120, 255, 255],
-        width: 2,
-        style: 'solid'
-      })
-    });
-  }
+  console.log(
+    '[up-geojson-layer] applying renderer to graphics',
+    graphics.length
+  );
 
-  return null;
+  graphics.forEach((graphic: any) => {
+    const matchedSymbol = this.getSymbolFromRendererConfig(
+      newRenderer,
+      graphic
+    );
+
+    graphic.symbol =
+      matchedSymbol ??
+      this.getDefaultSymbolForGeometry(
+        graphic.geometry,
+        graphic.attributes
+      );
+  });
+
+  graphicsLayer.refresh?.();
 }
