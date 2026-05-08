@@ -1,32 +1,12 @@
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer) return null;
-
-  try {
-    const hit: any = await this.view.hitTest(evt, {
-      include: [this.featureLayer]
-    });
-
-    const results: any[] = Array.isArray(hit?.results) ? hit.results : [];
-
-    for (const r of results) {
-      const g = r?.graphic as Graphic | undefined;
-      const layerId = (g?.layer as any)?.id;
-
-      if (
-        g &&
-        g.geometry &&
-        (
-          g.layer === this.featureLayer ||
-          layerId === this.featureLayer.id
-        )
-      ) {
-        return g;
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.warn("[up-geojson-layer] hitTest failed", error);
-    return null;
-  }
+if (!featureLayer) {
+  return;
 }
+
+featureLayer.renderer = new SimpleRenderer({
+  ...parsedRendererConfig,
+  symbol,
+}) as Renderer;
+
+featureLayer.refresh?.();
+
+return;
