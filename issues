@@ -1,58 +1,27 @@
-private setupMapCursorHover(): void {
-  if (!this.view) return;
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) return null;
 
-  this.cursorMoveHandle?.remove();
+  try {
+    const hit: any = await this.view.hitTest(evt, {
+      include: [this.featureLayer]
+    });
 
-  this.cursorMoveHandle = this.view.on(
-    "pointer-move",
-    async (evt: any) => {
-      if (!this.view || !this.featureLayer) {
-        this.setMapCursor("default");
-        return;
-      }
+    const result = (hit?.results ?? []).find((r: any) => {
+      const g = r?.graphic as Graphic | undefined;
 
-      try {
-        const hit: any = await this.view.hitTest(evt, {
-          include: [this.featureLayer]
-        });
+      return (
+        g &&
+        g.geometry &&
+        (
+          g.layer === this.featureLayer ||
+          (g.layer as any)?.id === this.featureLayer.id
+        )
+      );
+    });
 
-        const result = (hit?.results ?? []).find((r: any) => {
-          const g = r?.graphic;
-
-          return (
-            g &&
-            g.geometry &&
-            (
-              g.layer === this.featureLayer ||
-              g.layer?.id === this.featureLayer?.id
-            )
-          );
-        });
-
-        const graphic = result?.graphic as Graphic | undefined;
-
-        if (!graphic) {
-          this.hoveredGraphicUid = undefined;
-
-          this.setMapCursor("default", evt);
-
-          return;
-        }
-
-        this.hoveredGraphicUid =
-          graphic.attributes?.[this.uniqueIdPropertyName] ??
-          graphic.attributes?.OBJECTID;
-
-        this.setMapCursor("pointer", evt);
-      } catch (error) {
-        console.warn(
-          "[arc-geojson-layer] pointer hover failed",
-          error
-        );
-
-        this.setMapCursor("default", evt);
-      }
-    }
-  );
+    return (result?.graphic as Graphic) ?? null;
+  } catch (error) {
+    console.warn("[up-geojson-layer] hitTest failed", error);
+    return null;
+  }
 }
-
