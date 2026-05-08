@@ -1,39 +1,57 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  if (!this.graphicsEditor) {
-    await this.createEditor();
+private addToGeoJSON(newGraphic: Graphic): void {
+  if (this.isStartingDraw) return;
+
+  if (!newGraphic.attributes) {
+    newGraphic.attributes = {};
   }
 
-  if (!this.graphicsEditor) {
-    console.error("[arc-geojson-layer] graphicsEditor missing");
-    return;
+  const now = Date.now();
+
+  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    newGraphic.attributes[this.uniqueIdPropertyName] = now;
   }
 
-  this.inDrawingMode = true;
-  this.isStartingDraw = true;
-  this.editorOpen = false;
-
-  this._currentDrawGeometryType = drawGeometryType;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  const normalized = this.normalizeSketchTool(drawGeometryType);
-
-  console.log("[arc-geojson-layer] startDrawing", {
-    requested: drawGeometryType,
-    normalized
-  });
-
-  try {
-    this.graphicsEditor.create(normalized as any);
-  } catch (error) {
-    console.error("[arc-geojson-layer] startDrawing failed", error);
-
-    this.inDrawingMode = false;
-    this.isStartingDraw = false;
-    this._currentDrawGeometryType = undefined;
+  if (newGraphic.attributes.OBJECTID === undefined) {
+    newGraphic.attributes.OBJECTID = now;
   }
+
+  if (newGraphic.attributes.drawGeometryType === undefined) {
+    newGraphic.attributes.drawGeometryType =
+      newGraphic.attributes.shapeType ??
+      newGraphic.attributes.geometryType ??
+      newGraphic.geometry?.type;
+  }
+
+  if (
+    String(newGraphic.attributes.drawGeometryType).toUpperCase() === DrawGeometryTypes.CIRCLE
+  ) {
+    newGraphic.attributes.shapeType = DrawGeometryTypes.CIRCLE;
+    newGraphic.attributes.geometryType = DrawGeometryTypes.CIRCLE;
+  }
+
+  this.applyGraphicDefaults(newGraphic);
+
+  if (this.enableUserEdit) {
+    newGraphic.popupTemplate = null as any;
+  }
+
+  if (!this.featureLayer.graphics.includes(newGraphic)) {
+    this.featureLayer.add(newGraphic);
+  }
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature = this.graphicToGeoJsonFeature
+    ? this.graphicToGeoJsonFeature(newGraphic)
+    : {
+        type: "Feature",
+        geometry: this.arcGeometryToGeoJsonGeometry(newGraphic.geometry),
+        properties: { ...(newGraphic.attributes ?? {}) }
+      };
+
+  this.emitLayerEvent("userDrawnItemAdded", feature);
 }
