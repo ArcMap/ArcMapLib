@@ -2,7 +2,12 @@ private bindViewEvents(): void {
   let clickTimer: any = null;
 
   const clickHandle = this.view.on("click", async (evt: any) => {
-    if (this.enableUserEdit || this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
+    if (
+      this.enableUserEdit ||
+      this._editorOpen ||
+      this.inDrawingMode ||
+      this._isStartingDraw
+    ) {
       evt.stopPropagation?.();
       return;
     }
@@ -36,7 +41,13 @@ private bindViewEvents(): void {
 
       this.emitLayerEvent("layerClick", {
         graphic,
-        event: this.buildMouseEvent(graphic, evt.mapPoint),
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: graphic.attributes ?? {},
+        },
       });
     }, 280);
   });
@@ -53,6 +64,10 @@ private bindViewEvents(): void {
     this._suppressPopupUntil = Date.now() + 1000;
     this.enableInfoPopupWindow(false);
 
+    try {
+      this.view.popup?.close();
+    } catch {}
+
     await this.handleEditorDoubleClick(evt.mapPoint, "arcgis-double-click");
   });
 
@@ -67,6 +82,10 @@ private bindViewEvents(): void {
 
     this._suppressPopupUntil = Date.now() + 1000;
     this.enableInfoPopupWindow(false);
+
+    try {
+      this.view.popup?.close();
+    } catch {}
 
     const rect = this.view.container.getBoundingClientRect();
 
@@ -117,94 +136,4 @@ private bindViewEvents(): void {
       },
     }
   );
-}
-
-
-private async handleEditorDoubleClick(
-  mapPoint: Point,
-  source: string
-): Promise<void> {
-  if (!this.enableUserEdit) {
-    return;
-  }
-
-  this._suppressPopupUntil = Date.now() + 1000;
-  this.enableInfoPopupWindow(false);
-
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  let graphic: Graphic | null = null;
-
-  graphic = this.findNearestEditableGraphic(mapPoint);
-
-  if (!graphic) {
-    console.warn("[arc-geojson-layer] double-click target not found", {
-      source,
-      mapPoint,
-      featureCount: this.featureLayer?.graphics?.length ?? 0,
-    });
-    return;
-  }
-
-  console.log("[arc-geojson-layer] double-click target", {
-    source,
-    found: !!graphic,
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
-  });
-
-  await this.activateGraphicsEditor(graphic);
-}
-
-
-private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
-  if (
-    this.enableUserEdit ||
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this.shouldSuppressPopup()
-  ) {
-    return;
-  }
-
-  if (!graphic?.geometry || !this.view?.popup) {
-    return;
-  }
-
-  const location =
-    mapPoint ??
-    ArcGeoJSONLayer.getPopupPoint(graphic.geometry);
-
-  const popupTemplate =
-    graphic.popupTemplate ??
-    this.buildPopupTemplateFromCurrent(graphic);
-
-  if (!popupTemplate) {
-    return;
-  }
-
-  graphic.popupTemplate = popupTemplate;
-
-  try {
-    this.view.popupEnabled = true;
-
-    this.view.openPopup({
-      location,
-      features: [graphic],
-    });
-  } catch (error) {
-    console.warn("[arc-geojson-layer] popup open failed", error);
-  }
-}
-
-
-private static safeReplaceAll(
-  value: unknown,
-  searchValue: string,
-  replaceValue: string
-): string {
-  return String(value ?? "").split(searchValue).join(replaceValue);
 }
