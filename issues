@@ -1,60 +1,74 @@
-static updateRenderer(
-  newRenderer: string | object | undefined,
-  featureLayer: __esri.FeatureLayer | undefined,
-  rendererTypeToModule: Record<string, any>,
-  symbolJson?: any
-): void {
-  if (!featureLayer) {
-    return;
+private resolveUpdateTool(
+  graphic: Graphic,
+): 'move' | 'reshape' | 'transform' {
+
+  const drawGeometryType =
+    graphic.attributes?.drawGeometryType ??
+    graphic.attributes?.shapeType ??
+    graphic.attributes?.geometryType;
+
+  const geometryType =
+    String(drawGeometryType || '').toUpperCase();
+
+  const isCircle =
+    geometryType === DrawGeometryTypes.CIRCLE ||
+    geometryType === 'CIRCLE';
+
+  /**
+   * IMPORTANT:
+   * ArcGIS converts circles into polygons internally.
+   * If reshape is enabled, the polygon vertices distort the circle.
+   * So circles MUST use transform only.
+   */
+  if (isCircle) {
+    return 'transform';
   }
 
-  const rendererParseResult = JsonUtils.getJsonFor<any>(newRenderer);
-
-  if (rendererParseResult.error || !rendererParseResult.parsedJson) {
-    console.warn(
-      '[ArcGeoJSON][json-util] Could not parse renderer value. Staying on previous renderer.',
-      rendererParseResult.error
-    );
-    return;
+  /**
+   * Polygon editing with vertices
+   */
+  if (
+    graphic.geometry?.type === 'polygon' &&
+    (
+      this.enableUserEditVertices ||
+      this.enableUserEditAddVertices ||
+      this.enableUserEditDeleteVertices
+    )
+  ) {
+    return 'reshape';
   }
 
-  const parsedRendererConfig = rendererParseResult.parsedJson;
-
-  if (!parsedRendererConfig) {
-    return;
+  /**
+   * Scale / rotate
+   */
+  if (
+    this.enableUserEditScaling ||
+    this.enableUserEditRotating
+  ) {
+    return 'transform';
   }
 
-  try {
-    const rendererType = String(parsedRendererConfig.type || '').toLowerCase();
-
-    if (rendererType === 'simple') {
-      const symbol =
-        parsedRendererConfig.symbol
-          ? JsonUtils.createSymbolFromJson(parsedRendererConfig.symbol, featureLayer.geometryType)
-          : JsonUtils.createSymbolFromJson(symbolJson, featureLayer.geometryType);
-
-      featureLayer.renderer = new SimpleRenderer({
-        ...parsedRendererConfig,
-        symbol,
-      }) as __esri.Renderer;
-
-      featureLayer.refresh?.();
-      return;
-    }
-
-    if (rendererTypeToModule?.[parsedRendererConfig.type]) {
-      const RendererModule = rendererTypeToModule[parsedRendererConfig.type];
-
-      featureLayer.renderer = new RendererModule(parsedRendererConfig) as __esri.Renderer;
-      featureLayer.refresh?.();
-      return;
-    }
-
-    console.warn(
-      '[ArcGeoJSON][json-util] Unsupported renderer type.',
-      parsedRendererConfig.type
-    );
-  } catch (error) {
-    console.error('[ArcGeoJSON][json-util] updateRenderer failed.', error);
-  }
+  return 'move';
 }
+
+
+
+const tool = this.resolveUpdateTool(graphic);
+
+this.graphicsEditor.update([graphic], {
+  tool,
+
+  enableRotation:
+    tool === 'transform' &&
+    this.enableUserEditRotating,
+
+  enableScaling:
+    tool === 'transform' &&
+    this.enableUserEditScaling,
+
+  multipleSelectionEnabled: false,
+
+  preserveAspectRatio: true,
+
+  toggleToolOnClick: false,
+});
