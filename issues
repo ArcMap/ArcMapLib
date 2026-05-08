@@ -1,137 +1,45 @@
-private emitLayerEvent(name: string, detail: any): void {
-  this.dispatchEvent(
-    new CustomEvent(name, {
-      detail,
-      bubbles: true,
-      composed: true,
-    })
-  );
-}
-
-private addToGeoJSON(newGraphic: Graphic): void {
-  if (this._isStartingDraw) {
-    return;
+private resetEditorStateOnly(): void {
+  try {
+    this.sketchLayer?.graphics?.removeAll();
+  } catch (error) {
+    console.warn(
+      "[arc-geojson-layer] resetEditorStateOnly removeAll failed",
+      error
+    );
   }
 
-  if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] addToGeoJSON skipped: featureLayer missing");
-    return;
+  try {
+    if (this.graphicsEditor) {
+      this.graphicsEditor.cancel();
+    }
+  } catch (error) {
+    console.warn(
+      "[arc-geojson-layer] resetEditorStateOnly cancel failed",
+      error
+    );
   }
 
-  if (!newGraphic.geometry) {
-    console.warn("[arc-geojson-layer] addToGeoJSON skipped: geometry missing", newGraphic);
-    return;
+  try {
+    if (this.graphicsEditor) {
+      this.graphicsEditor.destroy();
+    }
+  } catch (error) {
+    console.warn(
+      "[arc-geojson-layer] resetEditorStateOnly destroy failed",
+      error
+    );
   }
 
-  if (!newGraphic.attributes) {
-    newGraphic.attributes = {};
-  }
+  this.graphicsEditor = undefined;
+  this.editorOpen = false;
 
-  const now = Date.now();
+  try {
+    this.editorHandles.forEach((handle: any) => {
+      try {
+        handle?.remove?.();
+      } catch (_) {}
+    });
+  } catch (_) {}
 
-  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    newGraphic.attributes[this.uniqueIdPropertyName] = now;
-  }
-
-  if (newGraphic.attributes.OBJECTID === undefined) {
-    newGraphic.attributes.OBJECTID = now;
-  }
-
-  if (newGraphic.attributes.drawGeometryType === undefined) {
-    newGraphic.attributes.drawGeometryType =
-      newGraphic.attributes.shapeType ??
-      newGraphic.attributes.geometryType ??
-      newGraphic.geometry.type;
-  }
-
-  if (
-    String(newGraphic.attributes.drawGeometryType).toUpperCase() ===
-    DrawGeometryTypes.CIRCLE
-  ) {
-    newGraphic.attributes.shapeType = DrawGeometryTypes.CIRCLE;
-    newGraphic.attributes.geometryType = DrawGeometryTypes.CIRCLE;
-  }
-
-  this.applyGraphicDefaults(newGraphic);
-
-  if (this.enableUserEdit) {
-    newGraphic.popupTemplate = null as any;
-  }
-
-  if (!this.featureLayer.graphics.includes(newGraphic)) {
-    this.featureLayer.add(newGraphic);
-  }
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  const feature = this.graphicToGeoJsonFeature(newGraphic);
-
-  this.emitLayerEvent("userDrawnItemAdded", feature);
-}
-
-private removeFromGeoJSON(graphicToRemove: Graphic): void {
-  if (!this.featureLayer || !graphicToRemove) {
-    return;
-  }
-
-  const feature = this.graphicToGeoJsonFeature(graphicToRemove);
-
-  this.featureLayer.remove(graphicToRemove);
-
-  if (this.sketchLayer?.graphics?.includes(graphicToRemove)) {
-    this.sketchLayer.remove(graphicToRemove);
-  }
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-  this.resetEditorStateOnly();
-
-  this.emitLayerEvent("userEditItemRemoved", feature);
-}
-
-
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
-    return;
-  }
-
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  this.emitLayerEvent("userEditItemUpdated", feature);
-}
-
-private graphicToGeoJsonFeature(graphic: Graphic): Feature {
-  return {
-    type: "Feature",
-    geometry: this.arcGeometryToGeoJsonGeometry(graphic.geometry),
-    properties: {
-      ...(graphic.attributes ?? {}),
-    },
-  };
-}
-
-
-private toFeatureCollectionFromLayer(): FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: this.featureLayer.graphics
-      .toArray()
-      .map((graphic: Graphic) => this.graphicToGeoJsonFeature(graphic))
-      .filter((feature: Feature | null): feature is Feature => feature !== null),
-  };
+  this.editorHandles = [];
 }
