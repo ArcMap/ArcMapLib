@@ -1,95 +1,3 @@
-private async createLayer(geojson: string | FeatureCollection): Promise<void> {
-  console.log('[up-geojson-layer] createLayer START', {
-    name: this.name,
-    renderer: this.renderer
-  });
-
-  const gId = `${this.id || 'up-geojson-layer'}-graphics`;
-  const lId = `${this.id || 'up-geojson-layer'}-labels`;
-  const sId = `${this.id || 'up-geojson-layer'}-sketch`;
-
-  if (this.view?.map) {
-    [gId, lId, sId].forEach((id) => {
-      const existingLayer = this.view.map.findLayerById(id);
-
-      if (existingLayer) {
-        (existingLayer as GraphicsLayer).graphics?.removeAll();
-        this.view.map.remove(existingLayer);
-      }
-    });
-  }
-
-  this.featureLayer = new GraphicsLayer({
-    id: gId,
-    title: this.name || this.id || 'UP GeoJSON Layer'
-  });
-
-  this.labelLayer = new GraphicsLayer({
-    id: lId,
-    listMode: 'hide'
-  });
-
-  this.sketchLayer = new GraphicsLayer({
-    id: sId,
-    listMode: 'hide'
-  });
-
-  this.view.map.add(this.featureLayer);
-  this.view.map.add(this.labelLayer);
-  this.view.map.add(this.sketchLayer);
-
-  const fsInfo = this.getUpGISJson(
-    geojson ?? {
-      type: 'FeatureCollection',
-      features: []
-    }
-  );
-
-  fsInfo?.graphics?.forEach((g: Graphic) => {
-    const matchedSymbol = this.getSymbolFromRendererConfig(this.renderer, g);
-
-    const fallbackSymbol = this.getDefaultSymbolForGeometry(
-      g.geometry,
-      g.attributes
-    );
-
-    this.applyGraphicDefaults(g);
-
-    g.symbol = matchedSymbol ?? fallbackSymbol;
-
-    console.log('[up-geojson-layer] createLayer graphic before add', {
-      geometryType: g.geometry?.type,
-      attributes: g.attributes,
-      matchedSymbol,
-      fallbackSymbol,
-      finalSymbol: g.symbol
-    });
-
-    this.featureLayer.add(g);
-  });
-
-  console.log('[up-geojson-layer] createLayer graphics added', {
-    graphicsCount: this.featureLayer.graphics.length,
-    layerVisible: this.featureLayer.visible
-  });
-
-  this.refreshLabels();
-  this.updateInfoTemplate(this.infoTemplate);
-  this.updateLayerClass(this.layerClass);
-
-  await this.createEditor();
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-
-  console.log('[up-geojson-layer] createLayer DONE', {
-    name: this.name,
-    graphicsCount: this.featureLayer.graphics.length
-  });
-}
-
-
 async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
   if (
     this.inDrawingMode ||
@@ -100,7 +8,7 @@ async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
     return;
   }
 
-  const parsed = ArcGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
+  const parsed = UpGeojsonLayer.parseJson<FeatureCollection>(newGeojson);
   const incomingCount = parsed.parsedJson?.features?.length ?? 0;
 
   console.log('[up-geojson-layer] updateGeojson START', {
@@ -119,16 +27,13 @@ async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
     return;
   }
 
-  if (incomingCount === 0) {
-    try {
-      this.graphicsEditor?.cancel();
-    } catch {}
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
 
-    this.sketchLayer?.graphics?.removeAll();
-  }
-
-  this.featureLayer.removeAll();
-  this.labelLayer?.removeAll();
+  this.featureLayer.graphics.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
 
   const fsInfo = this.getUpGISJson(newGeojson);
 
@@ -144,7 +49,8 @@ async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
 
     g.symbol = matchedSymbol ?? fallbackSymbol;
 
-    console.log('[up-geojson-layer] updateGeojson graphic before add', {
+    console.log('[up-geojson-layer] updateGeojson graphic BEFORE add', {
+      layerName: this.name,
       geometryType: g.geometry?.type,
       attributes: g.attributes,
       matchedSymbol,
@@ -153,18 +59,30 @@ async updateGeojson(newGeojson: string | FeatureCollection): Promise<void> {
     });
 
     this.featureLayer.add(g);
+
+    console.log('[up-geojson-layer] updateGeojson graphic AFTER add', {
+      layerName: this.name,
+      graphicsCount: this.featureLayer.graphics.length,
+      layerVisible: this.featureLayer.visible,
+      layerInMap: this.view?.map?.layers?.includes(this.featureLayer as any),
+      graphicGeometry: g.geometry,
+      graphicSymbol: g.symbol
+    });
   });
 
-  console.log('[up-geojson-layer] updateGeojson graphics added', {
-    graphicsCount: this.featureLayer.graphics.length,
-    layerVisible: this.featureLayer.visible
-  });
+  if (this.view?.map?.layers?.includes(this.featureLayer as any)) {
+    this.view.map.reorder(
+      this.featureLayer,
+      this.view.map.layers.length - 1
+    );
+  }
 
   this.refreshLabels();
   this.updateInfoTemplate(this.infoTemplate);
 
   console.log('[up-geojson-layer] updateGeojson DONE', {
     name: this.name,
-    graphicsCount: this.featureLayer.graphics.length
+    graphicsCount: this.featureLayer.graphics.length,
+    layerVisible: this.featureLayer.visible
   });
 }
