@@ -1,38 +1,38 @@
 private updateRenderer(newRenderer: any = this.renderer): void {
+  this.renderer = newRenderer;
+
   if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing', {
-      renderer: newRenderer
-    });
+    console.warn('[up-geojson-layer] updateRenderer skipped: featureLayer missing');
     return;
   }
 
-  const rendererTypeToModule = {
-    simple: 'simple',
-    uniqueValue: 'unique-value',
-    uniquevalue: 'unique-value',
-    'unique-value': 'unique-value',
-    classBreaks: 'class-breaks',
-    classbreaks: 'class-breaks',
-    'class-breaks': 'class-breaks'
-  };
+  const graphicsLayer = this.featureLayer as any;
 
-  const geometryType = (this.featureLayer as any).geometryType;
+  if (!graphicsLayer.graphics) {
+    console.warn('[up-geojson-layer] graphics missing on layer');
+    return;
+  }
 
-  console.log('[up-geojson-layer] calling JsonUtils.updateRenderer', {
-    renderer: newRenderer,
-    thisRenderer: this.renderer,
-    geometryType,
-    featureLayer: this.featureLayer
+  console.log('[up-geojson-layer] manually applying renderer to graphics');
+
+  graphicsLayer.graphics.forEach((graphic: any) => {
+    const geometryType = graphic.geometry?.type;
+
+    console.log('[up-geojson-layer] processing graphic', {
+      geometryType,
+      attributes: graphic.attributes
+    });
+
+    if (geometryType === 'point') {
+      graphic.symbol = this.getDefaultSymbolForGeometry('point');
+    } else if (geometryType === 'polygon') {
+      graphic.symbol = this.getDefaultSymbolForGeometry('polygon');
+    } else if (geometryType === 'polyline') {
+      graphic.symbol = this.getDefaultSymbolForGeometry('polyline');
+    }
+
+    console.log('[up-geojson-layer] symbol applied', graphic.symbol);
   });
 
-  JsonUtils.updateRenderer(
-    newRenderer,
-    this.featureLayer,
-    rendererTypeToModule,
-    this.getSymbolJson(geometryType)
-  );
-
-  console.log('[up-geojson-layer] renderer after JsonUtils.updateRenderer', {
-    renderer: this.featureLayer.renderer
-  });
+  graphicsLayer.refresh?.();
 }
