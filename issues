@@ -1,74 +1,81 @@
-private resolveUpdateTool(
-  graphic: Graphic,
-): 'move' | 'reshape' | 'transform' {
+private addToGeoJSON(newGraphic: Graphic): void {
+  if (!newGraphic) return;
 
-  const drawGeometryType =
-    graphic.attributes?.drawGeometryType ??
-    graphic.attributes?.shapeType ??
-    graphic.attributes?.geometryType;
-
-  const geometryType =
-    String(drawGeometryType || '').toUpperCase();
-
-  const isCircle =
-    geometryType === DrawGeometryTypes.CIRCLE ||
-    geometryType === 'CIRCLE';
-
-  /**
-   * IMPORTANT:
-   * ArcGIS converts circles into polygons internally.
-   * If reshape is enabled, the polygon vertices distort the circle.
-   * So circles MUST use transform only.
-   */
-  if (isCircle) {
-    return 'transform';
+  if (!newGraphic.attributes) {
+    newGraphic.attributes = {};
   }
 
-  /**
-   * Polygon editing with vertices
-   */
+  const now = Date.now();
+
+  // Fix: Graphic does not have uid in ArcGIS typing.
+  // Use attributes as stable id storage.
+  if (newGraphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    newGraphic.attributes[this.uniqueIdPropertyName] = now;
+  }
+
+  if (newGraphic.attributes.OBJECTID === undefined) {
+    newGraphic.attributes.OBJECTID = now;
+  }
+
+  // Important for circle editing:
+  // Circle drawn by Sketch becomes polygon geometry,
+  // so we must store original draw shape metadata.
+  if (!newGraphic.attributes.drawGeometryType) {
+    newGraphic.attributes.drawGeometryType =
+      newGraphic.attributes.shapeType ??
+      newGraphic.attributes.geometryType ??
+      newGraphic.geometry?.type;
+  }
+
   if (
-    graphic.geometry?.type === 'polygon' &&
-    (
-      this.enableUserEditVertices ||
-      this.enableUserEditAddVertices ||
-      this.enableUserEditDeleteVertices
-    )
+    String(newGraphic.attributes.drawGeometryType).toUpperCase() === DrawGeometryTypes.CIRCLE
   ) {
-    return 'reshape';
+    newGraphic.attributes.shapeType = DrawGeometryTypes.CIRCLE;
+    newGraphic.attributes.geometryType = DrawGeometryTypes.CIRCLE;
   }
 
-  /**
-   * Scale / rotate
-   */
-  if (
-    this.enableUserEditScaling ||
-    this.enableUserEditRotating
-  ) {
-    return 'transform';
+  this.applyGraphicDefaults(newGraphic);
+
+  if (this.enableUserEdit) {
+    newGraphic.popupTemplate = null as any;
   }
 
-  return 'move';
+  if (!this.featureLayer.graphics.includes(newGraphic)) {
+    this.featureLayer.add(newGraphic);
+  }
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  this.emitLayerEvent("userDrawnItemAdded", this.graphicToGeoJsonFeature(newGraphic));
 }
 
 
 
-const tool = this.resolveUpdateTool(graphic);
+if (event.state === "complete") {
+  const graphic = event.graphic as Graphic;
 
-this.graphicsEditor.update([graphic], {
-  tool,
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
 
-  enableRotation:
-    tool === 'transform' &&
-    this.enableUserEditRotating,
+  /**
+   * Preserve original draw type.
+   * ArcGIS converts circle/rectangle to polygon internally.
+   */
+  graphic.attributes.drawGeometryType =
+    this.currentDrawType;
 
-  enableScaling:
-    tool === 'transform' &&
-    this.enableUserEditScaling,
+  graphic.attributes.shapeType =
+    this.currentDrawType;
 
-  multipleSelectionEnabled: false,
+  graphic.attributes.geometryType =
+    this.currentDrawType;
 
-  preserveAspectRatio: true,
+  this.addToGeoJSON(graphic);
 
-  toggleToolOnClick: false,
-});
+  this.resetEditorStateOnly();
+}
