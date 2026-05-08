@@ -12,27 +12,30 @@ private setupMapCursorHover(): void {
       }
 
       try {
-        const hit = await this.view.hitTest(evt, {
+        const hit: any = await this.view.hitTest(evt, {
           include: [this.featureLayer]
         });
 
-        const result = hit.results.find((r: any) => {
-          const g = r.graphic;
+        const result = (hit?.results ?? []).find((r: any) => {
+          const g = r?.graphic;
+
           return (
             g &&
             g.geometry &&
             (
               g.layer === this.featureLayer ||
-              g.layer?.id === this.featureLayer.id
+              g.layer?.id === this.featureLayer?.id
             )
           );
-        }) as any;
+        });
 
         const graphic = result?.graphic as Graphic | undefined;
 
         if (!graphic) {
           this.hoveredGraphicUid = undefined;
+
           this.setMapCursor("default", evt);
+
           return;
         }
 
@@ -41,9 +44,15 @@ private setupMapCursorHover(): void {
           graphic.attributes?.OBJECTID;
 
         this.setMapCursor("pointer", evt);
-      } catch {
+      } catch (error) {
+        console.warn(
+          "[arc-geojson-layer] pointer hover failed",
+          error
+        );
+
         this.setMapCursor("default", evt);
       }
     }
   );
 }
+
