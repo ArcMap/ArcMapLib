@@ -1,24 +1,53 @@
-private getPopupPoint(geometry: any): Point | null {
-  if (!geometry) {
-    return null;
+private showGraphicPopup(
+  graphic: Graphic,
+  mapPoint?: Point
+): void {
+
+  if (
+    this.enableUserEdit ||
+    this.editorOpen ||
+    this.inDrawingMode ||
+    this.shouldSuppressPopup()
+  ) {
+    return;
   }
 
+  if (!graphic?.geometry || !this.view?.popup) {
+    return;
+  }
+
+  const location =
+    mapPoint ??
+    this.getPopupPoint(graphic.geometry) ??
+    undefined;
+
+  if (!location) {
+    return;
+  }
+
+  const popupTemplate =
+    graphic.popupTemplate ??
+    this.buildPopupTemplateFromCurrent(graphic);
+
+  if (!popupTemplate) {
+    return;
+  }
+
+  graphic.popupTemplate = popupTemplate;
+
   try {
-    if (geometry.type === "point") {
-      return geometry as Point;
-    }
 
-    if (geometry.extent?.center) {
-      return geometry.extent.center as Point;
-    }
+    this.view.popupEnabled = true;
 
-    if (geometry.centroid) {
-      return geometry.centroid as Point;
-    }
+    this.view.popup.open({
+      location,
+      features: [graphic]
+    });
 
-    return null;
   } catch (error) {
-    console.warn("[arc-geojson-layer] getPopupPoint failed", error);
-    return null;
+    console.warn(
+      "[arc-geojson-layer] popup open failed",
+      error
+    );
   }
 }
