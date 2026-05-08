@@ -115,3 +115,35 @@ await this.handleEditorDoubleClick(
   },
   "native-dblclick"
 );
+
+
+
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) {
+    return null;
+  }
+
+  try {
+    const hit = await this.view.hitTest(evt, {
+      include: [this.featureLayer],
+    });
+
+    const result = hit.results.find((r: any) => {
+      const graphic = r.graphic as Graphic | undefined;
+
+      return (
+        graphic &&
+        graphic.geometry &&
+        (
+          graphic.layer === this.featureLayer ||
+          (graphic.layer as any)?.id === this.featureLayer?.id
+        )
+      );
+    }) as any;
+
+    return result?.graphic ?? null;
+  } catch (error) {
+    console.warn("[arc-geojson-layer] hitTest failed", error);
+    return null;
+  }
+}
