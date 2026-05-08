@@ -1,87 +1,12 @@
-private geojsonFeatureToGraphic(
-  feature: Feature,
-  index: number
-): Graphic | null {
-  console.log('[geojsonFeatureToGraphic] incoming feature', feature);
-
-  const geometry = this.geojsonGeometryToArcGeometry(feature.geometry);
-
-  console.log(
-    '[geojsonFeatureToGraphic] converted geometry',
-    geometry
-  );
-
-  if (!geometry) {
-    console.warn(
-      '[geojsonFeatureToGraphic] geometry conversion failed',
-      feature
-    );
-
-    return null;
-  }
-
-  const props = { ...(feature.properties ?? {}) } as any;
-
-  console.log(
-    '[geojsonFeatureToGraphic] original properties',
-    props
-  );
-
-  if (props[this.uniqueIdPropertyName] === undefined) {
-    props[this.uniqueIdPropertyName] = index;
-  }
-
-  if (props.OBJECTID === undefined) {
-    props.OBJECTID = index;
-  }
-
-  Object.keys(props).forEach((key) => {
-    if (typeof props[key] === 'string') {
-      props[key] = props[key].trim();
-    }
-  });
-
-  console.log(
-    '[geojsonFeatureToGraphic] geometry type',
-    feature.geometry?.type
-  );
-
-  console.log(
-    '[geojsonFeatureToGraphic] point field',
-    props.point
-  );
-
-  console.log(
-    '[geojsonFeatureToGraphic] polygon field',
-    props.polygon
-  );
-
-  console.log(
-    '[geojsonFeatureToGraphic] combined renderer key',
-    `${props.point ?? ''}${props.polygon ?? ''}`
-  );
-
-  const graphic = new Graphic({
-    geometry,
-    attributes: props
-  });
-
-  console.log(
-    '[geojsonFeatureToGraphic] graphic created',
-    graphic
-  );
-
-  console.log(
-    '[geojsonFeatureToGraphic] graphic attributes',
-    graphic.attributes
-  );
-
-  this.applyGraphicDefaults(graphic);
-
-  console.log(
-    '[geojsonFeatureToGraphic] graphic after defaults',
-    graphic
-  );
-
-  return graphic;
-}
+console.log('[JsonUtils.updateRenderer] final renderer applied', {
+  layerGeometryType: (featureLayer as any).geometryType,
+  rendererType: renderer?.type,
+  field: renderer?.field,
+  field1: (renderer as any)?.field1,
+  field2: (renderer as any)?.field2,
+  fieldDelimiter: (renderer as any)?.fieldDelimiter,
+  uniqueValueInfos: (renderer as any)?.uniqueValueInfos?.map((info: any) => ({
+    value: info.value,
+    symbol: info.symbol
+  }))
+});
