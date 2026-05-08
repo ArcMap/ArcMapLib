@@ -1,53 +1,210 @@
-async startDrawing(drawGeometryType: string): Promise<void> {
-  const normalizedType = String(drawGeometryType || "").toLowerCase();
+private bindViewEvents(): void {
+  let clickTimer: any = null;
 
-  if (!this.view) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: view missing");
-    return;
-  }
+  const clickHandle = this.view.on("click", async (evt: any) => {
+    if (this.enableUserEdit || this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
+      evt.stopPropagation?.();
+      return;
+    }
 
-  if (!this.featureLayer) {
-    await this.createLayer(this.geojson);
-  }
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
 
-  if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: featureLayer missing");
-    return;
-  }
+    clickTimer = setTimeout(async () => {
+      clickTimer = null;
 
-  await this.createEditor();
+      const graphic = await this.getHitGraphic(evt);
 
-  if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] startDrawing skipped: graphicsEditor missing");
-    return;
-  }
+      if (!graphic) {
+        return;
+      }
 
-  this._currentDrawGeometryType = normalizedType;
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
-  this._editorOpen = false;
+      if (
+        this.enableUserEdit ||
+        this._editorOpen ||
+        this.inDrawingMode ||
+        this._isStartingDraw ||
+        this.shouldSuppressPopup()
+      ) {
+        return;
+      }
 
-  this.enableInfoPopupWindow(false);
+      this.showGraphicPopup(graphic, evt.mapPoint);
 
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  console.log("[arc-geojson-layer] startDrawing", {
-    requested: drawGeometryType,
-    normalized: normalizedType,
+      this.emitLayerEvent("layerClick", {
+        graphic,
+        event: this.buildMouseEvent(graphic, evt.mapPoint),
+      });
+    }, 280);
   });
 
-  this.graphicsEditor.create(this.normalizeSketchTool(normalizedType) as any);
+  const dblClickHandle = this.view.on("double-click", async (evt: any) => {
+    evt.stopPropagation?.();
+    evt.preventDefault?.();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1000;
+    this.enableInfoPopupWindow(false);
+
+    await this.handleEditorDoubleClick(evt.mapPoint, "arcgis-double-click");
+  });
+
+  const nativeDblClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1000;
+    this.enableInfoPopupWindow(false);
+
+    const rect = this.view.container.getBoundingClientRect();
+
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const mapPoint = this.view.toMap(screenPoint) as Point;
+
+    await this.handleEditorDoubleClick(mapPoint, "native-dblclick");
+  };
+
+  this.view.container?.addEventListener("dblclick", nativeDblClick, true);
+
+  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+    if (!this.view || !this.featureLayer || this._editorOpen || this.inDrawingMode) {
+      this.setMapCursor("default", evt);
+      return;
+    }
+
+    try {
+      const graphic = await this.getHitGraphic(evt);
+
+      if (!graphic) {
+        this.hoveredGraphicUid = undefined;
+        this.setMapCursor("default", evt);
+        return;
+      }
+
+      this.hoveredGraphicUid =
+        graphic.attributes?.[this.uniqueIdPropertyName] ??
+        graphic.attributes?.OBJECTID;
+
+      this.setMapCursor("pointer", evt);
+    } catch {
+      this.setMapCursor("default", evt);
+    }
+  });
+
+  this.eventHandles.push(
+    clickHandle,
+    dblClickHandle,
+    pointerMoveHandle,
+    {
+      remove: () => {
+        this.view.container?.removeEventListener("dblclick", nativeDblClick, true);
+      },
+    }
+  );
 }
 
 
+private async handleEditorDoubleClick(
+  mapPoint: Point,
+  source: string
+): Promise<void> {
+  if (!this.enableUserEdit) {
+    return;
+  }
 
-const drawType = String(
-  this._currentDrawGeometryType ||
-  graphic.attributes?.drawGeometryType ||
-  graphic.attributes?.shapeType ||
-  graphic.attributes?.geometryType ||
-  graphic.geometry?.type ||
-  ""
-).toLowerCase();
+  this._suppressPopupUntil = Date.now() + 1000;
+  this.enableInfoPopupWindow(false);
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
+  }
+
+  let graphic: Graphic | null = null;
+
+  graphic = this.findNearestEditableGraphic(mapPoint);
+
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] double-click target not found", {
+      source,
+      mapPoint,
+      featureCount: this.featureLayer?.graphics?.length ?? 0,
+    });
+    return;
+  }
+
+  console.log("[arc-geojson-layer] double-click target", {
+    source,
+    found: !!graphic,
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+  });
+
+  await this.activateGraphicsEditor(graphic);
+}
+
+
+private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
+  if (
+    this.enableUserEdit ||
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this.shouldSuppressPopup()
+  ) {
+    return;
+  }
+
+  if (!graphic?.geometry || !this.view?.popup) {
+    return;
+  }
+
+  const location =
+    mapPoint ??
+    ArcGeoJSONLayer.getPopupPoint(graphic.geometry);
+
+  const popupTemplate =
+    graphic.popupTemplate ??
+    this.buildPopupTemplateFromCurrent(graphic);
+
+  if (!popupTemplate) {
+    return;
+  }
+
+  graphic.popupTemplate = popupTemplate;
+
+  try {
+    this.view.popupEnabled = true;
+
+    this.view.openPopup({
+      location,
+      features: [graphic],
+    });
+  } catch (error) {
+    console.warn("[arc-geojson-layer] popup open failed", error);
+  }
+}
+
+
+private static safeReplaceAll(
+  value: unknown,
+  searchValue: string,
+  replaceValue: string
+): string {
+  return String(value ?? "").split(searchValue).join(replaceValue);
+}
