@@ -1,40 +1,49 @@
-private applyGraphicDefaults(graphic: Graphic): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
+private setupMapCursorHover(): void {
+  if (!this.view) return;
 
-  const graphicId =
-    graphic.attributes[this.uniqueIdPropertyName] ??
-    graphic.attributes.OBJECTID ??
-    Date.now() + Math.floor(Math.random() * 100000);
+  this.cursorMoveHandle?.remove();
 
-  if (
-    graphic.attributes[this.uniqueIdPropertyName] ===
-    undefined
-  ) {
-    graphic.attributes[this.uniqueIdPropertyName] =
-      graphicId;
-  }
+  this.cursorMoveHandle = this.view.on(
+    "pointer-move",
+    async (evt: any) => {
+      if (!this.view || !this.featureLayer) {
+        this.setMapCursor("default");
+        return;
+      }
 
-  if (graphic.attributes.OBJECTID === undefined) {
-    graphic.attributes.OBJECTID = graphicId;
-  }
+      try {
+        const hit = await this.view.hitTest(evt, {
+          include: [this.featureLayer]
+        });
 
-  if (!graphic.symbol) {
-    graphic.symbol =
-      this.getSymbolFromRendererConfig(
-        this.renderer,
-        graphic
-      ) ??
-      this.getDefaultSymbolForGeometry(
-        graphic.geometry
-      );
-  }
+        const result = hit.results.find((r: any) => {
+          const g = r.graphic;
+          return (
+            g &&
+            g.geometry &&
+            (
+              g.layer === this.featureLayer ||
+              g.layer?.id === this.featureLayer.id
+            )
+          );
+        }) as any;
 
-  graphic.popupTemplate =
-    this.enableUserEdit ||
-    this.inDrawingMode ||
-    this.editorOpen
-      ? null
-      : this.buildPopupTemplateFromCurrent(graphic);
+        const graphic = result?.graphic as Graphic | undefined;
+
+        if (!graphic) {
+          this.hoveredGraphicUid = undefined;
+          this.setMapCursor("default", evt);
+          return;
+        }
+
+        this.hoveredGraphicUid =
+          graphic.attributes?.[this.uniqueIdPropertyName] ??
+          graphic.attributes?.OBJECTID;
+
+        this.setMapCursor("pointer", evt);
+      } catch {
+        this.setMapCursor("default", evt);
+      }
+    }
+  );
 }
