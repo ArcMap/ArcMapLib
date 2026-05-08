@@ -1,35 +1,31 @@
+private isCircleGraphic(graphic: Graphic): boolean {
+  const value =
+    graphic.attributes?.drawGeometryType ??
+    graphic.attributes?.shapeType ??
+    graphic.attributes?.geometryType ??
+    graphic.attributes?.shape;
+
+  return String(value ?? "").toLowerCase() === "circle";
+}
+
 private resolveUpdateTool(
   graphic: Graphic,
 ): "move" | "reshape" | "transform" {
-
-  /**
-   * IMPORTANT:
-   * ArcGIS converts circles into polygons internally.
-   * So we MUST detect original circle metadata.
-   */
-  const isCircle = this.isCircleGraphic(graphic);
-
-  if (isCircle) {
-    /**
-     * Circles should use transform.
-     * Reshape breaks circle geometry.
-     */
+  if (this.isCircleGraphic(graphic)) {
     return "transform";
   }
 
-  /**
-   * Polygon / polyline vertex editing
-   */
   if (
-    this.enableUserEditAddVertices ||
-    this.enableUserEditDeleteVertices
+    graphic.geometry?.type === "polygon" &&
+    (
+      this.enableUserEditVertices ||
+      this.enableUserEditAddVertices ||
+      this.enableUserEditDeleteVertices
+    )
   ) {
     return "reshape";
   }
 
-  /**
-   * Scale / rotate
-   */
   if (
     this.enableUserEditScaling ||
     this.enableUserEditRotating
@@ -38,4 +34,213 @@ private resolveUpdateTool(
   }
 
   return "move";
+}
+
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this.isStartingDraw = false;
+  this.editorOpen = false;
+  this.suppressPopupUntil = Date.now() + 700;
+
+  if (!graphic) {
+    return;
+  }
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const drawGeometryType =
+    graphic.attributes.drawGeometryType ??
+    graphic.attributes.shapeType ??
+    graphic.attributes.geometryType;
+
+  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+    this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+
+  this.updateGeoJsonWithChanges();
+
+  this.enableInfoPopupWindow(this.enableUserEdit);
+
+  console.log("[arc-geojson-layer] create complete", {
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+  });
+}
+
+
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) {
+    return;
+  }
+
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
+
+  if (!this.graphicsEditor) {
+    return;
+  }
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  graphic.popupTemplate = null as any;
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const isCircle = this.isCircleGraphic(graphic);
+
+  if (isCircle) {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+  }
+
+  const tool = this.resolveUpdateTool(graphic);
+
+  try {
+    await this.graphicsEditor.update([graphic], {
+      tool,
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: isCircle || this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    } as any);
+
+    this.editorOpen = true;
+
+    console.log("[arc-geojson-layer] editor opened", {
+      geometryType: graphic.geometry.type,
+      isCircle,
+      tool,
+      attributes: graphic.attributes,
+    });
+  } catch (error) {
+    this.editorOpen = false;
+    console.error("[arc-geojson-layer] editor activation failed", error);
+  }
+}
+
+
+private async createEditor(): Promise<void> {
+  if (!this.view) {
+    console.warn("[arc-geojson-layer] createEditor skipped: view missing");
+    return;
+  }
+
+  if (!this.featureLayer) {
+    console.warn("[arc-geojson-layer] createEditor skipped: featureLayer missing");
+    return;
+  }
+
+  const layerExistsInMap = this.view.map?.layers?.includes(this.featureLayer as any);
+
+  if (!layerExistsInMap) {
+    this.view.map?.add(this.featureLayer);
+  }
+
+  if (this.graphicsEditor) {
+    try {
+      this.graphicsEditor.cancel();
+    } catch {}
+
+    try {
+      this.graphicsEditor.destroy();
+    } catch {}
+
+    this.graphicsEditor = undefined as any;
+  }
+
+  this.graphicsEditor = new SketchViewModel({
+    view: this.view,
+    layer: this.featureLayer,
+    updateOnGraphicClick: false,
+    defaultCreateOptions: {
+      mode: "click",
+    },
+    defaultUpdateOptions: {
+      tool: "reshape",
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    },
+  });
+
+  this.graphicsEditor.on("create", (event: any) => {
+    if (event.state !== "complete") {
+      return;
+    }
+
+    const graphic = event.graphic as Graphic;
+
+    if (!graphic) {
+      return;
+    }
+
+    if (!graphic.attributes) {
+      graphic.attributes = {};
+    }
+
+    /**
+     * Circle is internally handled by ArcGIS as polygon.
+     * So we must preserve original draw type metadata.
+     */
+    if (this.currentDrawGeometryType === DrawGeometryTypes.CIRCLE) {
+      graphic.attributes.drawGeometryType = DrawGeometryTypes.CIRCLE;
+      graphic.attributes.shapeType = DrawGeometryTypes.CIRCLE;
+      graphic.attributes.geometryType = DrawGeometryTypes.CIRCLE;
+      graphic.attributes.shape = DrawGeometryTypes.CIRCLE;
+    }
+
+    this.handleCreateComplete(graphic);
+  });
+
+  this.graphicsEditor.on("update", (event: any) => {
+    if (event.state !== "complete") {
+      return;
+    }
+
+    const graphics = event.graphics as Graphic[];
+
+    if (!graphics || graphics.length === 0) {
+      return;
+    }
+
+    graphics.forEach((graphic: Graphic) => {
+      if (!graphic) {
+        return;
+      }
+
+      this.updateGeoJsonWithChanges(graphic);
+    });
+
+    this.finishActiveEditor();
+  });
+
+  console.log("[arc-geojson-layer] createEditor DONE", {
+    layer: this.graphicsEditor.layer,
+    layerId: this.featureLayer.id,
+    layerExistsInMap: this.view.map?.layers?.includes(this.featureLayer as any),
+    graphicCount: this.featureLayer.graphics.length,
+  });
 }
