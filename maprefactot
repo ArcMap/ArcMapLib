@@ -1,60 +1,36 @@
-private updateRenderer(newRenderer: any = this.renderer): void {
-  if (!this.featureLayer) {
-    console.warn('[up-geojson-layer] updateRenderer skipped - featureLayer missing');
-    return;
-  }
+fsInfo?.graphics?.forEach((g: Graphic) => {
+  const matchedSymbol = this.getSymbolFromRendererConfig(this.renderer, g);
 
-  const graphicsLayer = this.featureLayer as any;
+  const fallbackSymbol = this.getDefaultSymbolForGeometry(
+    g.geometry,
+    g.attributes
+  );
 
-  const graphics = graphicsLayer.graphics?.toArray?.() || [];
-
-  if (!graphics.length) {
-    console.warn('[up-geojson-layer] updateRenderer skipped - no graphics yet');
-
-    requestAnimationFrame(() => {
-      this.updateRenderer(newRenderer);
-    });
-
-    return;
-  }
-
-  console.log('[up-geojson-layer] applying renderer to graphics', graphics.length);
-
-  graphics.forEach((graphic: any) => {
-    const geometryType = graphic.geometry?.type;
-
-    let symbol: any = null;
-
-    if (geometryType === 'point') {
-      symbol = this.getDefaultSymbolForGeometry(
-        graphic.geometry,
-        graphic.attributes
-      );
-    } else if (geometryType === 'polygon') {
-      symbol = this.getDefaultSymbolForGeometry(
-        graphic.geometry,
-        graphic.attributes
-      );
-    } else if (geometryType === 'polyline') {
-      symbol = this.getDefaultSymbolForGeometry(
-        graphic.geometry,
-        graphic.attributes
-      );
-    }
-
-    console.log('[up-geojson-layer] final graphic symbol applied', {
-      geometryType,
-      attributes: graphic.attributes,
-      matchedSymbol: symbol,
-      finalSymbol: symbol
-    });
-
-    if (symbol) {
-      graphic.symbol = symbol;
-    }
+  console.log('[up-geojson-layer] BEFORE defaults/add', {
+    geometryType: (g.geometry as any)?.type,
+    attributes: g.attributes,
+    matchedSymbol,
+    fallbackSymbol,
+    symbolBefore: g.symbol
   });
 
-  graphicsLayer.refresh?.();
+  this.applyGraphicDefaults(g);
 
-  this.requestUpdate();
-}
+  console.log('[up-geojson-layer] AFTER defaults BEFORE symbol set', {
+    symbolAfterDefaults: g.symbol
+  });
+
+  g.symbol = matchedSymbol ?? fallbackSymbol;
+
+  console.log('[up-geojson-layer] FINAL symbol BEFORE add', {
+    finalSymbol: g.symbol
+  });
+
+  this.featureLayer.add(g);
+
+  console.log('[up-geojson-layer] AFTER add', {
+    graphicsCount: (this.featureLayer as any).graphics?.length,
+    layerVisible: (this.featureLayer as any).visible,
+    layerListMode: (this.featureLayer as any).listMode
+  });
+});
