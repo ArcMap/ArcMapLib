@@ -1,30 +1,34 @@
-private graphicToGeoJsonFeature(graphic: Graphic): Feature | null {
-  if (!graphic || !graphic.geometry) {
-    return null;
+private async finishActiveEditor(): Promise<void> {
+  if (!this._editorOpen) {
+    return;
   }
 
-  const geometry = this.arcGeometryToGeoJson(graphic.geometry);
-
-  if (!geometry) {
-    return null;
-  }
-
-  return {
-    type: "Feature",
-    geometry,
-    properties: {
-      ...(graphic.attributes ?? {})
-    }
-  };
-}
-
-private toFeatureCollectionFromLayer(): FeatureCollection {
   const graphics = this.featureLayer?.graphics?.toArray?.() ?? [];
 
-  return {
-    type: "FeatureCollection",
-    features: graphics
-      .map((graphic: Graphic) => this.graphicToGeoJsonFeature(graphic))
-      .filter((feature: Feature | null): feature is Feature => feature !== null)
-  };
+  graphics.forEach((graphic: Graphic) => {
+    if (!graphic.geometry) {
+      return;
+    }
+
+    // Save edited geometry back into geojson
+    this.updateGeoJSONWithChanges(graphic);
+
+    // Restore symbol after edit is completed
+    graphic.symbol =
+      this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+  });
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {
+    // ignore ArcGIS cancel error
+  }
+
+  this._editorOpen = false;
+
+  // Re-enable popup after editor closes
+  this.enableInfoPopupWindow(this.enableUserEdit);
+
+  console.log("[arc-geojson-layer] editor closed");
 }
