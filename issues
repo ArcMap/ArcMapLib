@@ -1,51 +1,97 @@
-private async createEditor(): Promise<void> {
-  if (!this.view) {
-    console.warn("[arc-geojson-layer] createEditor skipped: view missing");
+async updateGeojson(
+  newGeojson: string | FeatureCollection | null | undefined
+): Promise<void> {
+  if (this._isClearingGeoJSONLayer) {
+    return;
+  }
+
+  if (this.inDrawingMode || this._isStartingDraw || this.removingItem) {
+    console.log("[arc-geojson-layer] updateGeojson skipped during active draw/edit");
+    return;
+  }
+
+  const isBlank =
+    newGeojson === undefined ||
+    newGeojson === null ||
+    newGeojson === "" ||
+    (
+      typeof newGeojson === "object" &&
+      Array.isArray((newGeojson as FeatureCollection).features) &&
+      (newGeojson as FeatureCollection).features.length === 0
+    );
+
+  if (isBlank) {
+    this.clearGeoJSONLayer(false);
     return;
   }
 
   if (!this.featureLayer) {
-    console.warn("[arc-geojson-layer] createEditor skipped: featureLayer missing");
+    await this.createLayer(newGeojson as any);
     return;
   }
 
-  if (!this.view.map.layers.includes(this.featureLayer as any)) {
-    this.view.map.add(this.featureLayer);
-  }
+  this.featureLayer.graphics.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
 
-  if (this.graphicsEditor) {
-    try {
-      this.graphicsEditor.cancel();
-    } catch {}
+  const fsInfo = this.getUPGISJson(newGeojson as any);
 
-    try {
-      this.graphicsEditor.destroy();
-    } catch {}
+  fsInfo?.graphics?.forEach((graphic: Graphic) => {
+    this.applyGraphicDefaults(graphic);
 
-    this.graphicsEditor = undefined as any;
-  }
+    graphic.symbol =
+      this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
 
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-    updateOnGraphicClick: false,
-    defaultCreateOptions: {
-      mode: "click",
-    },
-    defaultUpdateOptions: {
-      tool: "reshape",
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false,
-    },
+    this.featureLayer?.add(graphic);
   });
 
-  this.bindEditorEvents();
+  this.refreshLabels();
+  this.updateInfoTemplate(this.infoTemplate);
 
-  console.log("[arc-geojson-layer] createEditor DONE", {
-    layerId: this.featureLayer.id,
+  console.log("[arc-geojson-layer] updateGeojson DONE", {
     graphicsCount: this.featureLayer.graphics.length,
   });
+}
+
+
+public clearGeoJSONLayer(updateGeojsonProperty = true): void {
+  if (this._isClearingGeoJSONLayer) {
+    return;
+  }
+
+  this._isClearingGeoJSONLayer = true;
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._currentDrawGeometryType = undefined;
+
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  if (updateGeojsonProperty) {
+    this.blockGeoJsonUpdate = true;
+    this.geojson = {
+      type: "FeatureCollection",
+      features: [],
+    };
+    this.blockGeoJsonUpdate = false;
+  }
+
+  this.enableInfoPopupWindow(true);
+  this.setMapCursor("default");
+
+  this._isClearingGeoJSONLayer = false;
+
+  console.log("[arc-geojson-layer] clearGeoJSONLayer completed");
 }
