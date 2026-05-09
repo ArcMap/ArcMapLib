@@ -1,56 +1,294 @@
-async updateGeojson(
-  newGeojson: string | FeatureCollection | null | undefined
-): Promise<void> {
-  if (this._isClearingGeoJSONLayer) {
+private bindViewEvents(): void {
+  if (!this.view) {
     return;
   }
 
-  if (this.inDrawingMode || this._isStartingDraw || this.removingItem) {
-    console.log("[arc-geojson-layer] updateGeojson skipped during active draw/edit");
-    return;
-  }
+  this.eventHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
+  this.eventHandles = [];
 
-  const isBlank =
-    newGeojson === undefined ||
-    newGeojson === null ||
-    newGeojson === "" ||
-    (
-      typeof newGeojson === "object" &&
-      Array.isArray((newGeojson as FeatureCollection).features) &&
-      (newGeojson as FeatureCollection).features.length === 0
-    );
+  let clickTimer: any = null;
 
-  if (isBlank) {
-    this.clearGeoJSONLayer(false);
-    return;
-  }
+  const clickHandle = this.view.on("click", async (evt: any) => {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
 
-  if (!this.featureLayer) {
-    await this.createLayer(newGeojson as any);
-    return;
-  }
+    clickTimer = setTimeout(async () => {
+      clickTimer = null;
 
-  this.featureLayer.graphics.removeAll();
-  this.labelLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.removeAll();
+      if (
+        this._editorOpen ||
+        this.inDrawingMode ||
+        this._isStartingDraw ||
+        this.shouldSuppressPopup()
+      ) {
+        try {
+          this.view?.popup?.close();
+        } catch {}
+        return;
+      }
 
-  const fsInfo = this.getUPGISJson(newGeojson as any);
+      const graphic = await this.getHitGraphic(evt);
 
-  fsInfo?.graphics?.forEach((graphic: Graphic) => {
-    this.applyGraphicDefaults(graphic);
+      if (!graphic) {
+        return;
+      }
 
-    graphic.symbol =
-      this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+      this.showGraphicPopup(graphic, evt.mapPoint);
 
-    this.featureLayer?.add(graphic);
+      this.emitLayerEvent(
+        "layerClick",
+        this.graphicToGeoJsonFeature(graphic),
+        graphic,
+        {
+          event: {
+            coordinates: {
+              latitude: evt.mapPoint?.latitude ?? 0,
+              longitude: evt.mapPoint?.longitude ?? 0,
+            },
+            attributes: graphic.attributes ?? {},
+          },
+        }
+      );
+    }, 280);
   });
 
-  this.refreshLabels();
-  this.updateInfoTemplate(this.infoTemplate);
+  const dblClickHandle = this.view.on("double-click", async (evt: any) => {
+    evt.stopPropagation?.();
+    evt.preventDefault?.();
 
-  console.log("[arc-geojson-layer] updateGeojson DONE", {
-    graphicsCount: this.featureLayer.graphics.length,
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+
+    try {
+      this.view?.popup?.close();
+    } catch {}
+
+    await this.handleEditorDoubleClick(evt, "arcgis-double-click");
+  });
+
+  const nativeDblClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+
+    try {
+      this.view?.popup?.close();
+    } catch {}
+
+    const rect = this.view!.container.getBoundingClientRect();
+
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const mapPoint = this.view!.toMap(screenPoint) as Point;
+
+    await this.handleEditorDoubleClick(
+      {
+        x: screenPoint.x,
+        y: screenPoint.y,
+        mapPoint,
+      },
+      "native-dblclick"
+    );
+  };
+
+  this.view.container?.addEventListener("dblclick", nativeDblClick, true);
+
+  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+    if (!this.view || !this.featureLayer || this._editorOpen || this.inDrawingMode) {
+      this.setMapCursor("default", evt);
+      return;
+    }
+
+    const graphic = await this.getHitGraphic(evt);
+
+    if (!graphic) {
+      this.hoveredGraphicUid = undefined;
+      this.setMapCursor("default", evt);
+      return;
+    }
+
+    this.hoveredGraphicUid =
+      graphic.attributes?.[this.uniqueIdPropertyName] ??
+      graphic.attributes?.OBJECTID;
+
+    this.setMapCursor("pointer", evt);
+  });
+
+  this.eventHandles.push(
+    { remove: () => clickHandle?.remove?.() },
+    { remove: () => dblClickHandle?.remove?.() },
+    { remove: () => pointerMoveHandle?.remove?.() },
+    {
+      remove: () => {
+        this.view?.container?.removeEventListener("dblclick", nativeDblClick, true);
+      },
+    }
+  );
+}
+
+
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  if (!this.enableUserEdit) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false");
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 1500;
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
+  }
+
+  let graphic: Graphic | null = await this.getHitGraphic(evtOrMapPoint);
+
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
+  }
+
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] double-click editor target not found", {
+      source,
+      graphicsCount: this.featureLayer?.graphics?.length ?? 0,
+    });
+    return;
+  }
+
+  console.log("[arc-geojson-layer] double-click editor target", {
+    source,
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+  });
+
+  await this.activateGraphicsEditor(graphic);
+}
+
+
+
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) {
+    return;
+  }
+
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] activateGraphicsEditor skipped: graphicsEditor missing");
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 1500;
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  graphic.popupTemplate = null as any;
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const isCircle = this.isCircleGraphic(graphic);
+
+  if (isCircle) {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+    graphic.attributes.isCircle = true;
+  }
+
+  const tool = this.resolveUpdateTool(graphic);
+
+  try {
+    await this.graphicsEditor.update([graphic], {
+      tool,
+      enableRotation: tool === "transform" && this.enableUserEditRotating,
+      enableScaling: tool === "transform" && this.enableUserEditScaling,
+      preserveAspectRatio: isCircle || this.enableUserEditUniformScaling,
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    } as any);
+
+    console.log("[arc-geojson-layer] editor opened", {
+      geometryType: graphic.geometry?.type,
+      isCircle,
+      tool,
+      attributes: graphic.attributes,
+    });
+  } catch (error) {
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+    console.error("[arc-geojson-layer] activateGraphicsEditor failed", error);
+  }
+}
+
+
+
+private enableInfoPopupWindow(enable: boolean): void {
+  if (!this.view) {
+    return;
+  }
+
+  try {
+    this.view.popupEnabled = enable;
+  } catch {}
+
+  try {
+    if (!enable) {
+      this.view.popup?.close();
+    }
+  } catch {}
+
+  this.featureLayer?.graphics?.forEach((graphic: Graphic) => {
+    if (!graphic) {
+      return;
+    }
+
+    graphic.popupTemplate = enable
+      ? this.buildPopupTemplateFromCurrent(graphic)
+      : null as any;
   });
 }
 
@@ -71,13 +309,41 @@ public clearGeoJSONLayer(updateGeojsonProperty = true): void {
   this._isStartingDraw = false;
   this._currentDrawGeometryType = undefined;
 
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
   this.featureLayer?.graphics?.removeAll();
   this.labelLayer?.graphics?.removeAll();
   this.sketchLayer?.graphics?.removeAll();
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
+  /**
+   * Important for Angular side-sheet:
+   * Sometimes stale GraphicsLayer instances remain attached to the map.
+   * Clear every ArcGeoJSON related layer by id prefix.
+   */
+  const layerPrefix =
+    this.featureLayer?.id?.replace("-graphics", "") ??
+    this.name ??
+    this.id ??
+    "arc-geojson-layer";
+
+  const mapLayers = this.view?.map?.layers?.toArray?.() ?? [];
+
+  mapLayers.forEach((layer: any) => {
+    const layerId = String(layer?.id ?? "");
+
+    if (
+      layerId === this.featureLayer?.id ||
+      layerId === this.labelLayer?.id ||
+      layerId === this.sketchLayer?.id ||
+      layerId.startsWith(layerPrefix)
+    ) {
+      try {
+        layer.graphics?.removeAll?.();
+      } catch {}
+    }
+  });
 
   if (updateGeojsonProperty) {
     this.blockGeoJsonUpdate = true;
@@ -88,10 +354,21 @@ public clearGeoJSONLayer(updateGeojsonProperty = true): void {
     this.blockGeoJsonUpdate = false;
   }
 
-  this.enableInfoPopupWindow(true);
   this.setMapCursor("default");
+
+  /**
+   * Keep popup enabled after clear because user may draw again,
+   * but no graphic has popupTemplate now because all graphics are removed.
+   */
+  this.enableInfoPopupWindow(true);
 
   this._isClearingGeoJSONLayer = false;
 
-  console.log("[arc-geojson-layer] clearGeoJSONLayer completed");
+  console.log("[arc-geojson-layer] clearGeoJSONLayer completed", {
+    featureGraphics: this.featureLayer?.graphics?.length ?? 0,
+    labelGraphics: this.labelLayer?.graphics?.length ?? 0,
+    sketchGraphics: this.sketchLayer?.graphics?.length ?? 0,
+  });
 }
+
+
