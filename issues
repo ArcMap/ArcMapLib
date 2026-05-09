@@ -1,122 +1,162 @@
-private applyGraphicDefaults(graphic: Graphic): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
+public clearGeoJSONLayer(): void {
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._currentDrawGeometryType = undefined;
+
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = {
+    type: "FeatureCollection",
+    features: [],
+  };
+  this.blockGeoJsonUpdate = false;
+
+  this.enableInfoPopupWindow(true);
+  this.setMapCursor("default");
+
+  this.emitLayerEvent("geojson-cleared", null, null, {
+    geojson: this.geojson,
+  });
+
+  console.log("[arc-geojson-layer] clearGeoJSONLayer completed");
+}
+
+
+
+disconnectedCallback(): void {
+  super.disconnectedCallback();
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  try {
+    this.graphicsEditor?.destroy();
+  } catch {}
+
+  this.editorHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
+  this.editorHandles = [];
+
+  this.eventHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
+  this.eventHandles = [];
+
+  try {
+    this.cursorMoveHandle?.remove?.();
+  } catch {}
+  this.cursorMoveHandle = undefined;
+
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+
+  if (this.view?.map) {
+    try {
+      if (this.featureLayer) {
+        this.view.map.remove(this.featureLayer);
+      }
+
+      if (this.labelLayer) {
+        this.view.map.remove(this.labelLayer);
+      }
+
+      if (this.sketchLayer) {
+        this.view.map.remove(this.sketchLayer);
+      }
+    } catch {}
   }
 
-  const id =
-    graphic.attributes[this.uniqueIdPropertyName] ??
-    graphic.attributes.OBJECTID ??
-    Date.now() + Math.floor(Math.random() * 100000);
+  try {
+    this.view?.popup?.close();
+  } catch {}
 
-  if (graphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    graphic.attributes[this.uniqueIdPropertyName] = id;
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._currentDrawGeometryType = undefined;
+
+  this.setMapCursor("default");
+
+  this.graphicsEditor = undefined;
+  this.featureLayer = undefined;
+  this.labelLayer = undefined;
+  this.sketchLayer = undefined;
+
+  console.log("[arc-geojson-layer] disconnectedCallback cleanup completed");
+}
+
+
+
+
+async updateGeojson(newGeojson: string | FeatureCollection | null | undefined): Promise<void> {
+  if (
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.removingItem
+  ) {
+    console.log("[arc-geojson-layer] updateGeojson skipped during active draw/edit");
+    return;
   }
 
-  if (graphic.attributes.OBJECTID === undefined) {
-    graphic.attributes.OBJECTID = id;
+  const isBlank =
+    newGeojson === undefined ||
+    newGeojson === null ||
+    newGeojson === "" ||
+    (
+      typeof newGeojson === "object" &&
+      Array.isArray((newGeojson as FeatureCollection).features) &&
+      (newGeojson as FeatureCollection).features.length === 0
+    );
+
+  if (isBlank) {
+    this.clearGeoJSONLayer();
+    return;
   }
 
-  /**
-   * Do NOT always assign default symbol here.
-   * First respect renderer/symbol passed from Angular.
-   */
-  if (!graphic.symbol) {
+  if (!this.featureLayer) {
+    await this.createLayer(newGeojson as any);
+    return;
+  }
+
+  this.featureLayer.graphics.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+
+  const fsInfo = this.getArcGISJSON(newGeojson as any);
+
+  fsInfo?.graphics?.forEach((graphic: Graphic) => {
+    this.applyGraphicDefaults(graphic);
+
     graphic.symbol =
       this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-      this.getDefaultSymbolForGeometry(graphic.geometry);
-  }
+      this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
 
-  graphic.popupTemplate =
-    this._editorOpen || this.inDrawingMode || this._isStartingDraw
-      ? null as any
-      : this.buildPopupTemplateFromCurrent(graphic);
-}
-
-
-
-
-private getSymbolFromRendererConfig(
-  rendererRaw: any,
-  graphic: Graphic
-): any {
-  const parsed = JsonUtils.getJsonFor<any>(rendererRaw);
-
-  if (parsed.error || !parsed.parsedJson || !graphic?.attributes) {
-    return null;
-  }
-
-  const renderer = parsed.parsedJson;
-  const rendererType = String(renderer.type ?? "").toLowerCase();
-
-  if (rendererType === "simple") {
-    return JsonUtils.createSymbolFromJson(
-      renderer.symbol ?? renderer.defaultSymbol,
-      graphic.geometry?.type
-    );
-  }
-
-  if (rendererType !== "unique-value" && rendererType !== "uniquevalue") {
-    return renderer.defaultSymbol
-      ? JsonUtils.createSymbolFromJson(renderer.defaultSymbol, graphic.geometry?.type)
-      : null;
-  }
-
-  const attrs = graphic.attributes ?? {};
-
-  const field1 = renderer.field1 ?? renderer.field;
-  const field2 = renderer.field2;
-  const field3 = renderer.field3;
-
-  const fields = [field1, field2, field3].filter(Boolean);
-
-  const values = fields.map((fieldName: string) =>
-    String(attrs[fieldName] ?? "").trim()
-  );
-
-  const hasDelimiter =
-    renderer.fieldDelimiter !== undefined &&
-    renderer.fieldDelimiter !== null;
-
-  const delimiter = hasDelimiter ? String(renderer.fieldDelimiter) : undefined;
-
-  const candidateKeys = new Set<string>();
-
-  if (hasDelimiter) {
-    candidateKeys.add(values.join(delimiter));
-  }
-
-  candidateKeys.add(values.join(""));
-  candidateKeys.add(values.join("|"));
-  candidateKeys.add(values.join(","));
-  candidateKeys.add(values.join(", "));
-
-  values.forEach((value) => {
-    if (value) {
-      candidateKeys.add(value);
-    }
+    this.featureLayer?.add(graphic);
   });
 
-  const keys = Array.from(candidateKeys).map((x) => String(x).trim());
+  this.refreshLabels();
+  this.updateInfoTemplate(this.infoTemplate);
 
-  const matchedInfo = renderer.uniqueValueInfos?.find((info: any) => {
-    return keys.includes(String(info.value ?? "").trim());
+  console.log("[arc-geojson-layer] updateGeojson DONE", {
+    graphicsCount: this.featureLayer.graphics.length,
   });
-
-  if (matchedInfo?.symbol) {
-    return JsonUtils.createSymbolFromJson(
-      matchedInfo.symbol,
-      graphic.geometry?.type
-    );
-  }
-
-  if (renderer.defaultSymbol) {
-    return JsonUtils.createSymbolFromJson(
-      renderer.defaultSymbol,
-      graphic.geometry?.type
-    );
-  }
-
-  return null;
 }
-
-
