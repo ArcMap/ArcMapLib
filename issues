@@ -1,53 +1,20 @@
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this.enableUserEdit = true;
-
-  this._suppressPopupUntil = Date.now() + 700;
-
-  if (!graphic?.geometry) {
+private clearCurrentDrawingItems(keepGraphic?: Graphic): void {
+  if (!this.featureLayer) {
     return;
   }
 
-  graphic.attributes = {
-    ...(graphic.attributes ?? {}),
-    __isTemporaryDrawing: false,
-  };
+  this.featureLayer.graphics.toArray().forEach((graphic: Graphic) => {
+    if (keepGraphic && graphic === keepGraphic) {
+      return;
+    }
 
-  const drawGeometryType =
-    this._currentDrawGeometryType ??
-    graphic.attributes.drawGeometryType ??
-    graphic.attributes.shapeType ??
-    graphic.attributes.geometryType ??
-    graphic.geometry.type;
-
-  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  }
-
-  this.applyGraphicDefaults(graphic);
-
-  graphic.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-    this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
-
-  if (this.featureLayer && !this.featureLayer.graphics.includes(graphic)) {
-    this.featureLayer.add(graphic);
-  }
-
-  this.updateGeoJsonWithChanges(graphic);
-
-  this.enableInfoPopupWindow(true);
-
-  console.log("[arc-geojson-layer] create complete", {
-    enableUserEdit: this.enableUserEdit,
-    geometryType: graphic.geometry?.type,
-    drawGeometryType: graphic.attributes.drawGeometryType,
-    shapeType: graphic.attributes.shapeType,
+    this.featureLayer?.remove(graphic);
   });
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
 }
+
