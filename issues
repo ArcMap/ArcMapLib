@@ -1,26 +1,53 @@
-if (event.state === "start" || event.state === "active") {
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
   this._editorOpen = false;
-  this.enableInfoPopupWindow(false);
+  this.enableUserEdit = true;
 
-  const activeGraphic = event.graphic as Graphic;
+  this._suppressPopupUntil = Date.now() + 700;
 
-  /**
-   * Drawing mode rule:
-   * Show only the current drawing item.
-   * Do not allow multiple preview graphics.
-   */
-  this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
-    if (g !== activeGraphic && g.attributes?.__isTemporaryDrawing === true) {
-      this.featureLayer?.remove(g);
-    }
-  });
-
-  if (activeGraphic) {
-    activeGraphic.attributes = {
-      ...(activeGraphic.attributes ?? {}),
-      __isTemporaryDrawing: true,
-    };
+  if (!graphic?.geometry) {
+    return;
   }
+
+  graphic.attributes = {
+    ...(graphic.attributes ?? {}),
+    __isTemporaryDrawing: false,
+  };
+
+  const drawGeometryType =
+    this._currentDrawGeometryType ??
+    graphic.attributes.drawGeometryType ??
+    graphic.attributes.shapeType ??
+    graphic.attributes.geometryType ??
+    graphic.geometry.type;
+
+  if (String(drawGeometryType ?? "").toLowerCase() === "circle") {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.geometryType = "circle";
+    graphic.attributes.shape = "circle";
+    graphic.attributes.isCircle = true;
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+    this.getDefaultSymbolForGeometry(graphic.geometry, graphic.attributes);
+
+  if (this.featureLayer && !this.featureLayer.graphics.includes(graphic)) {
+    this.featureLayer.add(graphic);
+  }
+
+  this.updateGeoJsonWithChanges(graphic);
+
+  this.enableInfoPopupWindow(true);
+
+  console.log("[arc-geojson-layer] create complete", {
+    enableUserEdit: this.enableUserEdit,
+    geometryType: graphic.geometry?.type,
+    drawGeometryType: graphic.attributes.drawGeometryType,
+    shapeType: graphic.attributes.shapeType,
+  });
 }
