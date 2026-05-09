@@ -1,48 +1,281 @@
-private resolveLabelTextFromRules(
-  graphic: Graphic,
-  labelRules: any[]
-): string {
-  if (!graphic?.attributes || !Array.isArray(labelRules)) {
-    return "";
+static toCanonicalArcGisSymbol(
+  symbolInput: any,
+  geometryType?: string
+): any {
+  if (!symbolInput) {
+    return JsonUtils.getDefaultSymbolJson(geometryType);
   }
 
-  for (const rule of labelRules) {
-    if (!rule) {
-      continue;
-    }
+  const symbol =
+    typeof symbolInput?.toJSON === "function"
+      ? symbolInput.toJSON()
+      : JSON.parse(JSON.stringify(symbolInput));
 
-    /**
-     * ArcGIS style:
-     * labelExpressionInfo.expression
-     */
-    const expression =
-      rule?.labelExpressionInfo?.expression ??
-      rule?.labelExpression ??
-      rule?.expression;
+  const rawType = String(
+    symbol.type ??
+    symbol.symbolType ??
+    symbol.esriType ??
+    ""
+  ).toLowerCase();
 
-    if (!expression || typeof expression !== "string") {
-      continue;
-    }
+  switch (rawType) {
+    case "esrisms":
+    case "sms":
+    case "simplemarkersymbol":
+    case "simple-marker":
+      return {
+        type: "simple-marker",
+        style: JsonUtils.normalizeMarkerStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        size: symbol.size ?? symbol.width ?? 12,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        outline: JsonUtils.normalizeOutline(symbol.outline),
+      };
 
-    /**
-     * Example:
-     * "$feature.name"
-     * "$feature.route"
-     */
-    const matches = expression.match(/\$feature\.([a-zA-Z0-9_]+)/);
+    case "esripms":
+    case "pms":
+    case "picturemarkersymbol":
+    case "picture-marker":
+      return {
+        type: "picture-marker",
+        url: symbol.url ?? symbol.imageData ?? "",
+        width: symbol.width ?? symbol.size ?? 24,
+        height: symbol.height ?? symbol.size ?? 24,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+      };
 
-    if (!matches?.[1]) {
-      continue;
-    }
+    case "esrisls":
+    case "sls":
+    case "simplelinesymbol":
+    case "simple-line":
+      return {
+        type: "simple-line",
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        width: symbol.width ?? 2,
+        style: JsonUtils.normalizeLineStyle(symbol.style),
+      };
 
-    const fieldName = matches[1];
+    case "esrisfs":
+    case "sfs":
+    case "simplefillsymbol":
+    case "simple-fill":
+      return {
+        type: "simple-fill",
+        style: JsonUtils.normalizeFillStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 0.18]),
+        outline: JsonUtils.normalizeOutline(symbol.outline),
+      };
 
-    const value = graphic.attributes[fieldName];
+    case "text":
+    case "textsymbol":
+    case "text-symbol":
+      return {
+        type: "text",
+        text: symbol.text ?? "",
+        color: JsonUtils.normalizeColor(symbol.color, [0, 0, 0, 1]),
+        haloColor: JsonUtils.normalizeColor(symbol.haloColor, [255, 255, 255, 1]),
+        haloSize: symbol.haloSize ?? 1,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        angle: symbol.angle ?? 0,
+        font: {
+          size: symbol.font?.size ?? symbol.size ?? 12,
+          family: symbol.font?.family ?? "sans-serif",
+          weight: symbol.font?.weight ?? "normal",
+          style: symbol.font?.style ?? "normal",
+        },
+      };
 
-    if (value !== undefined && value !== null) {
-      return String(value);
-    }
+    case "web-style":
+    case "webstylesymbol":
+    case "web-style-symbol":
+      return {
+        type: "web-style",
+        name: symbol.name,
+        styleName: symbol.styleName,
+      };
+
+    default:
+      console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", symbol);
+      return JsonUtils.getDefaultSymbolJson(geometryType);
   }
-
-  return "";
 }
+
+
+static normalizeMarkerStyle(style: any): any {
+  const value = String(style ?? "circle").toLowerCase();
+
+  const map: Record<string, string> = {
+    esrismscircle: "circle",
+    esrismssquare: "square",
+    esrismsdiamond: "diamond",
+    esrismscross: "cross",
+    esrismsx: "x",
+    circle: "circle",
+    square: "square",
+    diamond: "diamond",
+    cross: "cross",
+    x: "x",
+    triangle: "triangle",
+    path: "path",
+  };
+
+  return map[value] ?? "circle";
+}
+
+static normalizeLineStyle(style: any): any {
+  const value = String(style ?? "solid").toLowerCase();
+
+  const map: Record<string, string> = {
+    esrislssolid: "solid",
+    esrislsdash: "dash",
+    esrislsdot: "dot",
+    esrislsdashdot: "dash-dot",
+    esrislsdashdotdot: "long-dash-dot-dot",
+
+    solid: "solid",
+    dash: "dash",
+    dot: "dot",
+    "dash-dot": "dash-dot",
+    "long-dash": "long-dash",
+    "long-dash-dot": "long-dash-dot",
+    "long-dash-dot-dot": "long-dash-dot-dot",
+    none: "none",
+    "short-dash": "short-dash",
+    "short-dash-dot": "short-dash-dot",
+    "short-dash-dot-dot": "short-dash-dot-dot",
+    "short-dot": "short-dot",
+
+    cross: "solid",
+    "diagonal-cross": "solid",
+    "backward-diagonal": "solid",
+    "forward-diagonal": "solid",
+    horizontal: "solid",
+    vertical: "solid",
+  };
+
+  return map[value] ?? "solid";
+}
+
+static normalizeFillStyle(style: any): any {
+  const value = String(style ?? "solid").toLowerCase();
+
+  const map: Record<string, string> = {
+    esrisfssolid: "solid",
+    esrisfsnull: "none",
+    esrisfshorizontal: "horizontal",
+    esrisfsvertical: "vertical",
+    esrisfsforwarddiagonal: "forward-diagonal",
+    esrisfsbackwarddiagonal: "backward-diagonal",
+    esrisfscross: "cross",
+    esrisfsdiagonalcross: "diagonal-cross",
+
+    solid: "solid",
+    none: "none",
+    null: "none",
+    horizontal: "horizontal",
+    vertical: "vertical",
+    "forward-diagonal": "forward-diagonal",
+    "backward-diagonal": "backward-diagonal",
+    cross: "cross",
+    "diagonal-cross": "diagonal-cross",
+  };
+
+  return map[value] ?? "solid";
+}
+
+static normalizeColor(
+  color: any,
+  fallback: number[] = [0, 120, 255, 1]
+): any {
+  if (!color) {
+    return fallback;
+  }
+
+  if (Array.isArray(color)) {
+    if (color.length === 3) {
+      return [color[0], color[1], color[2], fallback[3] ?? 1];
+    }
+
+    if (color.length === 4) {
+      const alpha = color[3] > 1 ? color[3] / 255 : color[3];
+      return [color[0], color[1], color[2], alpha];
+    }
+
+    return fallback;
+  }
+
+  if (typeof color === "string") {
+    return color;
+  }
+
+  if (typeof color === "object") {
+    const r = color.r ?? color.red ?? fallback[0];
+    const g = color.g ?? color.green ?? fallback[1];
+    const b = color.b ?? color.blue ?? fallback[2];
+    const a = color.a ?? color.alpha ?? fallback[3] ?? 1;
+
+    return [r, g, b, a > 1 ? a / 255 : a];
+  }
+
+  return fallback;
+}
+
+static normalizeOutline(outline: any): any {
+  if (outline === null || outline === false) {
+    return null;
+  }
+
+  return {
+    type: "simple-line",
+    color: JsonUtils.normalizeColor(outline?.color, [0, 120, 255, 1]),
+    width: outline?.width ?? 2,
+    style: JsonUtils.normalizeLineStyle(outline?.style),
+  };
+}
+
+static getDefaultSymbolJson(geometryType?: string): any {
+  const type = String(geometryType ?? "").toLowerCase();
+
+  if (type === "point" || type === "multipoint") {
+    return {
+      type: "simple-marker",
+      style: "circle",
+      color: [0, 120, 255, 1],
+      size: 12,
+      outline: {
+        type: "simple-line",
+        color: [255, 255, 255, 1],
+        width: 1,
+        style: "solid",
+      },
+    };
+  }
+
+  if (type === "polyline" || type === "line" || type === "linestring") {
+    return {
+      type: "simple-line",
+      color: [0, 120, 255, 1],
+      width: 2,
+      style: "solid",
+    };
+  }
+
+  return {
+    type: "simple-fill",
+    style: "solid",
+    color: [0, 120, 255, 0.18],
+    outline: {
+      type: "simple-line",
+      color: [0, 120, 255, 1],
+      width: 2,
+      style: "solid",
+    },
+  };
+}
+
+
