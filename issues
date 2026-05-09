@@ -1,70 +1,48 @@
-private refreshLabels(): void {
-  if (!this.labelLayer || !this.featureLayer) {
-    return;
+private resolveLabelTextFromRules(
+  graphic: Graphic,
+  labelRules: any[]
+): string {
+  if (!graphic?.attributes || !Array.isArray(labelRules)) {
+    return "";
   }
 
-  this.labelLayer.removeAll();
+  for (const rule of labelRules) {
+    if (!rule) {
+      continue;
+    }
 
-  /**
-   * Labels should render ONLY when consumer explicitly passes labelJson.
-   * Do not auto-label from properties.name, properties.label, etc.
-   */
-  const hasLabelJson =
-    this.labelJson !== undefined &&
-    this.labelJson !== null &&
-    String(this.labelJson).trim() !== "";
+    /**
+     * ArcGIS style:
+     * labelExpressionInfo.expression
+     */
+    const expression =
+      rule?.labelExpressionInfo?.expression ??
+      rule?.labelExpression ??
+      rule?.expression;
 
-  if (!hasLabelJson) {
-    return;
+    if (!expression || typeof expression !== "string") {
+      continue;
+    }
+
+    /**
+     * Example:
+     * "$feature.name"
+     * "$feature.route"
+     */
+    const matches = expression.match(/\$feature\.([a-zA-Z0-9_]+)/);
+
+    if (!matches?.[1]) {
+      continue;
+    }
+
+    const fieldName = matches[1];
+
+    const value = graphic.attributes[fieldName];
+
+    if (value !== undefined && value !== null) {
+      return String(value);
+    }
   }
 
-  const labelJson = JsonUtils.getLabelJson(
-    this.labelJson,
-    this.labelColor,
-    this.labelSize
-  );
-
-  const labelRules = Array.isArray(labelJson) ? labelJson : [labelJson];
-
-  this.featureLayer.graphics.forEach((g: Graphic) => {
-    if (!g?.geometry) {
-      return;
-    }
-
-    const labelText = this.resolveLabelTextFromRules(g, labelRules);
-
-    if (!labelText) {
-      return;
-    }
-
-    const pt = this.getPopupPoint(g.geometry);
-
-    if (!pt) {
-      return;
-    }
-
-    this.labelLayer.add(
-      new Graphic({
-        geometry: pt,
-        attributes: {
-          __labelFor:
-            g.attributes?.[this.uniqueIdPropertyName] ??
-            g.attributes?.OBJECTID,
-        },
-        symbol: new TextSymbol({
-          text: labelText,
-          color: JsonUtils.resolveLabelColor(this.labelColor) as any,
-          haloColor: "black",
-          haloSize: 1,
-          xoffset: 3,
-          yoffset: 3,
-          font: {
-            size: JsonUtils.resolveLabelSize(this.labelSize),
-            family: "sans-serif",
-            weight: "bold",
-          },
-        }),
-      })
-    );
-  });
+  return "";
 }
