@@ -1,178 +1,26 @@
-private bindViewEvents(): void {
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
-      evt.stopPropagation?.();
-      return;
-    }
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
-    }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      const graphic = await this.getHitGraphic(evt);
-      if (!graphic) return;
-
-      if (
-        this._editorOpen ||
-        this.inDrawingMode ||
-        this._isStartingDraw ||
-        this.shouldSuppressPopup()
-      ) {
-        return;
-      }
-
-      this.showGraphicPopup(graphic, evt.mapPoint);
-
-      this.emitLayerEvent(
-        "layerClick",
-        this.graphicToGeoJsonFeature(graphic),
-        graphic,
-        {
-          event: {
-            coordinates: {
-              latitude: evt.mapPoint?.latitude ?? 0,
-              longitude: evt.mapPoint?.longitude ?? 0,
-            },
-            attributes: graphic.attributes ?? {},
-          },
-        }
-      );
-    }, 280);
-  });
-
-  const dblClickHandle = this.view.on("double-click", async (evt: any) => {
-    evt.stopPropagation?.();
-    evt.preventDefault?.();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    await this.handleEditorDoubleClick(evt, "arcgis-double-click");
-  });
-
-  const nativeDblClick = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    const rect = this.view.container.getBoundingClientRect();
-
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    const mapPoint = this.view.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(
-      {
-        x: screenPoint.x,
-        y: screenPoint.y,
-        mapPoint,
-      },
-      "native-dblclick"
-    );
-  };
-
-  this.view.container?.addEventListener("dblclick", nativeDblClick, true);
-
-  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
-    if (!this.view || !this.featureLayer || this._editorOpen || this.inDrawingMode) {
-      this.setMapCursor("default", evt);
-      return;
-    }
-
-    try {
-      const graphic = await this.getHitGraphic(evt);
-
-      if (!graphic) {
-        this.hoveredGraphicUid = undefined;
-        this.setMapCursor("default", evt);
-        return;
-      }
-
-      this.hoveredGraphicUid =
-        graphic.attributes?.[this.uniqueIdPropertyName] ??
-        graphic.attributes?.OBJECTID;
-
-      this.setMapCursor("pointer", evt);
-    } catch {
-      this.setMapCursor("default", evt);
-    }
-  });
-
-  this.eventHandles.push(
-    { remove: () => clickHandle?.remove() },
-    { remove: () => dblClickHandle?.remove() },
-    { remove: () => pointerMoveHandle?.remove() },
-    {
-      remove: () => {
-        this.view?.container?.removeEventListener("dblclick", nativeDblClick, true);
-      },
-    }
-  );
-}
-
-
-
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  if (!this.enableUserEdit) {
-    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false");
-    return;
-  }
-
-  this._suppressPopupUntil = Date.now() + 1500;
+if (event.state === "start" || event.state === "active") {
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+  this._editorOpen = false;
   this.enableInfoPopupWindow(false);
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
+  const activeGraphic = event.graphic as Graphic;
 
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  let graphic: Graphic | null = null;
-
-  graphic = await this.getHitGraphic(evtOrMapPoint);
-
-  if (!graphic && evtOrMapPoint?.mapPoint) {
-    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
-  }
-
-  if (!graphic) {
-    console.warn("[arc-geojson-layer] double-click editor target not found", {
-      source,
-      evtOrMapPoint,
-    });
-    return;
-  }
-
-  console.log("[arc-geojson-layer] double-click editor target", {
-    source,
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
+  /**
+   * Drawing mode rule:
+   * Show only the current drawing item.
+   * Do not allow multiple preview graphics.
+   */
+  this.featureLayer?.graphics?.toArray().forEach((g: Graphic) => {
+    if (g !== activeGraphic && g.attributes?.__isTemporaryDrawing === true) {
+      this.featureLayer?.remove(g);
+    }
   });
 
-  await this.activateGraphicsEditor(graphic);
+  if (activeGraphic) {
+    activeGraphic.attributes = {
+      ...(activeGraphic.attributes ?? {}),
+      __isTemporaryDrawing: true,
+    };
+  }
 }
-
-
