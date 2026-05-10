@@ -1,109 +1,120 @@
-private bindEditorEvents(): void {
+public clearGeoJSONLayer(updateGeojsonProperty = true): void {
+  if (this._isClearingGeoJSONLayer) {
+    return;
+  }
+
+  this._isClearingGeoJSONLayer = true;
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._currentDrawGeometryType = undefined;
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+
+  /**
+   * Angular side sheet fix:
+   * Sometimes old GraphicsLayer references remain on the map.
+   * Clear every layer created by this ArcGeoJSON instance.
+   */
+  const mapLayers = this.view?.map?.layers?.toArray?.() ?? [];
+
+  mapLayers.forEach((layer: any) => {
+    const id = String(layer?.id ?? "");
+
+    if (
+      id === this.featureLayer?.id ||
+      id === this.labelLayer?.id ||
+      id === this.sketchLayer?.id ||
+      id.includes("arc-geojson") ||
+      id.includes(this.name ?? "")
+    ) {
+      try {
+        layer.graphics?.removeAll?.();
+      } catch {}
+    }
+  });
+
+  if (updateGeojsonProperty) {
+    this.blockGeoJsonUpdate = true;
+    this.geojson = {
+      type: "FeatureCollection",
+      features: [],
+    };
+    this.blockGeoJsonUpdate = false;
+  }
+
+  this.refreshLabels();
+  this.setMapCursor("default");
+
+  this._isClearingGeoJSONLayer = false;
+
+  console.log("[arc-geojson-layer] clearGeoJSONLayer completed", {
+    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
+    labelLayerGraphics: this.labelLayer?.graphics?.length ?? 0,
+    sketchLayerGraphics: this.sketchLayer?.graphics?.length ?? 0,
+  });
+}
+
+
+disconnectedCallback(): void {
+  super.disconnectedCallback();
+
+  this.clearGeoJSONLayer(false);
+
   this.editorHandles?.forEach((handle: any) => {
     try {
       handle?.remove?.();
     } catch {}
   });
-
   this.editorHandles = [];
 
-  if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] bindEditorEvents skipped: graphicsEditor missing");
-    return;
+  this.eventHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
+  this.eventHandles = [];
+
+  try {
+    this.cursorMoveHandle?.remove?.();
+  } catch {}
+  this.cursorMoveHandle = undefined;
+
+  try {
+    this.graphicsEditor?.destroy();
+  } catch {}
+  this.graphicsEditor = undefined as any;
+
+  if (this.view?.map) {
+    try {
+      if (this.featureLayer) {
+        this.view.map.remove(this.featureLayer);
+      }
+
+      if (this.labelLayer) {
+        this.view.map.remove(this.labelLayer);
+      }
+
+      if (this.sketchLayer) {
+        this.view.map.remove(this.sketchLayer);
+      }
+    } catch {}
   }
 
-  const createHandle = this.graphicsEditor.on("create", (event: any) => {
-    console.log("[arc-geojson-layer] sketch create event", {
-      state: event.state,
-      tool: event.tool,
-      graphicGeometryType: event.graphic?.geometry?.type,
-      currentDrawGeometryType: this._currentDrawGeometryType,
-    });
+  this.featureLayer = undefined as any;
+  this.labelLayer = undefined as any;
+  this.sketchLayer = undefined as any;
 
-    if (event.state === "start" || event.state === "active") {
-      this.inDrawingMode = true;
-      this._isStartingDraw = true;
-      this._editorOpen = false;
-      this._suppressPopupUntil = Date.now() + 1500;
-
-      this.enableInfoPopupWindow(false);
-
-      if (event.graphic) {
-        event.graphic.attributes = {
-          ...(event.graphic.attributes ?? {}),
-          __isTemporaryDrawing: true,
-        };
-      }
-
-      return;
-    }
-
-    if (event.state === "complete") {
-      const graphic = event.graphic as Graphic;
-
-      if (!graphic) {
-        this.inDrawingMode = false;
-        this._isStartingDraw = false;
-        this._editorOpen = false;
-        this.enableInfoPopupWindow(true);
-        return;
-      }
-
-      graphic.attributes = {
-        ...(graphic.attributes ?? {}),
-        __isTemporaryDrawing: false,
-      };
-
-      /**
-       * This is the missing call.
-       * All new draw completion must go through handleCreateComplete().
-       */
-      this.handleCreateComplete(graphic);
-
-      return;
-    }
-
-    if (event.state === "cancel") {
-      this.inDrawingMode = false;
-      this._isStartingDraw = false;
-      this._editorOpen = false;
-      this._currentDrawGeometryType = undefined;
-      this.enableInfoPopupWindow(true);
-    }
-  });
-
-  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
-    console.log("[arc-geojson-layer] sketch update event", {
-      state: event.state,
-      tool: event.tool,
-      graphicsCount: event.graphics?.length ?? 0,
-    });
-
-    if (event.state === "start" || event.state === "active") {
-      this._editorOpen = true;
-      this.inDrawingMode = false;
-      this._isStartingDraw = false;
-      this._suppressPopupUntil = Date.now() + 1500;
-      this.enableInfoPopupWindow(false);
-      return;
-    }
-
-    if (event.state === "complete") {
-      event.graphics?.forEach((graphic: Graphic) => {
-        this.updateGeoJsonWithChanges(graphic);
-      });
-
-      this.finishActiveEditor();
-      return;
-    }
-
-    if (event.state === "cancel") {
-      this._editorOpen = false;
-      this.enableInfoPopupWindow(true);
-    }
-  });
-
-  this.editorHandles.push(createHandle, updateHandle);
+  console.log("[arc-geojson-layer] disconnectedCallback cleanup completed");
 }
-
-
