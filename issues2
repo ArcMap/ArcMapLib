@@ -1,28 +1,63 @@
-const normalizedFeature: Feature<GeoJsonGeometry, GeoJsonProperties> = {
-  type: "Feature",
-  id: convertedFeature.id,
-  bbox: convertedFeature.bbox,
-  geometry: {
-    ...convertedFeature.geometry,
-    type: "Polygon",
-    coordinates: this.normalizePolygonCoordinates(
-      (convertedFeature.geometry as any).coordinates
-    ),
-  } as GeoJsonGeometry,
-  properties: {
-    ...(convertedFeature.properties ?? {}),
-    ...(isCircle
-      ? {
-          drawGeometryType: "circle",
-          shapeType: "circle",
-          shape: "circle",
-          isCircle: true,
-        }
-      : {
-          drawGeometryType: "polygon",
-          shapeType: "polygon",
-          shape: "polygon",
-          isCircle: false,
-        }),
-  },
-};
+private async createEditor(): Promise<void> {
+  if (!this.view || !this.featureLayer) {
+    return;
+  }
+
+  if (this.graphicsEditor) {
+    return;
+  }
+
+  this.graphicsEditor = new SketchViewModel({
+    view: this.view,
+    layer: this.featureLayer,
+
+    defaultUpdateOptions: {
+      tool: "reshape",
+      multipleSelectionEnabled: false,
+      toggleToolOnClick: false,
+    } as any,
+  } as any);
+
+  this.bindEditorEvents();
+
+  console.log("[arc-geojson-layer] createEditor DONE", {
+    layerId: this.featureLayer.id,
+  });
+}
+
+
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 700;
+
+  if (!graphic?.geometry) {
+    return;
+  }
+
+  graphic.attributes = {
+    ...(graphic.attributes ?? {}),
+    __isTemporaryDrawing: false,
+  };
+
+  this.applyGraphicDefaults(graphic);
+
+  this.addToGeoJSON(graphic);
+
+  this.enableInfoPopupWindow(true);
+
+  this.emitLayerEvent(
+    "userDrawItemAdded",
+    this.graphicToGeoJsonFeature(graphic),
+    graphic,
+    {
+      geojson: this.geojson,
+    }
+  );
+
+  console.log("[arc-geojson-layer] create complete saved", {
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+  });
+}
