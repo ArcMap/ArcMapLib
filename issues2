@@ -1,63 +1,37 @@
-private async createEditor(): Promise<void> {
-  if (!this.view || !this.featureLayer) {
+const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+  if (!this.view || !this.featureLayer || this.inDrawingMode || this._isStartingDraw) {
+    this.setMapCursor("default");
     return;
   }
 
-  if (this.graphicsEditor) {
+  const graphic = await this.getHitGraphic(evt);
+
+  if (graphic?.geometry) {
+    this.setMapCursor("pointer");
     return;
   }
 
-  this.graphicsEditor = new SketchViewModel({
-    view: this.view,
-    layer: this.featureLayer,
-
-    defaultUpdateOptions: {
-      tool: "reshape",
-      multipleSelectionEnabled: false,
-      toggleToolOnClick: false,
-    } as any,
-  } as any);
-
-  this.bindEditorEvents();
-
-  console.log("[arc-geojson-layer] createEditor DONE", {
-    layerId: this.featureLayer.id,
-  });
-}
+  this.setMapCursor("default");
+});
 
 
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._suppressPopupUntil = Date.now() + 700;
 
-  if (!graphic?.geometry) {
+private setMapCursor(cursor: "default" | "pointer"): void {
+  const container = this.view?.container as HTMLElement | undefined;
+
+  if (!container) {
     return;
   }
 
-  graphic.attributes = {
-    ...(graphic.attributes ?? {}),
-    __isTemporaryDrawing: false,
-  };
+  const value = cursor === "pointer" ? "pointer" : "default";
 
-  this.applyGraphicDefaults(graphic);
+  container.style.cursor = value;
 
-  this.addToGeoJSON(graphic);
-
-  this.enableInfoPopupWindow(true);
-
-  this.emitLayerEvent(
-    "userDrawItemAdded",
-    this.graphicToGeoJsonFeature(graphic),
-    graphic,
-    {
-      geojson: this.geojson,
-    }
+  const surfaces = container.querySelectorAll(
+    ".esri-view-surface, canvas, .esri-view-root, .esri-view"
   );
 
-  console.log("[arc-geojson-layer] create complete saved", {
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
+  surfaces.forEach((el: Element) => {
+    (el as HTMLElement).style.cursor = value;
   });
 }
