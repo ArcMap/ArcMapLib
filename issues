@@ -1,51 +1,76 @@
-private emitLayerEvent(
-  eventName: string,
-  feature?: Feature | null,
-  graphic?: Graphic | null,
-  extraData?: any
-): void {
-  const safeFeature =
-    feature ??
-    (graphic?.geometry
-      ? this.graphicToGeoJsonFeature(graphic)
-      : null);
+const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+  console.log("[arc-geojson-layer] sketch update event", {
+    state: event.state,
+    tool: event.tool,
+    graphicsCount: event.graphics?.length ?? 0,
+  });
 
-  const attributes =
-    safeFeature?.properties ??
-    graphic?.attributes ??
-    {};
+  if (event.state === "start" || event.state === "active") {
+    this._editorOpen = true;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+    return;
+  }
 
-  const geometry =
-    safeFeature?.geometry ??
-    (graphic?.geometry ? this.arcGeometryToGeoJson(graphic.geometry) : null);
+  if (event.state === "complete") {
+    const updatedGraphics = event.graphics ?? [];
 
-  const objectId =
-    attributes?.OBJECTID ??
-    attributes?.objectId ??
-    attributes?.id ??
-    null;
+    updatedGraphics.forEach((graphic: Graphic) => {
+      if (!graphic?.geometry) {
+        return;
+      }
 
-  this.dispatchEvent(
-    new CustomEvent(eventName, {
-      detail: {
-        type: eventName,
-        OBJECTID: objectId,
-        objectId,
-        id: objectId,
-        feature: safeFeature,
-        graphic: graphic ?? null,
-        attributes,
-        properties: attributes,
-        geometry,
-        geojson: this.geojson,
-        layerId:
-          this.featureLayer?.id ??
-          this.name ??
-          "arc-geojson-layer",
-        ...extraData,
-      },
-      bubbles: true,
-      composed: true,
-    })
+      this.applyGraphicDefaults(graphic);
+      this.updateGeoJsonWithChanges(graphic);
+    });
+
+    this._editorOpen = false;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this.enableInfoPopupWindow(true);
+
+    return;
+  }
+
+  if (event.state === "cancel") {
+    this.cancelDrawing();
+    return;
+  }
+});
+
+
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry || !this.featureLayer) {
+    return;
+  }
+
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = this.toFeatureCollectionFromLayer();
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  if (!feature) {
+    return;
+  }
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    feature,
+    graphicToUpdate,
+    {
+      geojson: this.geojson,
+    }
   );
+
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: graphicToUpdate.attributes?.OBJECTID,
+    geometryType: graphicToUpdate.geometry?.type,
+  });
 }
