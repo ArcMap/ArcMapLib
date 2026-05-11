@@ -1,10 +1,17 @@
+const isPolygon = graphic.geometry?.type === "polygon" && !isCircle;
+
 await this.graphicsEditor.update([graphic], {
   tool,
 
-  enableRotation: tool === "transform" && !isCircle && this.enableUserEditRotating,
-  enableScaling: tool === "transform" && (isCircle || this.enableUserEditScaling),
-  preserveAspectRatio: isCircle || this.enableUserEditUniformScaling,
+  enableRotation:
+    isCircle ? false : this.enableUserEditRotating,
+
+  enableScaling:
+    isCircle || isPolygon || this.enableUserEditScaling,
+
+  preserveAspectRatio:
+    isCircle || this.enableUserEditUniformScaling,
 
   multipleSelectionEnabled: false,
-  toggleToolOnClick: false,
+  toggleToolOnClick: true,
 } as any);
