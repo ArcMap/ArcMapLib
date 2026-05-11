@@ -1,17 +1,25 @@
+const isCircle = this.isCircleGraphic(graphic);
 const isPolygon = graphic.geometry?.type === "polygon" && !isCircle;
+const tool = this.resolveUpdateTool(graphic);
 
 await this.graphicsEditor.update([graphic], {
   tool,
 
-  enableRotation:
-    isCircle ? false : this.enableUserEditRotating,
-
-  enableScaling:
-    isCircle || isPolygon || this.enableUserEditScaling,
-
-  preserveAspectRatio:
-    isCircle || this.enableUserEditUniformScaling,
+  /**
+   * Circle:
+   * - transform
+   * - scale uniformly
+   *
+   * Polygon:
+   * - reshape
+   * - edit vertices
+   * - add/delete vertices
+   * - no transform box
+   */
+  enableRotation: isCircle ? false : false,
+  enableScaling: isCircle ? true : false,
+  preserveAspectRatio: isCircle ? true : false,
 
   multipleSelectionEnabled: false,
-  toggleToolOnClick: true,
+  toggleToolOnClick: false,
 } as any);
