@@ -814,6 +814,7 @@ export class ArcGeojsonLayer extends LitElement {
   }
 
 
+
   private async updateGeoJson(
     value:
       | string
@@ -1654,7 +1655,6 @@ export class ArcGeojsonLayer extends LitElement {
 
     this.graphicsEditor = undefined;
   }
-
 
 
   private geoJsonFeatureToGraphic(feature: Feature): Graphic | null {
@@ -2510,3 +2510,7 @@ declare global {
     "arc-geojson-layer": ArcGeojsonLayer;
   }
 }
+
+
+
+
