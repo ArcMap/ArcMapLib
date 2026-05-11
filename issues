@@ -1,39 +1,93 @@
-public cancelDrawing(): void {
-  this.enableInfoPopupWindow(true);
-
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
-
-  try {
-    this.sketchViewModel?.cancel();
-  } catch {}
-
-  /**
-   * ONLY clear temporary draw graphics
-   * DO NOT clear existing edit polygons
-   */
-  if (this.isTemporaryDrawLayer) {
-    try {
-      this.featureLayer?.graphics?.removeAll();
-    } catch {}
-
-    try {
-      this.labelLayer?.graphics?.removeAll();
-    } catch {}
-
-    try {
-      this.sketchLayer?.graphics?.removeAll();
-    } catch {}
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
+    return;
   }
 
-  this.editorOpen = false;
-  this.inDrawingMode = false;
-  this.isStartingDraw = false;
+  this.applyGraphicDefaults(graphicToUpdate);
 
-  this.setMapCursor("default");
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  if (!convertedFeature?.geometry) {
+    return;
+  }
+
+  const parsedResult = JsonUtils.getJsonFor<any>(this.geojson);
+
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : {
+          type: "FeatureCollection",
+          features: [],
+        };
+
+  const updateId =
+    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    convertedFeature.properties?.[this.uniqueIdPropertyName] ??
+    convertedFeature.properties?.OBJECTID;
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.properties?.[this.uniqueIdPropertyName] ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id;
+
+    if (
+      updateId !== undefined &&
+      updateId !== null &&
+      String(featureId) === String(updateId)
+    ) {
+      updated = true;
+      return {
+        ...feature,
+        geometry: convertedFeature.geometry,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(convertedFeature.properties ?? {}),
+        },
+      };
+    }
+
+    return feature;
+  });
+
+  /**
+   * Safety:
+   * If existing feature was not found, add it instead of losing it.
+   */
+  if (!updated) {
+    updatedFeatures.push(convertedFeature);
+  }
+
+  const updatedGeoJson = {
+    type: "FeatureCollection",
+    features: updatedFeatures,
+  };
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    convertedFeature,
+    graphicToUpdate,
+    {
+      geojson: updatedGeoJson,
+    }
+  );
+
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: updateId,
+    updated,
+    geometryType: graphicToUpdate.geometry?.type,
+    featureCount: updatedFeatures.length,
+  });
 }
