@@ -1,25 +1,39 @@
-const isCircle = this.isCircleGraphic(graphic);
-const isPolygon = graphic.geometry?.type === "polygon" && !isCircle;
-const tool = this.resolveUpdateTool(graphic);
+public cancelDrawing(): void {
+  this.enableInfoPopupWindow(true);
 
-await this.graphicsEditor.update([graphic], {
-  tool,
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  try {
+    this.sketchViewModel?.cancel();
+  } catch {}
 
   /**
-   * Circle:
-   * - transform
-   * - scale uniformly
-   *
-   * Polygon:
-   * - reshape
-   * - edit vertices
-   * - add/delete vertices
-   * - no transform box
+   * ONLY clear temporary draw graphics
+   * DO NOT clear existing edit polygons
    */
-  enableRotation: isCircle ? false : false,
-  enableScaling: isCircle ? true : false,
-  preserveAspectRatio: isCircle ? true : false,
+  if (this.isTemporaryDrawLayer) {
+    try {
+      this.featureLayer?.graphics?.removeAll();
+    } catch {}
 
-  multipleSelectionEnabled: false,
-  toggleToolOnClick: false,
-} as any);
+    try {
+      this.labelLayer?.graphics?.removeAll();
+    } catch {}
+
+    try {
+      this.sketchLayer?.graphics?.removeAll();
+    } catch {}
+  }
+
+  this.editorOpen = false;
+  this.inDrawingMode = false;
+  this.isStartingDraw = false;
+
+  this.setMapCursor("default");
+}
