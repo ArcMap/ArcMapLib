@@ -1,38 +1,29 @@
-const normalizedProperties = (normalizedFeature.properties ?? {}) as Record<string, any>;
+const geometryCoordinates =
+  (convertedFeature.geometry as any)?.coordinates ?? [];
 
-const updateId =
-  graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-  graphicToUpdate.attributes?.OBJECTID ??
-  normalizedProperties[this.uniqueIdPropertyName] ??
-  normalizedProperties.OBJECTID ??
-  normalizedProperties.id;
-
-
-const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-  const featureProperties = (feature?.properties ?? {}) as Record<string, any>;
-
-  const featureId =
-    featureProperties[this.uniqueIdPropertyName] ??
-    featureProperties.OBJECTID ??
-    featureProperties.id ??
-    feature?.id;
-
-  if (
-    updateId !== undefined &&
-    updateId !== null &&
-    String(featureId) === String(updateId)
-  ) {
-    updated = true;
-
-    return {
-      ...feature,
-      geometry: normalizedFeature.geometry,
-      properties: {
-        ...featureProperties,
-        ...normalizedProperties,
-      },
-    };
-  }
-
-  return feature;
-});
+const normalizedFeature = {
+  ...convertedFeature,
+  geometry: {
+    ...convertedFeature.geometry,
+    type: "Polygon",
+    coordinates: this.normalizePolygonCoordinates(
+      geometryCoordinates
+    ),
+  },
+  properties: {
+    ...(convertedFeature.properties ?? {}),
+    ...(isCircle
+      ? {
+          drawGeometryType: "circle",
+          shapeType: "circle",
+          shape: "circle",
+          isCircle: true,
+        }
+      : {
+          drawGeometryType: "polygon",
+          shapeType: "polygon",
+          shape: "polygon",
+          isCircle: false,
+        }),
+  },
+};
