@@ -1,32 +1,142 @@
-private finishActiveEditor(): void {
-  if (!this.graphicsEditor) {
-    this._editorOpen = false;
-    this.inDrawingMode = false;
-    this._isStartingDraw = false;
-    this.enableInfoPopupWindow(true);
+private isCircleGraphic(graphic: Graphic): boolean {
+  const attrs = graphic?.attributes ?? {};
+
+  /**
+   * Circle should be detected ONLY from explicit circle metadata.
+   * Do NOT treat normal polygon as circle only because geometry.type === "polygon".
+   */
+  return (
+    attrs.isCircle === true ||
+    String(attrs.drawGeometryType ?? "").toLowerCase() === "circle" ||
+    String(attrs.shapeType ?? "").toLowerCase() === "circle" ||
+    String(attrs.shape ?? "").toLowerCase() === "circle"
+  );
+}
+
+private resolveUpdateTool(
+  graphic: Graphic
+): "move" | "reshape" | "transform" {
+  if (this.isCircleGraphic(graphic)) {
+    return "transform";
+  }
+
+  /**
+   * Polygon should use reshape so vertices can be edited.
+   */
+  if (graphic.geometry?.type === "polygon") {
+    return "reshape";
+  }
+
+  if (
+    this.enableUserEditScaling ||
+    this.enableUserEditRotating
+  ) {
+    return "transform";
+  }
+
+  return "move";
+}
+
+
+
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.enableUserEdit || !graphic?.geometry) {
     return;
   }
 
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 1500;
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+
+  this.enableInfoPopupWindow(false);
+
   try {
-    this.graphicsEditor.complete();
+    this.view?.popup?.close();
   } catch {}
 
   try {
     this.graphicsEditor.cancel();
   } catch {}
 
-  this._editorOpen = false;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._suppressPopupUntil = Date.now() + 700;
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
 
-  this.enableInfoPopupWindow(true);
+  const isCircle = this.isCircleGraphic(graphic);
+  const tool = this.resolveUpdateTool(graphic);
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
+  /**
+   * IMPORTANT:
+   * Only add circle metadata when it is already a circle.
+   * Never add circle metadata to normal polygon.
+   */
+  if (isCircle) {
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.shape = "circle";
+    graphic.attributes.isCircle = true;
+  } else {
+    delete graphic.attributes.isCircle;
 
-  this.setMapCursor("default");
+    if (String(graphic.attributes.drawGeometryType ?? "").toLowerCase() === "circle") {
+      delete graphic.attributes.drawGeometryType;
+    }
 
-  console.log("[arc-geojson-layer] finishActiveEditor DONE");
+    if (String(graphic.attributes.shapeType ?? "").toLowerCase() === "circle") {
+      delete graphic.attributes.shapeType;
+    }
+
+    if (String(graphic.attributes.shape ?? "").toLowerCase() === "circle") {
+      delete graphic.attributes.shape;
+    }
+  }
+
+  graphic.popupTemplate = null as any;
+
+  await this.graphicsEditor.update([graphic], {
+    tool,
+
+    enableRotation:
+      isCircle ? false : this.enableUserEditRotating,
+
+    enableScaling:
+      isCircle ? true : this.enableUserEditScaling,
+
+    preserveAspectRatio:
+      isCircle ? true : this.enableUserEditUniformScaling,
+
+    multipleSelectionEnabled: false,
+    toggleToolOnClick: false,
+  } as any);
+
+  console.log("[arc-geojson-layer] editor opened", {
+    geometryType: graphic.geometry?.type,
+    isCircle,
+    tool,
+    attributes: graphic.attributes,
+  });
+}
+
+
+
+
+const drawType = String(this._currentDrawGeometryType ?? "").toLowerCase();
+
+if (drawType === "circle") {
+  graphic.attributes.drawGeometryType = "circle";
+  graphic.attributes.shapeType = "circle";
+  graphic.attributes.shape = "circle";
+  graphic.attributes.isCircle = true;
+} else {
+  delete graphic.attributes.isCircle;
+  delete graphic.attributes.drawGeometryType;
+  delete graphic.attributes.shapeType;
+  delete graphic.attributes.shape;
 }
