@@ -1,98 +1,27 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
+private async updateEditing(enabled: boolean): Promise<void> {
+  this.enableUserEdit = enabled;
+
+  console.log("[arc-geojson-layer] updateEditing", {
+    enabled,
+    editorOpen: this._editorOpen,
+    inDrawingMode: this.inDrawingMode,
+  });
+
+  if (!enabled) {
+    /**
+     * IMPORTANT:
+     * Do NOT call finishActiveEditor() here.
+     * This method is triggered by property changes, sometimes before user edits.
+     * Closing editor here causes polygon/circle to disappear or not save.
+     */
+    this._editorOpen = false;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this.enableInfoPopupWindow(true);
     return;
   }
 
-  this.applyGraphicDefaults(graphicToUpdate);
+  await this.createEditor();
 
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  if (!convertedFeature?.geometry) {
-    return;
-  }
-
-  const parsedResult = JsonUtils.getJsonFor<any>(this.geojson);
-
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : {
-          type: "FeatureCollection",
-          features: [],
-        };
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    convertedFeature.properties?.[this.uniqueIdPropertyName] ??
-    convertedFeature.properties?.OBJECTID ??
-    convertedFeature.properties?.id;
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id ??
-      feature?.id;
-
-    if (
-      updateId !== undefined &&
-      updateId !== null &&
-      String(featureId) === String(updateId)
-    ) {
-      updated = true;
-
-      return {
-        ...feature,
-        geometry: convertedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(convertedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(convertedFeature);
-  }
-
-  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
-    type: "FeatureCollection",
-    features: updatedFeatures as any,
-  };
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.requestUpdate("geojson");
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  this.emitLayerEvent("userEditItemUpdated", convertedFeature, graphicToUpdate, {
-    geojson: updatedGeoJson,
-  });
-
-  this.dispatchEvent(
-    new CustomEvent("geojson-change", {
-      detail: {
-        geojson: updatedGeoJson,
-      },
-      bubbles: true,
-      composed: true,
-    })
-  );
-
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: updateId,
-    updated,
-    nativeGeojsonAfterSet: this.geojson,
-    featureCount: updatedFeatures.length,
-  });
+  this.enableInfoPopupWindow(false);
 }
