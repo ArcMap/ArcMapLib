@@ -1,285 +1,80 @@
-private applyGraphicDefaults(graphic: Graphic): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
+private async updateGeojson(): Promise<void> {
+  if (this.blockGeoJsonUpdate) {
+    return;
   }
 
-  const id =
-    graphic.attributes[this.uniqueIdPropertyName] ??
-    graphic.attributes.OBJECTID ??
-    Date.now() + Math.floor(Math.random() * 100000);
-
-  if (graphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    graphic.attributes[this.uniqueIdPropertyName] = id;
+  if (this._isClearingGeoJSONLayer) {
+    return;
   }
 
-  if (graphic.attributes.OBJECTID === undefined) {
-    graphic.attributes.OBJECTID = id;
+  /**
+   * VERY IMPORTANT:
+   * Avoid Angular/Lit re-render loop.
+   */
+  if (this._lastGeoJsonReference === this.geojson) {
+    return;
   }
 
-  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
+  this._lastGeoJsonReference = this.geojson;
 
-  const finalSymbol =
-    rendererSymbol ??
-    graphic.symbol ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
+  console.log("[up-geojson-layer] updateGeojson START");
 
-  graphic.symbol = this.coerceSymbolForGeometry(finalSymbol, graphic.geometry);
+  const geojson = JsonUtils.getJsonFor<any>(this.geojson);
 
-  graphic.popupTemplate =
-    this._editorOpen || this.inDrawingMode || this._isStartingDraw
-      ? null as any
-      : this.buildPopupTemplateFromCurrent(graphic);
+  if (
+    geojson.error ||
+    !geojson.parsedJson ||
+    !geojson.parsedJson.features
+  ) {
+    console.warn("[up-geojson-layer] invalid geojson");
 
-  console.log("[arc-geojson-layer] applyGraphicDefaults", {
-    geometryType: graphic.geometry?.type,
-    rendererSymbol,
-    finalSymbol: graphic.symbol,
-    attributes: graphic.attributes,
-  });
-}
-
-
-private getSymbolFromRendererConfig(
-  rendererRaw: any,
-  graphic: Graphic
-): any {
-  const parsed = JsonUtils.getJsonFor<any>(rendererRaw);
-
-  if (parsed.error || !parsed.parsedJson || !graphic?.attributes) {
-    return null;
+    this.clearGeoJSONLayer(false);
+    return;
   }
 
-  const renderer = parsed.parsedJson;
-  const rendererType = String(renderer.type ?? "").toLowerCase();
+  /**
+   * ONLY clear existing graphics.
+   * DO NOT reset geojson property again.
+   */
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
 
-  if (rendererType === "simple") {
-    const symbol = JsonUtils.createSymbolFromJson(
-      renderer.symbol ?? renderer.defaultSymbol,
-      graphic.geometry?.type
-    );
-
-    return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+  /**
+   * DO NOT CLEAR sketch layer while editing.
+   */
+  if (!this._editorOpen && !this.inDrawingMode) {
+    this.sketchLayer?.graphics?.removeAll();
   }
 
-  if (rendererType !== "unique-value" && rendererType !== "uniquevalue") {
-    if (!renderer.defaultSymbol) {
-      return null;
-    }
+  const features = geojson.parsedJson.features ?? [];
 
-    const symbol = JsonUtils.createSymbolFromJson(
-      renderer.defaultSymbol,
-      graphic.geometry?.type
-    );
-
-    return this.coerceSymbolForGeometry(symbol, graphic.geometry);
-  }
-
-  const attrs = graphic.attributes ?? {};
-
-  const field1 = renderer.field1 ?? renderer.field;
-  const field2 = renderer.field2;
-  const field3 = renderer.field3;
-
-  const fields = [field1, field2, field3].filter(Boolean);
-
-  const values = fields.map((fieldName: string) =>
-    String(attrs[fieldName] ?? "").trim()
-  );
-
-  const hasDelimiter =
-    renderer.fieldDelimiter !== undefined &&
-    renderer.fieldDelimiter !== null;
-
-  const delimiter = hasDelimiter ? String(renderer.fieldDelimiter) : undefined;
-
-  const candidateKeys = new Set<string>();
-
-  if (hasDelimiter) {
-    candidateKeys.add(values.join(delimiter));
-  }
-
-  candidateKeys.add(values.join(""));
-  candidateKeys.add(values.join("|"));
-  candidateKeys.add(values.join(","));
-  candidateKeys.add(values.join(", "));
-
-  values.forEach((value) => {
-    if (value) {
-      candidateKeys.add(value);
-    }
+  console.log("[up-geojson-layer] rendering features", {
+    count: features.length,
   });
 
-  const keys = Array.from(candidateKeys).map((value) =>
-    String(value ?? "").trim()
-  );
+  for (const feature of features) {
+    try {
+      const graphic = this.createGraphicFromGeoJson(feature);
 
-  const matchedInfo = renderer.uniqueValueInfos?.find((info: any) => {
-    return keys.includes(String(info.value ?? "").trim());
+      if (!graphic) {
+        continue;
+      }
+
+      this.applyGraphicDefaults(graphic);
+
+      this.featureLayer?.graphics?.add(graphic);
+    } catch (error) {
+      console.warn(
+        "[up-geojson-layer] feature render failed",
+        error,
+        feature
+      );
+    }
+  }
+
+  this.refreshLabels();
+
+  console.log("[up-geojson-layer] updateGeojson DONE", {
+    graphics: this.featureLayer?.graphics?.length ?? 0,
   });
-
-  const rawSymbol =
-    matchedInfo?.symbol ??
-    renderer.defaultSymbol ??
-    renderer.symbol ??
-    null;
-
-  if (!rawSymbol) {
-    return null;
-  }
-
-  const symbol = JsonUtils.createSymbolFromJson(
-    rawSymbol,
-    graphic.geometry?.type
-  );
-
-  const coercedSymbol = this.coerceSymbolForGeometry(symbol, graphic.geometry);
-
-  console.log("[arc-geojson-layer] renderer symbol matched", {
-    geometryType: graphic.geometry?.type,
-    keys,
-    matchedValue: matchedInfo?.value,
-    rawSymbol,
-    coercedSymbol,
-  });
-
-  return coercedSymbol;
-}
-
-
-
-private coerceSymbolForGeometry(symbol: any, geometry: Geometry | null | undefined): any {
-  if (!symbol || !geometry) {
-    return symbol;
-  }
-
-  const geometryType = String((geometry as any).type ?? "").toLowerCase();
-  const symbolType = String(symbol.type ?? "").toLowerCase();
-
-  if (geometryType === "point" || geometryType === "multipoint") {
-    if (symbolType === "simple-marker" || symbolType === "picture-marker") {
-      return symbol;
-    }
-
-    const color =
-      symbol.color ??
-      symbol.outline?.color ??
-      [0, 120, 255, 1];
-
-    return {
-      type: "simple-marker",
-      style: "circle",
-      size: 18,
-      color,
-      outline: {
-        type: "simple-line",
-        color: symbol.outline?.color ?? [255, 255, 255, 1],
-        width: symbol.outline?.width ?? 2,
-        style: "solid",
-      },
-    };
-  }
-
-  if (geometryType === "polyline") {
-    if (symbolType === "simple-line") {
-      return symbol;
-    }
-
-    return {
-      type: "simple-line",
-      color:
-        symbol.outline?.color ??
-        symbol.color ??
-        [0, 120, 255, 1],
-      width:
-        symbol.outline?.width ??
-        symbol.width ??
-        3,
-      style: "solid",
-    };
-  }
-
-  if (geometryType === "polygon" || geometryType === "extent") {
-    if (symbolType === "simple-fill") {
-      return symbol;
-    }
-
-    const baseColor =
-      symbol.color ??
-      symbol.outline?.color ??
-      [0, 120, 255, 1];
-
-    const fillColor = Array.isArray(baseColor)
-      ? [
-          baseColor[0],
-          baseColor[1],
-          baseColor[2],
-          0.18,
-        ]
-      : baseColor;
-
-    return {
-      type: "simple-fill",
-      style: "solid",
-      color: fillColor,
-      outline: {
-        type: "simple-line",
-        color:
-          symbol.outline?.color ??
-          symbol.color ??
-          [0, 120, 255, 1],
-        width:
-          symbol.outline?.width ??
-          symbol.width ??
-          2,
-        style: "solid",
-      },
-    };
-  }
-
-  return symbol;
-}
-
-
-private getDefaultSymbolForGeometry(geometry: Geometry | undefined | null): any {
-  if (!geometry) {
-    return null;
-  }
-
-  const geometryType = String((geometry as any).type ?? "").toLowerCase();
-
-  if (geometryType === "point" || geometryType === "multipoint") {
-    return {
-      type: "simple-marker",
-      style: "circle",
-      size: 18,
-      color: [0, 120, 255, 1],
-      outline: {
-        type: "simple-line",
-        color: [255, 255, 255, 1],
-        width: 2,
-        style: "solid",
-      },
-    };
-  }
-
-  if (geometryType === "polyline") {
-    return {
-      type: "simple-line",
-      style: "solid",
-      color: [0, 120, 255, 1],
-      width: 3,
-    };
-  }
-
-  return {
-    type: "simple-fill",
-    style: "solid",
-    color: [0, 120, 255, 0.18],
-    outline: {
-      type: "simple-line",
-      color: [0, 120, 255, 1],
-      width: 2,
-      style: "solid",
-    },
-  };
 }
