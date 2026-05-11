@@ -1,17 +1,28 @@
-const normalizedProperties =
-  (normalizedFeature.properties ?? {}) as Record<string, any>;
-
-const updateId =
-  graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-  graphicToUpdate.attributes?.OBJECTID ??
-  normalizedProperties[this.uniqueIdPropertyName] ??
-  normalizedProperties.OBJECTID ??
-  normalizedProperties.id;
-
-
-
-
-properties: {
-  ...(feature.properties ?? {}),
-  ...normalizedProperties,
-},
+const normalizedFeature: Feature<GeoJsonGeometry, GeoJsonProperties> = {
+  type: "Feature",
+  id: convertedFeature.id,
+  bbox: convertedFeature.bbox,
+  geometry: {
+    ...convertedFeature.geometry,
+    type: "Polygon",
+    coordinates: this.normalizePolygonCoordinates(
+      (convertedFeature.geometry as any).coordinates
+    ),
+  } as GeoJsonGeometry,
+  properties: {
+    ...(convertedFeature.properties ?? {}),
+    ...(isCircle
+      ? {
+          drawGeometryType: "circle",
+          shapeType: "circle",
+          shape: "circle",
+          isCircle: true,
+        }
+      : {
+          drawGeometryType: "polygon",
+          shapeType: "polygon",
+          shape: "polygon",
+          isCircle: false,
+        }),
+  },
+};
