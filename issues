@@ -1,30 +1,115 @@
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._suppressPopupUntil = Date.now() + 700;
+private bindEditorEvents(): void {
+  this.editorHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
 
-  if (!graphic?.geometry) {
+  this.editorHandles = [];
+
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] bindEditorEvents skipped: graphicsEditor missing");
     return;
   }
 
-  graphic.attributes = {
-    ...(graphic.attributes ?? {}),
-    __isTemporaryDrawing: false,
-  };
+  const createHandle = this.graphicsEditor.on("create", (event: any) => {
+    if (event.state === "start" || event.state === "active") {
+      this.inDrawingMode = true;
+      this._isStartingDraw = true;
+      this._editorOpen = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+      return;
+    }
 
-  this.applyGraphicDefaults(graphic);
+    if (event.state === "complete") {
+      const graphic = event.graphic as Graphic;
 
-  graphic.symbol =
-    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
+      if (!graphic?.geometry) {
+        this.cancelDrawing();
+        return;
+      }
 
-  this.addToGeoJSON(graphic);
+      this.handleCreateComplete(graphic);
+      return;
+    }
 
-  this.enableInfoPopupWindow(true);
+    if (event.state === "cancel") {
+      this.cancelDrawing();
+    }
+  });
 
-  console.log("[arc-geojson-layer] create complete saved", {
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
+  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+    if (event.state === "start" || event.state === "active") {
+      this._editorOpen = true;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+      return;
+    }
+
+    if (event.state === "complete") {
+      const graphics = event.graphics ?? [];
+
+      graphics.forEach((graphic: Graphic) => {
+        if (!graphic?.geometry) {
+          return;
+        }
+
+        this.updateGeoJsonWithChanges(graphic);
+      });
+
+      this.finishActiveEditor();
+      return;
+    }
+
+    if (event.state === "cancel") {
+      this.cancelDrawing();
+    }
+  });
+
+  this.editorHandles.push(createHandle, updateHandle);
+}
+
+
+
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry || !this.featureLayer) {
+    return;
+  }
+
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  /**
+   * Rebuild GeoJSON from current FeatureLayer graphics.
+   * This captures the edited geometry.
+   */
+  const updatedGeoJson = this.toFeatureCollectionFromLayer();
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.blockGeoJsonUpdate = false;
+
+  this.refreshLabels();
+
+  const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  if (!feature) {
+    return;
+  }
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    feature,
+    graphicToUpdate,
+    {
+      geojson: updatedGeoJson,
+    }
+  );
+
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: graphicToUpdate.attributes?.OBJECTID,
+    geometryType: graphicToUpdate.geometry?.type,
   });
 }
