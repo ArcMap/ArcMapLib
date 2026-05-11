@@ -1,63 +1,49 @@
-public clearGeoJSONLayer(updateGeojsonProperty = false): void {
-  if (this._isClearingGeoJSONLayer) {
-    return;
-  }
-
-  this._isClearingGeoJSONLayer = true;
+public cancelDrawing(clearGraphics = false): void {
+  console.log("[arc-geojson-layer] cancelDrawing START", {
+    clearGraphics,
+    inDrawingMode: this.inDrawingMode,
+    editorOpen: this._editorOpen,
+  });
 
   try {
     this.graphicsEditor?.cancel();
-  } catch {}
-
-  this._editorOpen = false;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._currentDrawGeometryType = undefined;
+  } catch (error) {
+    console.warn("[arc-geojson-layer] graphicsEditor.cancel failed", error);
+  }
 
   try {
     this.view?.popup?.close();
   } catch {}
 
-  this.featureLayer?.graphics?.removeAll();
-  this.labelLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.removeAll();
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._currentDrawGeometryType = undefined;
 
-  const mapLayers = this.view?.map?.layers?.toArray?.() ?? [];
+  this.enableInfoPopupWindow(true);
 
-  mapLayers.forEach((layer: any) => {
-    const id = String(layer?.id ?? "");
+  /**
+   * Remove temporary sketch graphics
+   */
+  try {
+    this.sketchLayer?.graphics?.removeAll();
+  } catch {}
 
-    if (
-      layer === this.featureLayer ||
-      layer === this.labelLayer ||
-      layer === this.sketchLayer ||
-      id.includes("geojson") ||
-      id.includes("geofence") ||
-      id.includes("graphics")
-    ) {
-      try {
-        layer.graphics?.removeAll?.();
-      } catch {}
-    }
-  });
-
-  if (updateGeojsonProperty) {
-    this.blockGeoJsonUpdate = true;
-    this.geojson = {
-      type: "FeatureCollection",
-      features: [],
-    };
-    this.blockGeoJsonUpdate = false;
+  /**
+   * Optional full clear
+   */
+  if (clearGraphics) {
+    try {
+      this.featureLayer?.graphics?.removeAll();
+      this.labelLayer?.graphics?.removeAll();
+    } catch {}
   }
 
-  this.refreshLabels();
   this.setMapCursor("default");
 
-  this._isClearingGeoJSONLayer = false;
-
-  console.log("[arc-geojson-layer] clearGeoJSONLayer completed", {
+  console.log("[arc-geojson-layer] cancelDrawing DONE", {
     featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
-    labelLayerGraphics: this.labelLayer?.graphics?.length ?? 0,
     sketchLayerGraphics: this.sketchLayer?.graphics?.length ?? 0,
   });
 }
+
