@@ -1,76 +1,30 @@
-const updateHandle = this.graphicsEditor.on("update", (event: any) => {
-  console.log("[arc-geojson-layer] sketch update event", {
-    state: event.state,
-    tool: event.tool,
-    graphicsCount: event.graphics?.length ?? 0,
-  });
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._suppressPopupUntil = Date.now() + 700;
 
-  if (event.state === "start" || event.state === "active") {
-    this._editorOpen = true;
-    this.inDrawingMode = false;
-    this._isStartingDraw = false;
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
+  if (!graphic?.geometry) {
     return;
   }
 
-  if (event.state === "complete") {
-    const updatedGraphics = event.graphics ?? [];
+  graphic.attributes = {
+    ...(graphic.attributes ?? {}),
+    __isTemporaryDrawing: false,
+  };
 
-    updatedGraphics.forEach((graphic: Graphic) => {
-      if (!graphic?.geometry) {
-        return;
-      }
+  this.applyGraphicDefaults(graphic);
 
-      this.applyGraphicDefaults(graphic);
-      this.updateGeoJsonWithChanges(graphic);
-    });
+  graphic.symbol =
+    this.getSymbolFromRendererConfig(this.renderer, graphic) ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
 
-    this._editorOpen = false;
-    this.inDrawingMode = false;
-    this._isStartingDraw = false;
-    this.enableInfoPopupWindow(true);
+  this.addToGeoJSON(graphic);
 
-    return;
-  }
+  this.enableInfoPopupWindow(true);
 
-  if (event.state === "cancel") {
-    this.cancelDrawing();
-    return;
-  }
-});
-
-
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry || !this.featureLayer) {
-    return;
-  }
-
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = this.toFeatureCollectionFromLayer();
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  const feature = this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  if (!feature) {
-    return;
-  }
-
-  this.emitLayerEvent(
-    "userEditItemUpdated",
-    feature,
-    graphicToUpdate,
-    {
-      geojson: this.geojson,
-    }
-  );
-
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: graphicToUpdate.attributes?.OBJECTID,
-    geometryType: graphicToUpdate.geometry?.type,
+  console.log("[arc-geojson-layer] create complete saved", {
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
   });
 }
