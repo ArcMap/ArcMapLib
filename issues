@@ -1,40 +1,80 @@
-if (changedProps.has("geojson")) {
-  const value = this.geojson;
+onUpdateGeojsonLayer(data: any): void {
+  console.log("onUpdateGeojsonLayer", data);
 
-  const isBlank =
-    value === undefined ||
-    value === null ||
-    value === "" ||
-    (
-      typeof value === "object" &&
-      Array.isArray((value as any).features) &&
-      (value as any).features.length === 0
+  const updatedFeature = data?.feature ?? data;
+  const updatedGeometry = data?.geometry ?? updatedFeature?.geometry;
+  const updatedProperties =
+    data?.properties ??
+    data?.attributes ??
+    updatedFeature?.properties ??
+    {};
+
+  if (!updatedGeometry) {
+    console.warn("onUpdateGeojsonLayer skipped: geometry missing", data);
+    return;
+  }
+
+  const editedObjectId =
+    updatedProperties.OBJECTID ??
+    updatedProperties.id ??
+    updatedFeature?.id;
+
+  const selectedFenceIndex = this.currentFeature.findIndex((feature: any) => {
+    const featureId =
+      feature?.id ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id;
+
+    return String(featureId) === String(editedObjectId);
+  });
+
+  if (selectedFenceIndex === -1) {
+    console.warn("Edited feature not found. Skipping update.", {
+      editedObjectId,
+      currentFeature: this.currentFeature,
+      data,
+    });
+    return;
+  }
+
+  if (!CreateFenceUtil.validateFenceBoundaries(updatedFeature)) {
+    this.resetCurrentFeature();
+    this.store.dispatch(
+      new ShowErrorBanner(CreateFenceUtil.ERROR_OUTSIDE_BOUNDARY)
     );
-
-  if (isBlank && !this.inDrawingMode && !this._editorOpen) {
-    console.log("[arc-geojson-layer] blank geojson on startup skipped");
+    this.editGeofenceService.invalidateFenceDrawn();
     return;
   }
 
-  void this.updateGeoJson(value);
-}
+  const existingFeature = this.currentFeature[selectedFenceIndex];
 
+  const finalFeature = {
+    ...existingFeature,
+    id: existingFeature?.id ?? editedObjectId,
+    geometry: {
+      ...(existingFeature?.geometry ?? {}),
+      type: this.isCircle ? "Circle" : updatedGeometry.type,
+      coordinates: updatedGeometry.coordinates,
+    },
+    properties: {
+      ...(existingFeature?.properties ?? {}),
+      ...updatedProperties,
+      id: existingFeature?.properties?.id ?? editedObjectId,
+      OBJECTID: existingFeature?.properties?.OBJECTID ?? editedObjectId,
+    },
+  };
 
-private async updateEditing(enabled: boolean): Promise<void> {
-  this.enableUserEdit = enabled;
+  this.currentFeature = [
+    ...this.currentFeature.slice(0, selectedFenceIndex),
+    finalFeature,
+    ...this.currentFeature.slice(selectedFenceIndex + 1),
+  ];
 
-  if (!enabled) {
-    this.enableInfoPopupWindow(true);
-    return;
+  if (this.geometryData?.[selectedFenceIndex]?.geometry) {
+    this.geometryData[selectedFenceIndex].geometry.coordinates =
+      updatedGeometry.coordinates;
   }
 
-  const hasGraphics = (this.featureLayer?.graphics?.length ?? 0) > 0;
-
-  if (!hasGraphics) {
-    console.log("[arc-geojson-layer] updateEditing skipped: no graphics yet");
-    return;
-  }
-
-  await this.createEditor();
-  this.enableInfoPopupWindow(false);
+  this.editGeofenceService.currentFeature = this.currentFeature;
+  this.cdr.detectChanges();
 }
