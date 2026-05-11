@@ -1,51 +1,63 @@
-private async updateGeojson(usein: any): Promise<void> {
-  if (this.blockGeoJsonUpdate) {
-    return;
-  }
-
+public clearGeoJSONLayer(updateGeojsonProperty = false): void {
   if (this._isClearingGeoJSONLayer) {
     return;
   }
 
-  if (this._lastGeoJsonReference === usein) {
-    return;
-  }
+  this._isClearingGeoJSONLayer = true;
 
-  this._lastGeoJsonReference = usein;
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
 
-  const geojson = JsonUtils.getJsonFor<any>(usein);
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._currentDrawGeometryType = undefined;
 
-  if (
-    geojson.error ||
-    !geojson.parsedJson ||
-    !geojson.parsedJson.features
-  ) {
-    this.clearGeoJSONLayer(false);
-    return;
-  }
+  try {
+    this.view?.popup?.close();
+  } catch {}
 
   this.featureLayer?.graphics?.removeAll();
   this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
 
-  if (!this._editorOpen && !this.inDrawingMode) {
-    this.sketchLayer?.graphics?.removeAll();
-  }
+  const mapLayers = this.view?.map?.layers?.toArray?.() ?? [];
 
-  const fsInfo = this.getUPGISJson(usein);
+  mapLayers.forEach((layer: any) => {
+    const id = String(layer?.id ?? "");
 
-  fsInfo?.graphics?.forEach((graphic: Graphic) => {
-    if (!graphic?.geometry) {
-      return;
+    if (
+      layer === this.featureLayer ||
+      layer === this.labelLayer ||
+      layer === this.sketchLayer ||
+      id.includes("geojson") ||
+      id.includes("geofence") ||
+      id.includes("graphics")
+    ) {
+      try {
+        layer.graphics?.removeAll?.();
+      } catch {}
     }
-
-    this.applyGraphicDefaults(graphic);
-
-    this.featureLayer?.graphics?.add(graphic);
   });
 
-  this.refreshLabels();
+  if (updateGeojsonProperty) {
+    this.blockGeoJsonUpdate = true;
+    this.geojson = {
+      type: "FeatureCollection",
+      features: [],
+    };
+    this.blockGeoJsonUpdate = false;
+  }
 
-  console.log("[up-geojson-layer] updateGeojson DONE", {
-    graphics: this.featureLayer?.graphics?.length ?? 0,
+  this.refreshLabels();
+  this.setMapCursor("default");
+
+  this._isClearingGeoJSONLayer = false;
+
+  console.log("[arc-geojson-layer] clearGeoJSONLayer completed", {
+    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
+    labelLayerGraphics: this.labelLayer?.graphics?.length ?? 0,
+    sketchLayerGraphics: this.sketchLayer?.graphics?.length ?? 0,
   });
 }
