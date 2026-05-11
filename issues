@@ -1,136 +1,32 @@
-private isCircleGraphic(graphic: Graphic): boolean {
-  const value =
-    graphic?.attributes?.drawGeometryType ??
-    graphic?.attributes?.shapeType ??
-    graphic?.attributes?.geometryType ??
-    graphic?.attributes?.shape ??
-    graphic?.attributes?.isCircle;
-
-  return (
-    value === true ||
-    String(value ?? "").toLowerCase() === "circle"
-  );
-}
-
-private resolveUpdateTool(
-  graphic: Graphic
-): "move" | "reshape" | "transform" {
-  /**
-   * Circle is stored as polygon in ArcGIS/GeoJSON.
-   * Do NOT reshape circle vertices.
-   * Use transform so user can move/scale circle-like polygon.
-   */
-  if (this.isCircleGraphic(graphic)) {
-    return "transform";
-  }
-
-  if (
-    this.enableUserEditScaling ||
-    this.enableUserEditRotating
-  ) {
-    return "transform";
-  }
-
-  if (
-    this.enableUserEditAddVertices ||
-    this.enableUserEditDeleteVertices
-  ) {
-    return "reshape";
-  }
-
-  return "move";
-}
-
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.enableUserEdit || !graphic?.geometry) {
-    return;
-  }
-
-  await this.createEditor();
-
+private finishActiveEditor(): void {
   if (!this.graphicsEditor) {
+    this._editorOpen = false;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this.enableInfoPopupWindow(true);
     return;
   }
-
-  this._suppressPopupUntil = Date.now() + 1500;
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-
-  this.enableInfoPopupWindow(false);
 
   try {
-    this.view?.popup?.close();
+    this.graphicsEditor.complete();
   } catch {}
 
   try {
     this.graphicsEditor.cancel();
   } catch {}
 
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._suppressPopupUntil = Date.now() + 700;
 
-  const isCircle = this.isCircleGraphic(graphic);
+  this.enableInfoPopupWindow(true);
 
-  if (isCircle) {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  }
+  try {
+    this.view?.popup?.close();
+  } catch {}
 
-  graphic.popupTemplate = null as any;
+  this.setMapCursor("default");
 
-  const tool = this.resolveUpdateTool(graphic);
-
-  await this.graphicsEditor.update([graphic], {
-    tool,
-    enableRotation:
-      !isCircle && this.enableUserEditRotating,
-
-    enableScaling:
-      isCircle || this.enableUserEditScaling,
-
-    preserveAspectRatio:
-      isCircle || this.enableUserEditUniformScaling,
-
-    multipleSelectionEnabled: false,
-    toggleToolOnClick: false,
-  } as any);
-
-  console.log("[arc-geojson-layer] editor opened", {
-    geometryType: graphic.geometry?.type,
-    isCircle,
-    tool,
-    attributes: graphic.attributes,
-  });
-}
-
-
-if (event.state === "complete") {
-  const graphics = event.graphics ?? [];
-
-  graphics.forEach((graphic: Graphic) => {
-    if (!graphic?.geometry) {
-      return;
-    }
-
-    if (this.isCircleGraphic(graphic)) {
-      graphic.attributes = {
-        ...(graphic.attributes ?? {}),
-        drawGeometryType: "circle",
-        shapeType: "circle",
-        geometryType: "circle",
-        shape: "circle",
-        isCircle: true,
-      };
-    }
-
-    this.updateGeoJsonWithChanges(graphic);
-  });
-
-  this.finishActiveEditor();
-  return;
+  console.log("[arc-geojson-layer] finishActiveEditor DONE");
 }
