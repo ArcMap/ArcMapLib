@@ -1,4 +1,4 @@
-private async updateGeojson(): Promise<void> {
+private async updateGeojson(usein: any): Promise<void> {
   if (this.blockGeoJsonUpdate) {
     return;
   }
@@ -7,70 +7,41 @@ private async updateGeojson(): Promise<void> {
     return;
   }
 
-  /**
-   * VERY IMPORTANT:
-   * Avoid Angular/Lit re-render loop.
-   */
-  if (this._lastGeoJsonReference === this.geojson) {
+  if (this._lastGeoJsonReference === usein) {
     return;
   }
 
-  this._lastGeoJsonReference = this.geojson;
+  this._lastGeoJsonReference = usein;
 
-  console.log("[up-geojson-layer] updateGeojson START");
-
-  const geojson = JsonUtils.getJsonFor<any>(this.geojson);
+  const geojson = JsonUtils.getJsonFor<any>(usein);
 
   if (
     geojson.error ||
     !geojson.parsedJson ||
     !geojson.parsedJson.features
   ) {
-    console.warn("[up-geojson-layer] invalid geojson");
-
     this.clearGeoJSONLayer(false);
     return;
   }
 
-  /**
-   * ONLY clear existing graphics.
-   * DO NOT reset geojson property again.
-   */
   this.featureLayer?.graphics?.removeAll();
   this.labelLayer?.graphics?.removeAll();
 
-  /**
-   * DO NOT CLEAR sketch layer while editing.
-   */
   if (!this._editorOpen && !this.inDrawingMode) {
     this.sketchLayer?.graphics?.removeAll();
   }
 
-  const features = geojson.parsedJson.features ?? [];
+  const fsInfo = this.getUPGISJson(usein);
 
-  console.log("[up-geojson-layer] rendering features", {
-    count: features.length,
-  });
-
-  for (const feature of features) {
-    try {
-      const graphic = this.createGraphicFromGeoJson(feature);
-
-      if (!graphic) {
-        continue;
-      }
-
-      this.applyGraphicDefaults(graphic);
-
-      this.featureLayer?.graphics?.add(graphic);
-    } catch (error) {
-      console.warn(
-        "[up-geojson-layer] feature render failed",
-        error,
-        feature
-      );
+  fsInfo?.graphics?.forEach((graphic: Graphic) => {
+    if (!graphic?.geometry) {
+      return;
     }
-  }
+
+    this.applyGraphicDefaults(graphic);
+
+    this.featureLayer?.graphics?.add(graphic);
+  });
 
   this.refreshLabels();
 
