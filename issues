@@ -1,120 +1,163 @@
-public clearGeoJSONLayer(updateGeojsonProperty = true): void {
-  if (this._isClearingGeoJSONLayer) {
-    return;
+private getDefaultSymbolForGeometry(geometry: Geometry | undefined | null): any {
+  if (!geometry) {
+    return null;
   }
 
-  this._isClearingGeoJSONLayer = true;
+  const geometryType = String((geometry as any).type ?? "").toLowerCase();
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
-
-  this._editorOpen = false;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._currentDrawGeometryType = undefined;
-
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  this.featureLayer?.graphics?.removeAll();
-  this.labelLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.removeAll();
-
-  /**
-   * Angular side sheet fix:
-   * Sometimes old GraphicsLayer references remain on the map.
-   * Clear every layer created by this ArcGeoJSON instance.
-   */
-  const mapLayers = this.view?.map?.layers?.toArray?.() ?? [];
-
-  mapLayers.forEach((layer: any) => {
-    const id = String(layer?.id ?? "");
-
-    if (
-      id === this.featureLayer?.id ||
-      id === this.labelLayer?.id ||
-      id === this.sketchLayer?.id ||
-      id.includes("arc-geojson") ||
-      id.includes(this.name ?? "")
-    ) {
-      try {
-        layer.graphics?.removeAll?.();
-      } catch {}
-    }
-  });
-
-  if (updateGeojsonProperty) {
-    this.blockGeoJsonUpdate = true;
-    this.geojson = {
-      type: "FeatureCollection",
-      features: [],
+  if (geometryType === "point" || geometryType === "multipoint") {
+    return {
+      type: "simple-marker",
+      style: "circle",
+      size: 18,
+      color: [0, 120, 255, 1],
+      outline: {
+        type: "simple-line",
+        color: [255, 255, 255, 1],
+        width: 2,
+        style: "solid",
+      },
     };
-    this.blockGeoJsonUpdate = false;
   }
 
-  this.refreshLabels();
-  this.setMapCursor("default");
+  if (geometryType === "polyline") {
+    return {
+      type: "simple-line",
+      style: "solid",
+      color: [0, 120, 255, 1],
+      width: 3,
+    };
+  }
 
-  this._isClearingGeoJSONLayer = false;
+  return {
+    type: "simple-fill",
+    style: "solid",
+    color: [0, 120, 255, 0.18],
+    outline: {
+      type: "simple-line",
+      color: [0, 120, 255, 1],
+      width: 2,
+      style: "solid",
+    },
+  };
+}
 
-  console.log("[arc-geojson-layer] clearGeoJSONLayer completed", {
-    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
-    labelLayerGraphics: this.labelLayer?.graphics?.length ?? 0,
-    sketchLayerGraphics: this.sketchLayer?.graphics?.length ?? 0,
+
+private applyGraphicDefaults(graphic: Graphic): void {
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const id =
+    graphic.attributes[this.uniqueIdPropertyName] ??
+    graphic.attributes.OBJECTID ??
+    Date.now() + Math.floor(Math.random() * 100000);
+
+  if (graphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    graphic.attributes[this.uniqueIdPropertyName] = id;
+  }
+
+  if (graphic.attributes.OBJECTID === undefined) {
+    graphic.attributes.OBJECTID = id;
+  }
+
+  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
+
+  graphic.symbol =
+    rendererSymbol ??
+    graphic.symbol ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
+
+  graphic.popupTemplate =
+    this._editorOpen || this.inDrawingMode || this._isStartingDraw
+      ? null as any
+      : this.buildPopupTemplateFromCurrent(graphic);
+
+  console.log("[arc-geojson-layer] applyGraphicDefaults", {
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+    symbol: graphic.symbol,
   });
 }
 
 
-disconnectedCallback(): void {
-  super.disconnectedCallback();
-
-  this.clearGeoJSONLayer(false);
-
-  this.editorHandles?.forEach((handle: any) => {
-    try {
-      handle?.remove?.();
-    } catch {}
-  });
-  this.editorHandles = [];
-
-  this.eventHandles?.forEach((handle: any) => {
-    try {
-      handle?.remove?.();
-    } catch {}
-  });
-  this.eventHandles = [];
-
-  try {
-    this.cursorMoveHandle?.remove?.();
-  } catch {}
-  this.cursorMoveHandle = undefined;
-
-  try {
-    this.graphicsEditor?.destroy();
-  } catch {}
-  this.graphicsEditor = undefined as any;
-
-  if (this.view?.map) {
-    try {
-      if (this.featureLayer) {
-        this.view.map.remove(this.featureLayer);
-      }
-
-      if (this.labelLayer) {
-        this.view.map.remove(this.labelLayer);
-      }
-
-      if (this.sketchLayer) {
-        this.view.map.remove(this.sketchLayer);
-      }
-    } catch {}
+static toCanonicalArcGisSymbol(symbolInput: any, geometryType?: string): any {
+  if (!symbolInput) {
+    return JsonUtils.getDefaultSymbolJson(geometryType);
   }
 
-  this.featureLayer = undefined as any;
-  this.labelLayer = undefined as any;
-  this.sketchLayer = undefined as any;
+  const symbol =
+    typeof symbolInput?.toJSON === "function"
+      ? symbolInput.toJSON()
+      : JSON.parse(JSON.stringify(symbolInput));
 
-  console.log("[arc-geojson-layer] disconnectedCallback cleanup completed");
+  const rawType = String(
+    symbol.type ??
+    symbol.symbolType ??
+    symbol.esriType ??
+    ""
+  ).toLowerCase();
+
+  switch (rawType) {
+    case "esrisms":
+    case "esrims":
+    case "sms":
+    case "simplemarkersymbol":
+    case "simple-marker":
+      return {
+        type: "simple-marker",
+        style: JsonUtils.normalizeMarkerStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        size: symbol.size ?? symbol.width ?? 18,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        outline: JsonUtils.normalizeOutline(symbol.outline),
+      };
+
+    case "esripms":
+    case "pms":
+    case "picturemarkersymbol":
+    case "picture-marker":
+      return {
+        type: "picture-marker",
+        url: symbol.url ?? symbol.imageData ?? "",
+        width: symbol.width ?? symbol.size ?? 24,
+        height: symbol.height ?? symbol.size ?? 24,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+      };
+
+    case "esrisls":
+    case "sls":
+    case "simplelinesymbol":
+    case "simple-line":
+      return {
+        type: "simple-line",
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        width: symbol.width ?? 2,
+        style: JsonUtils.normalizeLineStyle(symbol.style),
+      };
+
+    case "esrisfs":
+    case "sfs":
+    case "simplefillsymbol":
+    case "simple-fill":
+      return {
+        type: "simple-fill",
+        style: JsonUtils.normalizeFillStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 0.18]),
+        outline: JsonUtils.normalizeOutline(symbol.outline),
+      };
+
+    default:
+      console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", {
+        rawType,
+        symbol,
+        geometryType,
+      });
+
+      return JsonUtils.getDefaultSymbolJson(geometryType);
+  }
 }
