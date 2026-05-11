@@ -1,29 +1,17 @@
-const geometryCoordinates =
-  (convertedFeature.geometry as any)?.coordinates ?? [];
+const objectId =
+  graphic.attributes?.[this.uniqueIdPropertyName] ??
+  graphic.attributes?.OBJECTID ??
+  graphic.attributes?.id ??
+  Date.now();
 
-const normalizedFeature = {
-  ...convertedFeature,
-  geometry: {
-    ...convertedFeature.geometry,
-    type: "Polygon",
-    coordinates: this.normalizePolygonCoordinates(
-      geometryCoordinates
-    ),
-  },
+return {
+  type: "Feature",
+  id: objectId,
+  geometry: this.arcGeometryToGeoJson(graphic.geometry),
   properties: {
-    ...(convertedFeature.properties ?? {}),
-    ...(isCircle
-      ? {
-          drawGeometryType: "circle",
-          shapeType: "circle",
-          shape: "circle",
-          isCircle: true,
-        }
-      : {
-          drawGeometryType: "polygon",
-          shapeType: "polygon",
-          shape: "polygon",
-          isCircle: false,
-        }),
+    ...(graphic.attributes ?? {}),
+    id: objectId,
+    OBJECTID: objectId,
+    [this.uniqueIdPropertyName]: objectId,
   },
 };
