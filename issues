@@ -1,48 +1,12 @@
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  const editEnabled = this.isUserEditEnabled();
+private isUserEditEnabled(): boolean {
+  const attrValue =
+    this.getAttribute("enable-user-edit") ??
+    this.getAttribute("enableUserEdit");
 
-  if (!editEnabled) {
-    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
-      enableUserEdit: this.enableUserEdit,
-      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
-      attrCamelEnableUserEdit: this.getAttribute("enableUserEdit"),
-      source,
-    });
-    return;
-  }
-
-  this.enableUserEdit = true;
-  this._suppressPopupUntil = Date.now() + 1500;
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
-
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  let graphic: Graphic | null = await this.getHitGraphic(evtOrMapPoint);
-
-  if (!graphic && evtOrMapPoint?.mapPoint) {
-    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
-  }
-
-  if (!graphic) {
-    console.warn("[arc-geojson-layer] double-click editor target not found", {
-      source,
-      graphicsCount: this.featureLayer?.graphics?.length ?? 0,
-    });
-    return;
-  }
-
-  await this.activateGraphicsEditor(graphic);
-
-
-
+  return (
+    this.enableUserEdit === true ||
+    attrValue === "true" ||
+    this.hasAttribute("enable-user-edit") ||
+    this.hasAttribute("enableUserEdit")
+  );
+}
