@@ -1,165 +1,38 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
-    return;
-  }
+const normalizedProperties = (normalizedFeature.properties ?? {}) as Record<string, any>;
 
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  if (!convertedFeature?.geometry) {
-    return;
-  }
-
-  const isCircle = this.isCircleGraphic(graphicToUpdate);
-
-  const normalizedFeature = {
-    ...convertedFeature,
-    geometry: {
-      ...convertedFeature.geometry,
-      type: isCircle ? "Polygon" : "Polygon",
-      coordinates: this.normalizePolygonCoordinates(
-        convertedFeature.geometry.coordinates
-      ),
-    },
-    properties: {
-      ...(convertedFeature.properties ?? {}),
-      ...(isCircle
-        ? {
-            drawGeometryType: "circle",
-            shapeType: "circle",
-            shape: "circle",
-            isCircle: true,
-          }
-        : {
-            drawGeometryType: "polygon",
-            shapeType: "polygon",
-            shape: "polygon",
-            isCircle: false,
-          }),
-    },
-  };
-
-  const parsedResult = JsonUtils.getJsonFor<any>(this.geojson);
-
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : {
-          type: "FeatureCollection",
-          features: [],
-        };
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    normalizedFeature.properties?.[this.uniqueIdPropertyName] ??
-    normalizedFeature.properties?.OBJECTID ??
-    normalizedFeature.properties?.id;
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id ??
-      feature?.id;
-
-    if (
-      updateId !== undefined &&
-      updateId !== null &&
-      String(featureId) === String(updateId)
-    ) {
-      updated = true;
-
-      return {
-        ...feature,
-        geometry: normalizedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(normalizedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(normalizedFeature);
-  }
-
-  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
-    type: "FeatureCollection",
-    features: updatedFeatures as any,
-  };
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.requestUpdate("geojson");
-  this.blockGeoJsonUpdate = false;
-
-  this.refreshLabels();
-
-  this.emitLayerEvent("userEditItemUpdated", normalizedFeature as any, graphicToUpdate, {
-    geojson: updatedGeoJson,
-  });
-
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: updateId,
-    updated,
-    isCircle,
-    geometryType: normalizedFeature.geometry.type,
-    coordinates: normalizedFeature.geometry.coordinates,
-    featureCount: updatedFeatures.length,
-  });
-}
+const updateId =
+  graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+  graphicToUpdate.attributes?.OBJECTID ??
+  normalizedProperties[this.uniqueIdPropertyName] ??
+  normalizedProperties.OBJECTID ??
+  normalizedProperties.id;
 
 
-private normalizePolygonCoordinates(coordinates: any): any {
-  if (!Array.isArray(coordinates)) {
-    return coordinates;
-  }
+const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+  const featureProperties = (feature?.properties ?? {}) as Record<string, any>;
 
-  let rings = coordinates;
+  const featureId =
+    featureProperties[this.uniqueIdPropertyName] ??
+    featureProperties.OBJECTID ??
+    featureProperties.id ??
+    feature?.id;
 
   if (
-    Array.isArray(coordinates[0]) &&
-    typeof coordinates[0][0] === "number"
+    updateId !== undefined &&
+    updateId !== null &&
+    String(featureId) === String(updateId)
   ) {
-    rings = [coordinates];
+    updated = true;
+
+    return {
+      ...feature,
+      geometry: normalizedFeature.geometry,
+      properties: {
+        ...featureProperties,
+        ...normalizedProperties,
+      },
+    };
   }
 
-  if (
-    Array.isArray(coordinates[0]) &&
-    Array.isArray(coordinates[0][0]) &&
-    typeof coordinates[0][0][0] === "number"
-  ) {
-    rings = coordinates;
-  }
-
-  return rings.map((ring: any[]) => {
-    const normalizedRing = ring.filter(
-      (point: any) =>
-        Array.isArray(point) &&
-        typeof point[0] === "number" &&
-        typeof point[1] === "number"
-    );
-
-    if (normalizedRing.length === 0) {
-      return normalizedRing;
-    }
-
-    const first = normalizedRing[0];
-    const last = normalizedRing[normalizedRing.length - 1];
-
-    if (first[0] !== last[0] || first[1] !== last[1]) {
-      normalizedRing.push([first[0], first[1]]);
-    }
-
-    return normalizedRing;
-  });
-}
+  return feature;
+});
