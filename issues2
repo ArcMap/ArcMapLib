@@ -1,0 +1,17 @@
+const normalizedProperties =
+  (normalizedFeature.properties ?? {}) as Record<string, any>;
+
+const updateId =
+  graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+  graphicToUpdate.attributes?.OBJECTID ??
+  normalizedProperties[this.uniqueIdPropertyName] ??
+  normalizedProperties.OBJECTID ??
+  normalizedProperties.id;
+
+
+
+
+properties: {
+  ...(feature.properties ?? {}),
+  ...normalizedProperties,
+},
