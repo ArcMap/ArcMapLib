@@ -1,17 +1,40 @@
-const objectId =
-  graphic.attributes?.[this.uniqueIdPropertyName] ??
-  graphic.attributes?.OBJECTID ??
-  graphic.attributes?.id ??
-  Date.now();
+if (changedProps.has("geojson")) {
+  const value = this.geojson;
 
-return {
-  type: "Feature",
-  id: objectId,
-  geometry: this.arcGeometryToGeoJson(graphic.geometry),
-  properties: {
-    ...(graphic.attributes ?? {}),
-    id: objectId,
-    OBJECTID: objectId,
-    [this.uniqueIdPropertyName]: objectId,
-  },
-};
+  const isBlank =
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    (
+      typeof value === "object" &&
+      Array.isArray((value as any).features) &&
+      (value as any).features.length === 0
+    );
+
+  if (isBlank && !this.inDrawingMode && !this._editorOpen) {
+    console.log("[arc-geojson-layer] blank geojson on startup skipped");
+    return;
+  }
+
+  void this.updateGeoJson(value);
+}
+
+
+private async updateEditing(enabled: boolean): Promise<void> {
+  this.enableUserEdit = enabled;
+
+  if (!enabled) {
+    this.enableInfoPopupWindow(true);
+    return;
+  }
+
+  const hasGraphics = (this.featureLayer?.graphics?.length ?? 0) > 0;
+
+  if (!hasGraphics) {
+    console.log("[arc-geojson-layer] updateEditing skipped: no graphics yet");
+    return;
+  }
+
+  await this.createEditor();
+  this.enableInfoPopupWindow(false);
+}
