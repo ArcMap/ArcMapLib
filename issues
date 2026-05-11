@@ -1,52 +1,51 @@
-public cancelDrawing(): void {
-  console.log("[arc-geojson-layer] cancelDrawing START");
+private emitLayerEvent(
+  eventName: string,
+  feature?: Feature | null,
+  graphic?: Graphic | null,
+  extraData?: any
+): void {
+  const safeFeature =
+    feature ??
+    (graphic?.geometry
+      ? this.graphicToGeoJsonFeature(graphic)
+      : null);
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch (error) {
-    console.warn(
-      "[arc-geojson-layer] graphicsEditor cancel failed",
-      error
-    );
-  }
+  const attributes =
+    safeFeature?.properties ??
+    graphic?.attributes ??
+    {};
 
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._currentDrawGeometryType = undefined;
+  const geometry =
+    safeFeature?.geometry ??
+    (graphic?.geometry ? this.arcGeometryToGeoJson(graphic.geometry) : null);
 
-  this.enableInfoPopupWindow(true);
+  const objectId =
+    attributes?.OBJECTID ??
+    attributes?.objectId ??
+    attributes?.id ??
+    null;
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  try {
-    this.featureLayer?.graphics?.removeAll();
-  } catch {}
-
-  try {
-    this.labelLayer?.graphics?.removeAll();
-  } catch {}
-
-  try {
-    this.sketchLayer?.graphics?.removeAll();
-  } catch {}
-
-  try {
-    this.graphicsLayer?.removeAll();
-  } catch {}
-
-  this.setMapCursor("default");
-
-  console.log("[arc-geojson-layer] cancelDrawing DONE", {
-    featureLayerGraphics:
-      this.featureLayer?.graphics?.length ?? 0,
-
-    labelLayerGraphics:
-      this.labelLayer?.graphics?.length ?? 0,
-
-    sketchLayerGraphics:
-      this.sketchLayer?.graphics?.length ?? 0,
-  });
+  this.dispatchEvent(
+    new CustomEvent(eventName, {
+      detail: {
+        type: eventName,
+        OBJECTID: objectId,
+        objectId,
+        id: objectId,
+        feature: safeFeature,
+        graphic: graphic ?? null,
+        attributes,
+        properties: attributes,
+        geometry,
+        geojson: this.geojson,
+        layerId:
+          this.featureLayer?.id ??
+          this.name ??
+          "arc-geojson-layer",
+        ...extraData,
+      },
+      bubbles: true,
+      composed: true,
+    })
+  );
 }
