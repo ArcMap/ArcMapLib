@@ -1,69 +1,98 @@
-public cancelDrawing(): void {
-  console.log("[arc-geojson-layer] cancelDrawing START", {
-    inDrawingMode: this.inDrawingMode,
-    isStartingDraw: this._isStartingDraw,
-    editorOpen: this._editorOpen,
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
+    return;
+  }
+
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
+
+  if (!convertedFeature?.geometry) {
+    return;
+  }
+
+  const parsedResult = JsonUtils.getJsonFor<any>(this.geojson);
+
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : {
+          type: "FeatureCollection",
+          features: [],
+        };
+
+  const updateId =
+    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    convertedFeature.properties?.[this.uniqueIdPropertyName] ??
+    convertedFeature.properties?.OBJECTID ??
+    convertedFeature.properties?.id;
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.properties?.[this.uniqueIdPropertyName] ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id ??
+      feature?.id;
+
+    if (
+      updateId !== undefined &&
+      updateId !== null &&
+      String(featureId) === String(updateId)
+    ) {
+      updated = true;
+
+      return {
+        ...feature,
+        geometry: convertedFeature.geometry,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(convertedFeature.properties ?? {}),
+        },
+      };
+    }
+
+    return feature;
   });
 
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
+  if (!updated) {
+    updatedFeatures.push(convertedFeature);
+  }
 
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._currentDrawGeometryType = undefined;
+  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
+    type: "FeatureCollection",
+    features: updatedFeatures as any,
+  };
 
-  try {
-    this.view?.popup?.close();
-  } catch {}
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.requestUpdate("geojson");
+  this.blockGeoJsonUpdate = false;
 
-  /**
-   * IMPORTANT:
-   * cancelDrawing is ONLY for create mode / unsaved drawing.
-   * It is allowed to clear graphics only when user was drawing a new item.
-   */
-  this.featureLayer?.graphics?.removeAll();
-  this.labelLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.removeAll();
+  this.refreshLabels();
 
-  this.enableInfoPopupWindow(true);
-  this.setMapCursor("default");
+  this.emitLayerEvent("userEditItemUpdated", convertedFeature, graphicToUpdate, {
+    geojson: updatedGeoJson,
+  });
 
-  console.log("[arc-geojson-layer] cancelDrawing DONE");
-}
+  this.dispatchEvent(
+    new CustomEvent("geojson-change", {
+      detail: {
+        geojson: updatedGeoJson,
+      },
+      bubbles: true,
+      composed: true,
+    })
+  );
 
-
-private finishActiveEditor(): void {
-  console.log("[arc-geojson-layer] finishActiveEditor START");
-
-  try {
-    this.graphicsEditor?.complete();
-  } catch {}
-
-  try {
-    this.graphicsEditor?.cancel();
-  } catch {}
-
-  /**
-   * IMPORTANT:
-   * Do NOT clear featureLayer graphics here.
-   * Edit mode must keep existing polygon/circle on the map.
-   */
-  this._editorOpen = false;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._suppressPopupUntil = Date.now() + 700;
-
-  this.enableInfoPopupWindow(true);
-
-  try {
-    this.view?.popup?.close();
-  } catch {}
-
-  this.setMapCursor("default");
-
-  console.log("[arc-geojson-layer] finishActiveEditor DONE", {
-    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: updateId,
+    updated,
+    nativeGeojsonAfterSet: this.geojson,
+    featureCount: updatedFeatures.length,
   });
 }
