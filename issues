@@ -1,93 +1,69 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
-    return;
-  }
-
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-
-  if (!convertedFeature?.geometry) {
-    return;
-  }
-
-  const parsedResult = JsonUtils.getJsonFor<any>(this.geojson);
-
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : {
-          type: "FeatureCollection",
-          features: [],
-        };
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    convertedFeature.properties?.[this.uniqueIdPropertyName] ??
-    convertedFeature.properties?.OBJECTID;
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id;
-
-    if (
-      updateId !== undefined &&
-      updateId !== null &&
-      String(featureId) === String(updateId)
-    ) {
-      updated = true;
-      return {
-        ...feature,
-        geometry: convertedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(convertedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
+public cancelDrawing(): void {
+  console.log("[arc-geojson-layer] cancelDrawing START", {
+    inDrawingMode: this.inDrawingMode,
+    isStartingDraw: this._isStartingDraw,
+    editorOpen: this._editorOpen,
   });
 
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._currentDrawGeometryType = undefined;
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
   /**
-   * Safety:
-   * If existing feature was not found, add it instead of losing it.
+   * IMPORTANT:
+   * cancelDrawing is ONLY for create mode / unsaved drawing.
+   * It is allowed to clear graphics only when user was drawing a new item.
    */
-  if (!updated) {
-    updatedFeatures.push(convertedFeature);
-  }
+  this.featureLayer?.graphics?.removeAll();
+  this.labelLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
 
-  const updatedGeoJson = {
-    type: "FeatureCollection",
-    features: updatedFeatures,
-  };
+  this.enableInfoPopupWindow(true);
+  this.setMapCursor("default");
 
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.blockGeoJsonUpdate = false;
+  console.log("[arc-geojson-layer] cancelDrawing DONE");
+}
 
-  this.refreshLabels();
 
-  this.emitLayerEvent(
-    "userEditItemUpdated",
-    convertedFeature,
-    graphicToUpdate,
-    {
-      geojson: updatedGeoJson,
-    }
-  );
+private finishActiveEditor(): void {
+  console.log("[arc-geojson-layer] finishActiveEditor START");
 
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: updateId,
-    updated,
-    geometryType: graphicToUpdate.geometry?.type,
-    featureCount: updatedFeatures.length,
+  try {
+    this.graphicsEditor?.complete();
+  } catch {}
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  /**
+   * IMPORTANT:
+   * Do NOT clear featureLayer graphics here.
+   * Edit mode must keep existing polygon/circle on the map.
+   */
+  this._editorOpen = false;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._suppressPopupUntil = Date.now() + 700;
+
+  this.enableInfoPopupWindow(true);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  this.setMapCursor("default");
+
+  console.log("[arc-geojson-layer] finishActiveEditor DONE", {
+    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
   });
 }
