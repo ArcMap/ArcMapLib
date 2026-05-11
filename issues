@@ -1,80 +1,48 @@
-onUpdateGeojsonLayer(data: any): void {
-  console.log("onUpdateGeojsonLayer", data);
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  const editEnabled = this.isUserEditEnabled();
 
-  const updatedFeature = data?.feature ?? data;
-  const updatedGeometry = data?.geometry ?? updatedFeature?.geometry;
-  const updatedProperties =
-    data?.properties ??
-    data?.attributes ??
-    updatedFeature?.properties ??
-    {};
-
-  if (!updatedGeometry) {
-    console.warn("onUpdateGeojsonLayer skipped: geometry missing", data);
-    return;
-  }
-
-  const editedObjectId =
-    updatedProperties.OBJECTID ??
-    updatedProperties.id ??
-    updatedFeature?.id;
-
-  const selectedFenceIndex = this.currentFeature.findIndex((feature: any) => {
-    const featureId =
-      feature?.id ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id;
-
-    return String(featureId) === String(editedObjectId);
-  });
-
-  if (selectedFenceIndex === -1) {
-    console.warn("Edited feature not found. Skipping update.", {
-      editedObjectId,
-      currentFeature: this.currentFeature,
-      data,
+  if (!editEnabled) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
+      enableUserEdit: this.enableUserEdit,
+      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
+      attrCamelEnableUserEdit: this.getAttribute("enableUserEdit"),
+      source,
     });
     return;
   }
 
-  if (!CreateFenceUtil.validateFenceBoundaries(updatedFeature)) {
-    this.resetCurrentFeature();
-    this.store.dispatch(
-      new ShowErrorBanner(CreateFenceUtil.ERROR_OUTSIDE_BOUNDARY)
-    );
-    this.editGeofenceService.invalidateFenceDrawn();
+  this.enableUserEdit = true;
+  this._suppressPopupUntil = Date.now() + 1500;
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view!.popupEnabled = false;
+    this.view?.popup?.close();
+  } catch {}
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
     return;
   }
 
-  const existingFeature = this.currentFeature[selectedFenceIndex];
+  let graphic: Graphic | null = await this.getHitGraphic(evtOrMapPoint);
 
-  const finalFeature = {
-    ...existingFeature,
-    id: existingFeature?.id ?? editedObjectId,
-    geometry: {
-      ...(existingFeature?.geometry ?? {}),
-      type: this.isCircle ? "Circle" : updatedGeometry.type,
-      coordinates: updatedGeometry.coordinates,
-    },
-    properties: {
-      ...(existingFeature?.properties ?? {}),
-      ...updatedProperties,
-      id: existingFeature?.properties?.id ?? editedObjectId,
-      OBJECTID: existingFeature?.properties?.OBJECTID ?? editedObjectId,
-    },
-  };
-
-  this.currentFeature = [
-    ...this.currentFeature.slice(0, selectedFenceIndex),
-    finalFeature,
-    ...this.currentFeature.slice(selectedFenceIndex + 1),
-  ];
-
-  if (this.geometryData?.[selectedFenceIndex]?.geometry) {
-    this.geometryData[selectedFenceIndex].geometry.coordinates =
-      updatedGeometry.coordinates;
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
   }
 
-  this.editGeofenceService.currentFeature = this.currentFeature;
-  this.cdr.detectChanges();
-}
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] double-click editor target not found", {
+      source,
+      graphicsCount: this.featureLayer?.graphics?.length ?? 0,
+    });
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
+
+
+
