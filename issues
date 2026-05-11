@@ -1,3 +1,245 @@
+private applyGraphicDefaults(graphic: Graphic): void {
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const id =
+    graphic.attributes[this.uniqueIdPropertyName] ??
+    graphic.attributes.OBJECTID ??
+    Date.now() + Math.floor(Math.random() * 100000);
+
+  if (graphic.attributes[this.uniqueIdPropertyName] === undefined) {
+    graphic.attributes[this.uniqueIdPropertyName] = id;
+  }
+
+  if (graphic.attributes.OBJECTID === undefined) {
+    graphic.attributes.OBJECTID = id;
+  }
+
+  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
+
+  const finalSymbol =
+    rendererSymbol ??
+    graphic.symbol ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
+
+  graphic.symbol = this.coerceSymbolForGeometry(finalSymbol, graphic.geometry);
+
+  graphic.popupTemplate =
+    this._editorOpen || this.inDrawingMode || this._isStartingDraw
+      ? null as any
+      : this.buildPopupTemplateFromCurrent(graphic);
+
+  console.log("[arc-geojson-layer] applyGraphicDefaults", {
+    geometryType: graphic.geometry?.type,
+    rendererSymbol,
+    finalSymbol: graphic.symbol,
+    attributes: graphic.attributes,
+  });
+}
+
+
+private getSymbolFromRendererConfig(
+  rendererRaw: any,
+  graphic: Graphic
+): any {
+  const parsed = JsonUtils.getJsonFor<any>(rendererRaw);
+
+  if (parsed.error || !parsed.parsedJson || !graphic?.attributes) {
+    return null;
+  }
+
+  const renderer = parsed.parsedJson;
+  const rendererType = String(renderer.type ?? "").toLowerCase();
+
+  if (rendererType === "simple") {
+    const symbol = JsonUtils.createSymbolFromJson(
+      renderer.symbol ?? renderer.defaultSymbol,
+      graphic.geometry?.type
+    );
+
+    return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+  }
+
+  if (rendererType !== "unique-value" && rendererType !== "uniquevalue") {
+    if (!renderer.defaultSymbol) {
+      return null;
+    }
+
+    const symbol = JsonUtils.createSymbolFromJson(
+      renderer.defaultSymbol,
+      graphic.geometry?.type
+    );
+
+    return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+  }
+
+  const attrs = graphic.attributes ?? {};
+
+  const field1 = renderer.field1 ?? renderer.field;
+  const field2 = renderer.field2;
+  const field3 = renderer.field3;
+
+  const fields = [field1, field2, field3].filter(Boolean);
+
+  const values = fields.map((fieldName: string) =>
+    String(attrs[fieldName] ?? "").trim()
+  );
+
+  const hasDelimiter =
+    renderer.fieldDelimiter !== undefined &&
+    renderer.fieldDelimiter !== null;
+
+  const delimiter = hasDelimiter ? String(renderer.fieldDelimiter) : undefined;
+
+  const candidateKeys = new Set<string>();
+
+  if (hasDelimiter) {
+    candidateKeys.add(values.join(delimiter));
+  }
+
+  candidateKeys.add(values.join(""));
+  candidateKeys.add(values.join("|"));
+  candidateKeys.add(values.join(","));
+  candidateKeys.add(values.join(", "));
+
+  values.forEach((value) => {
+    if (value) {
+      candidateKeys.add(value);
+    }
+  });
+
+  const keys = Array.from(candidateKeys).map((value) =>
+    String(value ?? "").trim()
+  );
+
+  const matchedInfo = renderer.uniqueValueInfos?.find((info: any) => {
+    return keys.includes(String(info.value ?? "").trim());
+  });
+
+  const rawSymbol =
+    matchedInfo?.symbol ??
+    renderer.defaultSymbol ??
+    renderer.symbol ??
+    null;
+
+  if (!rawSymbol) {
+    return null;
+  }
+
+  const symbol = JsonUtils.createSymbolFromJson(
+    rawSymbol,
+    graphic.geometry?.type
+  );
+
+  const coercedSymbol = this.coerceSymbolForGeometry(symbol, graphic.geometry);
+
+  console.log("[arc-geojson-layer] renderer symbol matched", {
+    geometryType: graphic.geometry?.type,
+    keys,
+    matchedValue: matchedInfo?.value,
+    rawSymbol,
+    coercedSymbol,
+  });
+
+  return coercedSymbol;
+}
+
+
+
+private coerceSymbolForGeometry(symbol: any, geometry: Geometry | null | undefined): any {
+  if (!symbol || !geometry) {
+    return symbol;
+  }
+
+  const geometryType = String((geometry as any).type ?? "").toLowerCase();
+  const symbolType = String(symbol.type ?? "").toLowerCase();
+
+  if (geometryType === "point" || geometryType === "multipoint") {
+    if (symbolType === "simple-marker" || symbolType === "picture-marker") {
+      return symbol;
+    }
+
+    const color =
+      symbol.color ??
+      symbol.outline?.color ??
+      [0, 120, 255, 1];
+
+    return {
+      type: "simple-marker",
+      style: "circle",
+      size: 18,
+      color,
+      outline: {
+        type: "simple-line",
+        color: symbol.outline?.color ?? [255, 255, 255, 1],
+        width: symbol.outline?.width ?? 2,
+        style: "solid",
+      },
+    };
+  }
+
+  if (geometryType === "polyline") {
+    if (symbolType === "simple-line") {
+      return symbol;
+    }
+
+    return {
+      type: "simple-line",
+      color:
+        symbol.outline?.color ??
+        symbol.color ??
+        [0, 120, 255, 1],
+      width:
+        symbol.outline?.width ??
+        symbol.width ??
+        3,
+      style: "solid",
+    };
+  }
+
+  if (geometryType === "polygon" || geometryType === "extent") {
+    if (symbolType === "simple-fill") {
+      return symbol;
+    }
+
+    const baseColor =
+      symbol.color ??
+      symbol.outline?.color ??
+      [0, 120, 255, 1];
+
+    const fillColor = Array.isArray(baseColor)
+      ? [
+          baseColor[0],
+          baseColor[1],
+          baseColor[2],
+          0.18,
+        ]
+      : baseColor;
+
+    return {
+      type: "simple-fill",
+      style: "solid",
+      color: fillColor,
+      outline: {
+        type: "simple-line",
+        color:
+          symbol.outline?.color ??
+          symbol.color ??
+          [0, 120, 255, 1],
+        width:
+          symbol.outline?.width ??
+          symbol.width ??
+          2,
+        style: "solid",
+      },
+    };
+  }
+
+  return symbol;
+}
+
+
 private getDefaultSymbolForGeometry(geometry: Geometry | undefined | null): any {
   if (!geometry) {
     return null;
@@ -40,124 +282,4 @@ private getDefaultSymbolForGeometry(geometry: Geometry | undefined | null): any 
       style: "solid",
     },
   };
-}
-
-
-private applyGraphicDefaults(graphic: Graphic): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const id =
-    graphic.attributes[this.uniqueIdPropertyName] ??
-    graphic.attributes.OBJECTID ??
-    Date.now() + Math.floor(Math.random() * 100000);
-
-  if (graphic.attributes[this.uniqueIdPropertyName] === undefined) {
-    graphic.attributes[this.uniqueIdPropertyName] = id;
-  }
-
-  if (graphic.attributes.OBJECTID === undefined) {
-    graphic.attributes.OBJECTID = id;
-  }
-
-  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
-
-  graphic.symbol =
-    rendererSymbol ??
-    graphic.symbol ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
-
-  graphic.popupTemplate =
-    this._editorOpen || this.inDrawingMode || this._isStartingDraw
-      ? null as any
-      : this.buildPopupTemplateFromCurrent(graphic);
-
-  console.log("[arc-geojson-layer] applyGraphicDefaults", {
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
-    symbol: graphic.symbol,
-  });
-}
-
-
-static toCanonicalArcGisSymbol(symbolInput: any, geometryType?: string): any {
-  if (!symbolInput) {
-    return JsonUtils.getDefaultSymbolJson(geometryType);
-  }
-
-  const symbol =
-    typeof symbolInput?.toJSON === "function"
-      ? symbolInput.toJSON()
-      : JSON.parse(JSON.stringify(symbolInput));
-
-  const rawType = String(
-    symbol.type ??
-    symbol.symbolType ??
-    symbol.esriType ??
-    ""
-  ).toLowerCase();
-
-  switch (rawType) {
-    case "esrisms":
-    case "esrims":
-    case "sms":
-    case "simplemarkersymbol":
-    case "simple-marker":
-      return {
-        type: "simple-marker",
-        style: JsonUtils.normalizeMarkerStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
-        size: symbol.size ?? symbol.width ?? 18,
-        angle: symbol.angle ?? 0,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-        outline: JsonUtils.normalizeOutline(symbol.outline),
-      };
-
-    case "esripms":
-    case "pms":
-    case "picturemarkersymbol":
-    case "picture-marker":
-      return {
-        type: "picture-marker",
-        url: symbol.url ?? symbol.imageData ?? "",
-        width: symbol.width ?? symbol.size ?? 24,
-        height: symbol.height ?? symbol.size ?? 24,
-        angle: symbol.angle ?? 0,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-      };
-
-    case "esrisls":
-    case "sls":
-    case "simplelinesymbol":
-    case "simple-line":
-      return {
-        type: "simple-line",
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
-        width: symbol.width ?? 2,
-        style: JsonUtils.normalizeLineStyle(symbol.style),
-      };
-
-    case "esrisfs":
-    case "sfs":
-    case "simplefillsymbol":
-    case "simple-fill":
-      return {
-        type: "simple-fill",
-        style: JsonUtils.normalizeFillStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 0.18]),
-        outline: JsonUtils.normalizeOutline(symbol.outline),
-      };
-
-    default:
-      console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", {
-        rawType,
-        symbol,
-        geometryType,
-      });
-
-      return JsonUtils.getDefaultSymbolJson(geometryType);
-  }
 }
