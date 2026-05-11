@@ -1,37 +1,411 @@
-const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
-  if (!this.view || !this.featureLayer || this.inDrawingMode || this._isStartingDraw) {
-    this.setMapCursor("default");
+protected updated(changedProps: Map<string, unknown>): void {
+
+  if (changedProps.has('renderer')) {
+    this.updateRenderer(this.renderer);
+  }
+
+  if (changedProps.has('layerClass')) {
+    this.updateLayerClass(this.layerClass);
+  }
+
+  if (
+    changedProps.has('enableUserEdit') ||
+    changedProps.has('enableUserEditMove') ||
+    changedProps.has('enableUserEditVertices') ||
+    changedProps.has('enableUserEditScaling') ||
+    changedProps.has('enableUserEditUniformScaling') ||
+    changedProps.has('enableUserEditRotating') ||
+    changedProps.has('enableUserEditAddVertices') ||
+    changedProps.has('enableUserEditDeleteVertices')
+  ) {
+
+    /**
+     * IMPORTANT
+     * Prevent editor recreation loops.
+     */
+
+    const oldValue = changedProps.get('enableUserEdit');
+
+    if (oldValue !== this.enableUserEdit) {
+      this.updateEditing(this.enableUserEdit);
+    }
+  }
+
+  /**
+   * IMPORTANT
+   * Prevent recursive geojson updates during edit.
+   */
+
+  if (
+    changedProps.has('geojson') &&
+    !this.blockGeoJsonUpdate &&
+    !this.isUpdatingGeometry &&
+    !this.editorOpen
+  ) {
+
+    this.updateGeoJson(this.geojson);
+  }
+}
+
+
+private async updateEditing(enabled: boolean): Promise<void> {
+
+  console.log('[arc-geojson-layer] updateEditing', {
+    enabled,
+    editorOpen: this.editorOpen,
+    inDrawingMode: this.inDrawingMode
+  });
+
+  this.enableUserEdit = enabled;
+
+  /**
+   * VIEW MODE
+   */
+  if (!enabled) {
+
+    this.finishActiveEditor();
+
+    this.enableInfoPopupWindow(true);
+
+    this.editorOpen = false;
+
     return;
   }
 
-  const graphic = await this.getHitGraphic(evt);
+  /**
+   * EDIT MODE
+   */
+  this.enableInfoPopupWindow(false);
 
-  if (graphic?.geometry) {
-    this.setMapCursor("pointer");
+  /**
+   * IMPORTANT
+   * Do not recreate editor repeatedly.
+   */
+
+  if (this.sketchViewModel) {
     return;
   }
 
-  this.setMapCursor("default");
-});
+  await this.createEditor();
+}
 
 
+private finishActiveEditor(): void {
 
-private setMapCursor(cursor: "default" | "pointer"): void {
-  const container = this.view?.container as HTMLElement | undefined;
+  console.log('[arc-geojson-layer] finishActiveEditor');
 
-  if (!container) {
+  this.editorOpen = false;
+
+  this.inDrawingMode = false;
+
+  if (!this.sketchViewModel) {
     return;
   }
 
-  const value = cursor === "pointer" ? "pointer" : "default";
+  try {
 
-  container.style.cursor = value;
+    this.sketchViewModel.cancel();
 
-  const surfaces = container.querySelectorAll(
-    ".esri-view-surface, canvas, .esri-view-root, .esri-view"
-  );
+  } catch (error) {
 
-  surfaces.forEach((el: Element) => {
-    (el as HTMLElement).style.cursor = value;
+    console.warn(
+      '[arc-geojson-layer] sketch cancel failed',
+      error
+    );
+  }
+}
+
+
+private enableInfoPopupWindow(enable: boolean): void {
+
+  if (!this.featureLayer) {
+    return;
+  }
+
+  this.featureLayer.popupEnabled = enable;
+
+  this.featureLayer.graphics.forEach((graphic: Graphic) => {
+
+    /**
+     * EDIT MODE
+     */
+    if (!enable) {
+
+      graphic.popupTemplate = null;
+
+      return;
+    }
+
+    /**
+     * VIEW MODE
+     */
+    graphic.popupTemplate =
+      this.buildPopupTemplateFromCurrent(graphic);
   });
 }
+
+private bindViewEvents(): void {
+
+  if (!this.mapView || !this.featureLayer) {
+    return;
+  }
+
+  /**
+   * POINTER CURSOR
+   */
+  this.pointerMoveHandle = this.mapView.on(
+    'pointer-move',
+    async (event: any) => {
+
+      if (!this.mapView) {
+        return;
+      }
+
+      const hit = await this.mapView.hitTest(event);
+
+      const hasFeature = hit.results.some((result: any) => {
+
+        return (
+          result.graphic &&
+          result.graphic.layer === this.featureLayer
+        );
+      });
+
+      this.mapView.container.style.cursor =
+        hasFeature ? 'pointer' : 'default';
+    }
+  );
+
+  /**
+   * DOUBLE CLICK
+   */
+  this.doubleClickHandle = this.mapView.on(
+    'double-click',
+    async (event: any) => {
+
+      if (!this.enableUserEdit) {
+        return;
+      }
+
+      event.stopPropagation();
+
+      const hit = await this.mapView?.hitTest(event);
+
+      const result = hit?.results?.find((r: any) => {
+
+        return (
+          r.graphic &&
+          r.graphic.layer === this.featureLayer
+        );
+      });
+
+      if (!result?.graphic) {
+        return;
+      }
+
+      console.log(
+        '[arc-geojson-layer] double click editor target',
+        result.graphic
+      );
+
+      this.openEditorForGraphic(result.graphic);
+    }
+  );
+}
+
+private openEditorForGraphic(
+  graphic: Graphic
+): void {
+
+  if (!this.sketchViewModel) {
+    return;
+  }
+
+  if (!this.enableUserEdit) {
+    return;
+  }
+
+  /**
+   * Prevent popup during edit.
+   */
+  this.suppressPopupOpen = true;
+
+  this.mapView?.popup?.close();
+
+  this.enableInfoPopupWindow(false);
+
+  this.editorOpen = true;
+
+  this.currentEditGraphic = graphic;
+
+  const isCircle =
+    graphic.attributes?.isCircle ||
+    graphic.attributes?.shape === 'circle';
+
+  console.log(
+    '[arc-geojson-layer] editor opened',
+    {
+      geometryType: graphic.geometry?.type,
+      isCircle
+    }
+  );
+
+  try {
+
+    this.sketchViewModel.update([graphic], {
+      tool: isCircle ? 'transform' : 'reshape',
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio:
+        this.enableUserEditUniformScaling,
+
+      toggleToolOnClick: false
+    });
+
+  } catch (error) {
+
+    console.error(
+      '[arc-geojson-layer] sketch update failed',
+      error
+    );
+  }
+}
+
+
+private updateGeoJsonWithChanges(
+  graphicToUpdate: Graphic
+): void {
+
+  if (!graphicToUpdate?.geometry) {
+    return;
+  }
+
+  const convertedFeature =
+    this.convertGraphicToGeoJson(graphicToUpdate);
+
+  if (!convertedFeature?.geometry) {
+    return;
+  }
+
+  const parsedResult =
+    this.getJsonForAny(this.geojson);
+
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : {
+          type: 'FeatureCollection',
+          features: []
+        };
+
+  const updateId =
+    graphicToUpdate.attributes?.[
+      this.uniqueIdPropertyName
+    ] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    convertedFeature.properties?.[
+      this.uniqueIdPropertyName
+    ] ??
+    convertedFeature.properties?.OBJECTID ??
+    convertedFeature.properties?.id;
+
+  let updated = false;
+
+  const updatedFeatures =
+    currentGeoJson.features.map((feature: any) => {
+
+      const featureId =
+        feature?.properties?.[
+          this.uniqueIdPropertyName
+        ] ??
+        feature?.properties?.OBJECTID ??
+        feature?.properties?.id;
+
+      if (String(featureId) === String(updateId)) {
+
+        updated = true;
+
+        return {
+          ...feature,
+          geometry: convertedFeature.geometry,
+
+          properties: {
+            ...(feature.properties ?? {}),
+            ...(convertedFeature.properties ?? {})
+          }
+        };
+      }
+
+      return feature;
+    });
+
+  /**
+   * Safety
+   */
+  if (!updated) {
+
+    updatedFeatures.push(convertedFeature as any);
+  }
+
+  const updatedGeoJson: FeatureCollection = {
+    type: 'FeatureCollection',
+    features: updatedFeatures as any
+  };
+
+  this.isUpdatingGeometry = true;
+
+  this.blockGeoJsonUpdate = true;
+
+  this.geojson = updatedGeoJson;
+
+  this.dispatchLayerEvent(
+    'userEditItemUpdated',
+    convertedFeature,
+    graphicToUpdate,
+    {
+      geojson: updatedGeoJson
+    }
+  );
+
+  console.log(
+    '[arc-geojson-layer] edited geometry saved',
+    {
+      objectId: updateId,
+      updated,
+      featureCount: updatedFeatures.length
+    }
+  );
+
+  requestAnimationFrame(() => {
+
+    this.blockGeoJsonUpdate = false;
+
+    this.isUpdatingGeometry = false;
+  });
+}
+
+
+private applyCursorPointer(): void {
+
+  if (!this.featureLayer) {
+    return;
+  }
+
+  this.featureLayer.on('mouse-over', () => {
+
+    if (this.mapView) {
+      this.mapView.container.style.cursor = 'pointer';
+    }
+  });
+
+  this.featureLayer.on('mouse-out', () => {
+
+    if (this.mapView) {
+      this.mapView.container.style.cursor = 'default';
+    }
+  });
+}
+
+
