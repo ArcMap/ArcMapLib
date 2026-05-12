@@ -1,62 +1,132 @@
-private _cursorResetTimer: any = null;
-private _currentCursor: "default" | "pointer" = "default"; // NEW
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+
+  // FIX: Detect circle BEFORE applyGraphicDefaults overwrites attributes
+  const wasDrawnAsCircle =
+    this._currentDrawGeometryType === "circle" ||
+    this.isCircleGraphic(graphic);
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  // Stamp circle identity BEFORE applyGraphicDefaults runs
+  if (wasDrawnAsCircle) {
+    graphic.attributes.isCircle = true;
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.shape = "circle";
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  // Move from sketchLayer to featureLayer
+  this.sketchLayer?.graphics?.remove(graphic);
+
+  try {
+    this.featureLayer?.add(graphic);
+  } catch {}
+
+  this.addToGeoJSON(graphic);
+  this.enableInfoPopupWindow(true);
+
+  this.emitLayerEvent(
+    "userDrawItemAdded",
+    this.graphicToGeoJsonFeature(graphic),
+    graphic,
+    { geojson: this.geojson }
+  );
+
+  console.log("[arc-geojson-layer] draw complete", {
+    geometryType: graphic.geometry?.type,
+    isCircle: wasDrawnAsCircle,
+  });
+}
 
 
-const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-  if (this._editorOpen || this.inDrawingMode) {
-    if (this._cursorResetTimer) {
-      clearTimeout(this._cursorResetTimer);
-      this._cursorResetTimer = null;
-    }
-    if (this._currentCursor !== "default") {
-      this._currentCursor = "default";
-      this._setViewCursor("default");
-    }
+private applyGraphicDefaults(graphic: Graphic): void {
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const objectId =
+    graphic.attributes[this.uniqueIdPropertyName] ??
+    graphic.attributes.OBJECTID ??
+    graphic.attributes.id ??
+    Date.now() + Math.floor(Math.random() * 100000);
+
+  graphic.attributes[this.uniqueIdPropertyName] = objectId;
+  graphic.attributes.OBJECTID = objectId;
+  graphic.attributes.id = objectId;
+
+  // FIX: Never overwrite isCircle/drawGeometryType if already stamped
+  // These are set in handleCreateComplete before this method runs
+  const isCircle = this.isCircleGraphic(graphic);
+
+  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
+
+  const selectedSymbol =
+    rendererSymbol ??
+    graphic.symbol ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
+
+  graphic.symbol = this.coerceSymbolForGeometry(selectedSymbol, graphic.geometry);
+
+  graphic.popupTemplate =
+    this._editorOpen || this.inDrawingMode || this._isStartingDraw
+      ? (null as any)
+      : this.buildPopupTemplateFromCurrent(graphic);
+}
+
+
+private isCircleGraphic(graphic: Graphic): boolean {
+  const attrs = graphic?.attributes ?? {};
+
+  const fromAttrs =
+    attrs.isCircle === true ||
+    attrs.isCircle === "true" ||
+    String(attrs.drawGeometryType ?? "").toLowerCase() === "circle" ||
+    String(attrs.shapeType ?? "").toLowerCase() === "circle" ||
+    String(attrs.shape ?? "").toLowerCase() === "circle" ||
+    Object.prototype.hasOwnProperty.call(attrs, "radius");
+
+  return fromAttrs;
+}
+
+
+private addToGeoJSON(graphic: Graphic): void {
+  const convertedFeature = this.graphicToGeoJsonFeature(graphic);
+  if (!convertedFeature) {
     return;
   }
 
-  if (!this.featureLayer) {
-    return;
+  // FIX: Stamp circle identity into GeoJSON properties so it survives
+  // round-trip through geojson → graphic → geojson
+  const isCircle = this.isCircleGraphic(graphic);
+  if (isCircle && convertedFeature.properties) {
+    convertedFeature.properties.isCircle = true;
+    convertedFeature.properties.drawGeometryType = "circle";
+    convertedFeature.properties.shapeType = "circle";
+    convertedFeature.properties.shape = "circle";
   }
 
-  this.view
-    .hitTest(evt, { include: [this.featureLayer] })
-    .then((hit: any) => {
-      const hasHit = (hit?.results ?? []).some((r: any) => {
-        const g = r?.graphic;
-        return (
-          g?.geometry &&
-          (g.layer === this.featureLayer ||
-            (g.layer as any)?.id === this.featureLayer?.id)
-        );
-      });
+  const parsedResult = this.getJsonForAny(this.geojson);
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : { type: "FeatureCollection", features: [] };
 
-      if (hasHit) {
-        // Cancel any pending reset
-        if (this._cursorResetTimer) {
-          clearTimeout(this._cursorResetTimer);
-          this._cursorResetTimer = null;
-        }
-        // Only call DOM update if cursor isn't already pointer
-        if (this._currentCursor !== "pointer") {
-          this._currentCursor = "pointer";
-          this._setViewCursor("pointer");
-        }
-      } else {
-        // Only start reset timer if cursor is currently pointer
-        if (this._currentCursor === "pointer" && !this._cursorResetTimer) {
-          this._cursorResetTimer = setTimeout(() => {
-            this._cursorResetTimer = null;
-            this._currentCursor = "default";
-            this._setViewCursor("default");
-          }, 150); // 150ms — stable enough to not flicker
-        }
-      }
-    })
-    .catch(() => {
-      if (this._currentCursor !== "default") {
-        this._currentCursor = "default";
-        this._setViewCursor("default");
-      }
-    });
-});
+  currentGeoJson.features.push(convertedFeature as any);
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = currentGeoJson as any;
+  this.blockGeoJsonUpdate = false;
+
+  console.log("[arc-geojson-layer] addToGeoJSON", {
+    featureCount: currentGeoJson.features.length,
+    isCircle,
+  });
+}
