@@ -1,15 +1,40 @@
-const isCircle = this.isCircleGraphic(graphic);
+console.log("[arc-geojson-layer] editor target", {
+  geometryType: graphic.geometry?.type,
+  isCircle,
+  attributes: graphic.attributes,
+});
 
-await this.graphicsEditor.update([graphic], {
-  tool: isCircle ? "transform" : "reshape",
 
-  enableRotation: false,
 
-  // Circle should resize bigger/smaller
-  enableScaling: isCircle ? true : this.enableUserEditScaling,
-  enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
-  preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
+if (isCircle) {
 
-  multipleSelectionEnabled: false,
-  toggleToolOnClick: false,
-} as any);
+  await this.graphicsEditor.update([graphic], {
+    tool: "transform",
+
+    enableRotation: false,
+
+    enableScaling: true,
+
+    enableUniformScaling: true,
+
+    preserveAspectRatio: true,
+
+    multipleSelectionEnabled: false,
+
+    toggleToolOnClick: false,
+  } as any);
+
+} else {
+
+  await this.graphicsEditor.update([graphic], {
+    tool: "reshape",
+
+    enableRotation: false,
+
+    enableScaling: false,
+
+    multipleSelectionEnabled: false,
+
+    toggleToolOnClick: false,
+  } as any);
+}
