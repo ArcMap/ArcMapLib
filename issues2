@@ -1,5 +1,7 @@
 public openPopup(featureId: string): void {
-  const graphic = (this._sourceCache ?? []).find((g: Graphic) =>
+  const graphics = this.featureLayer?.graphics?.toArray() ?? [];
+  
+  const graphic = graphics.find((g: Graphic) =>
     String(g.attributes?.[this.uniqueIdPropertyName]) === String(featureId) ||
     String(g.attributes?.OBJECTID) === String(featureId) ||
     String(g.attributes?.id) === String(featureId)
