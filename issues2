@@ -1,75 +1,46 @@
-const pointerMoveHandle = this.view.on(
-  "pointer-move",
-  async (evt: any) => {
+private _lastCursor: "default" | "pointer" = "default";
 
-    if (!this.view || !this.featureLayer) {
-      this.setMapCursor("default");
-      return;
-    }
-
-    try {
-      const hit = await this.view.hitTest(evt);
-
-      const graphic = hit?.results?.find((r: any) => {
-        const g = r?.graphic;
-
-        return (
-          g &&
-          g.geometry &&
-          (
-            g.layer === this.featureLayer ||
-            g.sourceLayer === this.featureLayer
-          )
-        );
-      })?.graphic;
-
-      if (graphic) {
-        this.setMapCursor("pointer");
-      } else {
-        this.setMapCursor("default");
-      }
-
-    } catch (error) {
-      this.setMapCursor("default");
-    }
+private setMapCursor(cursor: "default" | "pointer"): void {
+  if (this._lastCursor === cursor) {
+    return;
   }
-);
 
+  this._lastCursor = cursor;
 
-
-graphic.symbol = {
-  ...graphic.symbol,
-  style: "solid",
-};
-
-
-
-private setMapCursor(cursor: string): void {
-
-  const container = this.view?.container as HTMLElement;
+  const container = this.view?.container as HTMLElement | undefined;
 
   if (!container) {
     return;
   }
 
-  container.style.cursor = cursor;
+  const value = cursor === "pointer" ? "pointer" : "default";
 
-  const canvas = container.querySelector("canvas") as HTMLElement;
+  container.style.setProperty("cursor", value, "important");
 
-  if (canvas) {
-    canvas.style.cursor = cursor;
-  }
+  const targets = container.querySelectorAll(
+    [
+      ".esri-view-root",
+      ".esri-view-surface",
+      ".esri-view-surface canvas",
+      ".esri-view-surface--touch-none",
+      "canvas",
+      "div"
+    ].join(",")
+  );
 
-  const surface = container.querySelector(".esri-view-surface") as HTMLElement;
+  targets.forEach((el: Element) => {
+    (el as HTMLElement).style.setProperty("cursor", value, "important");
+  });
 
-  if (surface) {
-    surface.style.cursor = cursor;
-  }
+  /**
+   * ArcGIS sometimes keeps cursor on the event target / canvas.
+   * Force it one frame later also.
+   */
+  requestAnimationFrame(() => {
+    container.style.setProperty("cursor", value, "important");
+
+    container.querySelectorAll("canvas, .esri-view-surface").forEach((el: Element) => {
+      (el as HTMLElement).style.setProperty("cursor", value, "important");
+    });
+  });
 }
-
-
-console.log(
-  "[arc-geojson-layer] hover",
-  graphic?.geometry?.type,
-  graphic
-);
