@@ -1,106 +1,23 @@
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) {
-    console.warn("[arc-geojson-layer] editor blocked or invalid graphic", {
-      enableUserEdit: this.enableUserEdit,
-      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
-      hasGraphic: !!graphic,
-      hasGeometry: !!graphic?.geometry,
-    });
-    return;
-  }
+private isUserEditEnabled(): boolean {
+  const attrValue = this.getAttribute("enable-user-edit");
+  const camelAttrValue = this.getAttribute("enableUserEdit");
 
-  await this.createEditor();
-
-  if (!this.graphicsEditor) {
-    console.warn("[arc-geojson-layer] graphicsEditor missing");
-    return;
-  }
-
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._suppressPopupUntil = Date.now() + 2000;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const isCircle = this.isCircleGraphic(graphic);
-
-  if (isCircle) {
-    graphic.attributes = {
-      ...(graphic.attributes ?? {}),
-      isCircle: true,
-      shape: "circle",
-      shapeType: "circle",
-      drawGeometryType: "circle",
-      geometryType: "circle",
-    };
-  } else {
-    graphic.attributes = {
-      ...(graphic.attributes ?? {}),
-      isCircle: false,
-      shape: "polygon",
-      shapeType: "polygon",
-      drawGeometryType: "polygon",
-      geometryType: "polygon",
-    };
-  }
-
-  graphic.popupTemplate = null as any;
-
-  /**
-   * Based on your screenshot:
-   *
-   * Polygon should NOT use transform if you want add/move/delete vertices.
-   * Polygon must use reshape.
-   *
-   * Circle should NOT use reshape because it breaks into polygon-like vertices.
-   * Circle must use transform.
-   */
-  const tool = isCircle ? "transform" : "reshape";
-
-  console.log("[arc-geojson-layer] activateGraphicsEditor target", {
-    geometryType: graphic.geometry?.type,
-    isCircle,
-    tool,
-    enableUserEditVertices: this.enableUserEditVertices,
-    enableUserEditAddVertices: this.enableUserEditAddVertices,
-    enableUserEditDeleteVertices: this.enableUserEditDeleteVertices,
-    attributes: graphic.attributes,
-  });
-
-  await this.graphicsEditor.update([graphic], {
-    tool,
-
-    enableRotation: false,
-
-    // Circle: resize bigger/smaller.
-    // Polygon: reshape vertices, not resize box.
-    enableScaling: isCircle ? true : false,
-
-    // Circle must remain circular.
-    enableUniformScaling: isCircle ? true : false,
-    preserveAspectRatio: isCircle ? true : false,
-
-    multipleSelectionEnabled: false,
-    toggleToolOnClick: false,
-  } as any);
-
-  console.log("[arc-geojson-layer] editor opened", {
-    geometryType: graphic.geometry?.type,
-    isCircle,
-    tool,
-  });
+  return (
+    this.enableUserEdit === true ||
+    String(this.enableUserEdit) === "true" ||
+    attrValue === "" ||
+    attrValue === "true" ||
+    camelAttrValue === "" ||
+    camelAttrValue === "true"
+  );
 }
+
+
+
+
+
+console.log("[arc-geojson-layer] edit binding check", {
+  enableUserEdit: this.enableUserEdit,
+  attrEnableUserEdit: this.getAttribute("enable-user-edit"),
+  element: this,
+});
