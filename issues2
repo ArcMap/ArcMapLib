@@ -1,96 +1,19 @@
-private isCircleGraphic(graphic: Graphic | null | undefined): boolean {
-  if (!graphic) {
-    return false;
-  }
+const graphic = hit?.results?.find((r: any) => {
+  return (
+    r.graphic &&
+    r.graphic.layer === this.featureLayer
+  );
+})?.graphic;
 
-  const attrs = graphic.attributes ?? {};
+
+
+
+const result = (hit?.results ?? []).find((r: any) => {
+  const graphic = r?.graphic as Graphic | undefined;
 
   return (
-    attrs.isCircle === true ||
-    attrs.shape === "circle" ||
-    attrs.shapeType === "circle" ||
-    attrs.drawGeometryType === "circle" ||
-    attrs.geometryType === "circle"
+    graphic &&
+    graphic.geometry &&
+    graphic.layer === this.featureLayer
   );
-}
-
-
-if (this.isCircleGraphic(graphicToUpdate)) {
-  normalizedFeature.properties = {
-    ...(normalizedFeature.properties ?? {}),
-
-    isCircle: true,
-    shape: "circle",
-    shapeType: "circle",
-    drawGeometryType: "circle",
-    geometryType: "circle",
-  };
-}
-
-
-if (!this.isUserEditEnabled()) {
-  console.warn(
-    "[arc-geojson-layer] editor blocked because editing disabled"
-  );
-  return;
-}
-
-
-private isUserEditEnabled(): boolean {
-  return (
-    this.enableUserEdit === true ||
-    String(this.enableUserEdit) === "true"
-  );
-}
-
-
-const pointerMoveHandle = this.view.on(
-  "pointer-move",
-  async (evt: any) => {
-    if (!this.view || !this.featureLayer) {
-      this.setMapCursor("default");
-      return;
-    }
-
-    if (this._editorOpen || this.inDrawingMode) {
-      this.setMapCursor("default");
-      return;
-    }
-
-    try {
-      const hit = await this.view.hitTest(evt);
-
-      const graphic = hit?.results?.find((r: any) => {
-        return (
-          r.graphic &&
-          (
-            r.graphic.layer === this.featureLayer ||
-            r.graphic.layer === this.sketchLayer
-          )
-        );
-      })?.graphic;
-
-      if (graphic) {
-        this.setMapCursor("pointer");
-        return;
-      }
-
-      if (evt.mapPoint) {
-        const graphics = this.featureLayer.graphics.toArray();
-
-        for (const g of graphics) {
-          const geom: any = g.geometry;
-
-          if (geom?.extent?.contains?.(evt.mapPoint)) {
-            this.setMapCursor("pointer");
-            return;
-          }
-        }
-      }
-
-      this.setMapCursor("default");
-    } catch {
-      this.setMapCursor("default");
-    }
-  }
-);
+});
