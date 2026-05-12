@@ -1,152 +1,96 @@
-private resolveUpdateTool(graphic: Graphic): UpdateTool {
-  if (this.isCircleGraphic(graphic)) {
-    return "transform";
+private isCircleGraphic(graphic: Graphic | null | undefined): boolean {
+  if (!graphic) {
+    return false;
   }
 
-  if (graphic.geometry?.type === "polygon") {
-    return "reshape";
-  }
+  const attrs = graphic.attributes ?? {};
 
-  return "move";
-}
-
-
-
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) {
-    return;
-  }
-
-  await this.createEditor();
-
-  if (!this.graphicsEditor) {
-    return;
-  }
-
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._suppressPopupUntil = Date.now() + 1500;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
-
-  try {
-    this.graphicsEditor.cancel();
-  } catch {}
-
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const isCircle = this.isCircleGraphic(graphic);
-
-  if (isCircle) {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.geometryType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  }
-
-  graphic.popupTemplate = null as any;
-
-  await this.graphicsEditor.update([graphic], {
-    tool: isCircle ? "transform" : "reshape",
-    enableRotation: false,
-    enableScaling: isCircle ? true : this.enableUserEditScaling,
-    preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
-    multipleSelectionEnabled: false,
-    toggleToolOnClick: false,
-  } as any);
-
-  console.log("[arc-geojson-layer] editor opened", {
-    geometryType: graphic.geometry?.type,
-    isCircle,
-    tool: isCircle ? "transform" : "reshape",
-    attributes: graphic.attributes,
-  });
-}
-
-
-const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
-  if (
-    !this.view ||
-    !this.featureLayer ||
-    this.inDrawingMode ||
-    this._isStartingDraw
-  ) {
-    this.setMapCursor("default");
-    return;
-  }
-
-  let graphic = await this.getHitGraphic(evt);
-
-  if (!graphic && evt.mapPoint) {
-    graphic = this.findGraphicUnderPointer(evt.mapPoint);
-  }
-
-  if (graphic?.geometry) {
-    this.setMapCursor("pointer");
-    return;
-  }
-
-  this.setMapCursor("default");
-});
-
-
-private findGraphicUnderPointer(mapPoint: any): Graphic | null {
-  if (!mapPoint || !this.featureLayer) {
-    return null;
-  }
-
-  const graphics = this.featureLayer.graphics.toArray();
-
-  for (const graphic of graphics) {
-    const geometry: any = graphic.geometry;
-
-    if (!geometry) {
-      continue;
-    }
-
-    if (geometry.type === "point") {
-      const dx = Number(geometry.x ?? geometry.longitude ?? 0) - Number(mapPoint.x ?? 0);
-      const dy = Number(geometry.y ?? geometry.latitude ?? 0) - Number(mapPoint.y ?? 0);
-
-      if (Math.sqrt(dx * dx + dy * dy) < 0.5) {
-        return graphic;
-      }
-    }
-
-    if (geometry.extent && geometry.extent.contains?.(mapPoint)) {
-      return graphic;
-    }
-  }
-
-  return null;
-}
-
-
-private setMapCursor(cursor: "default" | "pointer"): void {
-  const container = this.view?.container as HTMLElement | undefined;
-
-  if (!container) {
-    return;
-  }
-
-  const value = cursor === "pointer" ? "pointer" : "default";
-
-  container.style.cursor = value;
-
-  const surfaces = container.querySelectorAll(
-    ".esri-view-surface, canvas, .esri-view-root, .esri-view"
+  return (
+    attrs.isCircle === true ||
+    attrs.shape === "circle" ||
+    attrs.shapeType === "circle" ||
+    attrs.drawGeometryType === "circle" ||
+    attrs.geometryType === "circle"
   );
-
-  surfaces.forEach((el: Element) => {
-    (el as HTMLElement).style.cursor = value;
-  });
 }
+
+
+if (this.isCircleGraphic(graphicToUpdate)) {
+  normalizedFeature.properties = {
+    ...(normalizedFeature.properties ?? {}),
+
+    isCircle: true,
+    shape: "circle",
+    shapeType: "circle",
+    drawGeometryType: "circle",
+    geometryType: "circle",
+  };
+}
+
+
+if (!this.isUserEditEnabled()) {
+  console.warn(
+    "[arc-geojson-layer] editor blocked because editing disabled"
+  );
+  return;
+}
+
+
+private isUserEditEnabled(): boolean {
+  return (
+    this.enableUserEdit === true ||
+    String(this.enableUserEdit) === "true"
+  );
+}
+
+
+const pointerMoveHandle = this.view.on(
+  "pointer-move",
+  async (evt: any) => {
+    if (!this.view || !this.featureLayer) {
+      this.setMapCursor("default");
+      return;
+    }
+
+    if (this._editorOpen || this.inDrawingMode) {
+      this.setMapCursor("default");
+      return;
+    }
+
+    try {
+      const hit = await this.view.hitTest(evt);
+
+      const graphic = hit?.results?.find((r: any) => {
+        return (
+          r.graphic &&
+          (
+            r.graphic.layer === this.featureLayer ||
+            r.graphic.layer === this.sketchLayer
+          )
+        );
+      })?.graphic;
+
+      if (graphic) {
+        this.setMapCursor("pointer");
+        return;
+      }
+
+      if (evt.mapPoint) {
+        const graphics = this.featureLayer.graphics.toArray();
+
+        for (const g of graphics) {
+          const geom: any = g.geometry;
+
+          if (geom?.extent?.contains?.(evt.mapPoint)) {
+            this.setMapCursor("pointer");
+            return;
+          }
+        }
+      }
+
+      this.setMapCursor("default");
+    } catch {
+      this.setMapCursor("default");
+    }
+  }
+);
