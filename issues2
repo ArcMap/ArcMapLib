@@ -38,3 +38,187 @@ private async handleEditorDoubleClick(
 
   await this.activateGraphicsEditor(graphic);
 }
+
+
+private _activeVisibleType: string | null = null;
+
+
+public async startDrawing(drawGeometryType: string): Promise<void> {
+  const normalizedType = String(drawGeometryType ?? "").toLowerCase();
+
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    return;
+  }
+
+  this._currentDrawGeometryType = normalizedType;
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+  this._editorOpen = false;
+  this._lastCreatedByDrawing = true;
+  this._suppressPopupUntil = Date.now() + 1500;
+
+  // FIX: When startDrawing is called, filter to show only
+  // graphics of this type. So switching circle→polygon hides circles.
+  this._activeVisibleType = normalizedType;
+  this.filterGraphicsByActiveType(normalizedType);
+
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  const sketchTool = this.normalizeSketchTool(normalizedType);
+
+  console.log("[arc-geojson-layer] startDrawing", {
+    requested: drawGeometryType,
+    normalized: normalizedType,
+    sketchTool,
+  });
+
+  this.graphicsEditor.create(sketchTool as any);
+}
+
+
+private filterGraphicsByActiveType(activeType: string | null): void {
+  if (!this.featureLayer) {
+    return;
+  }
+
+  if (!activeType) {
+    // No filter — show everything
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      (g as any).visible = true;
+    });
+    return;
+  }
+
+  const type = activeType.toLowerCase();
+
+  this.featureLayer.graphics.forEach((g: Graphic) => {
+    const isCircle = this.isCircleGraphic(g);
+    const geomType = String(g.geometry?.type ?? "").toLowerCase();
+
+    let visible = false;
+
+    switch (type) {
+      case "circle":
+        // Show only circle graphics
+        visible = isCircle;
+        break;
+
+      case "polygon":
+      case "freehand-polygon":
+        // Show only non-circle polygons
+        visible = geomType === "polygon" && !isCircle;
+        break;
+
+      case "polyline":
+      case "freehand-polyline":
+      case "line":
+        visible = geomType === "polyline";
+        break;
+
+      case "point":
+        visible = geomType === "point";
+        break;
+
+      case "rectangle":
+      case "extent":
+        // Rectangle is stored as polygon but not circle
+        visible = geomType === "polygon" && !isCircle;
+        break;
+
+      default:
+        visible = true;
+    }
+
+    (g as any).visible = visible;
+  });
+
+  console.log("[arc-geojson-layer] filterGraphicsByActiveType", {
+    activeType,
+    total: this.featureLayer.graphics.length,
+    visible: this.featureLayer.graphics.toArray()
+      .filter((g: Graphic) => (g as any).visible !== false).length,
+  });
+}
+
+
+private handleCreateComplete(graphic: Graphic): void {
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+
+  const wasDrawnAsCircle =
+    this._currentDrawGeometryType === "circle" ||
+    this.isCircleGraphic(graphic);
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  if (wasDrawnAsCircle) {
+    graphic.attributes.isCircle = true;
+    graphic.attributes.drawGeometryType = "circle";
+    graphic.attributes.shapeType = "circle";
+    graphic.attributes.shape = "circle";
+  }
+
+  this.applyGraphicDefaults(graphic);
+
+  this.sketchLayer?.graphics?.remove(graphic);
+
+  try {
+    this.featureLayer?.add(graphic);
+  } catch {}
+
+  // FIX: Re-apply filter so newly added graphic respects current type
+  this.filterGraphicsByActiveType(this._activeVisibleType);
+
+  this.addToGeoJSON(graphic);
+  this.enableInfoPopupWindow(true);
+
+  this.emitLayerEvent(
+    "userDrawItemAdded",
+    this.graphicToGeoJsonFeature(graphic),
+    graphic,
+    { geojson: this.geojson }
+  );
+
+  console.log("[arc-geojson-layer] draw complete", {
+    geometryType: graphic.geometry?.type,
+    isCircle: wasDrawnAsCircle,
+  });
+}
+
+
+// At the end of updateGeoJson, after addMany:
+if (graphics.length > 0) {
+  this.featureLayer.addMany(graphics);
+}
+
+this.refreshLabels();
+
+// FIX: Re-apply active type filter after reload
+this.filterGraphicsByActiveType(this._activeVisibleType);
+
+
+
+public cancelDrawing(): void {
+  // ... existing code ...
+
+  // FIX: Reset filter — show all graphics when drawing is cancelled
+  this._activeVisibleType = null;
+  this.filterGraphicsByActiveType(null);
+
+  this.enableInfoPopupWindow(true);
+  this._setViewCursor("default");
+}
+
+
