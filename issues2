@@ -1,49 +1,19 @@
-lprivate async handleEditorDoubleClick(evtOrMapPoint: any, source: string): Promise<void> {
-  this._suppressPopupUntil = Date.now() + 2000;
-  this.enableInfoPopupWindow(false);
+private isUserEditEnabled(): boolean {
+  const el = this as any;
 
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
+  const propValue =
+    el.enableUserEdit ??
+    el["enable-user-edit"];
 
-  const hitGraphic = await this.getHitGraphic(evtOrMapPoint);
+  const attrValue =
+    this.getAttribute("enable-user-edit") ??
+    this.getAttribute("enableUserEdit");
 
-  if (!hitGraphic) {
-    return;
-  }
-
-  const editableGraphic = this.findLiveGraphicFromLayer(hitGraphic);
-
-  if (!editableGraphic) {
-    return;
-  }
-
-  if (!this.isUserEditEnabled()) {
-    console.warn("[arc-geojson-layer] editor blocked: this layer edit is false", {
-      enableUserEdit: this.enableUserEdit,
-      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
-      source,
-      layerId: this.featureLayer?.id,
-      hitLayerId: (hitGraphic.layer as any)?.id,
-    });
-    return;
-  }
-
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
-  }
-
-  await this.activateGraphicsEditor(editableGraphic);
+  return (
+    propValue === true ||
+    propValue === "true" ||
+    attrValue === "" ||
+    attrValue === "true" ||
+    this.hasAttribute("enable-user-edit")
+  );
 }
-
-
-return (
-  graphic &&
-  graphic.geometry &&
-  (
-    graphic.layer === this.featureLayer ||
-    (graphic.layer as any)?.id === this.featureLayer?.id
-  )
-);
