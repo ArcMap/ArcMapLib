@@ -1,17 +1,23 @@
-this.addToGeoJson(graphic);
-this.enableInfoPopupWindow(true);
+const INTERNAL_KEYS = new Set([
+  'OBJECTID',
+  'isCircle',
+  'isTemporaryDrawing',
+  'drawGeometryType',
+  'shapeType',
+  'shape',
+  this.uniqueIdPropertyName,
+]);
 
-// ✅ Convert before emitting
-const geoGraphic = graphic.clone();
-if (geoGraphic.geometry?.spatialReference?.isWebMercator) {
-  geoGraphic.geometry = webMercatorUtils.webMercatorToGeographic(
-    geoGraphic.geometry!
-  ) as Geometry;
-}
-
-this.emitLayerEvent(
-  'userDrawItemAdded',
-  this.graphicToGeoJsonFeature(geoGraphic),
-  geoGraphic,
-  { geojson: this.geojson },
-);
+const fieldInfos = Object.keys(attributes)
+  .filter((key) => !INTERNAL_KEYS.has(key))
+  .filter((key) => {
+    const value = attributes[key];
+    return value !== undefined && 
+           value !== null && 
+           typeof value !== 'object';
+  })
+  .map((key) => ({
+    fieldName: key,
+    label: key,
+    visible: true,
+  }));
