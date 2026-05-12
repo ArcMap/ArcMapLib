@@ -2,6 +2,7 @@ private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
   if (!this.isUserEditEnabled() || !graphic?.geometry) {
     console.warn("[arc-geojson-layer] editor blocked or invalid graphic", {
       enableUserEdit: this.enableUserEdit,
+      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
       hasGraphic: !!graphic,
       hasGeometry: !!graphic?.geometry,
     });
@@ -59,34 +60,39 @@ private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
 
   graphic.popupTemplate = null as any;
 
+  /**
+   * Based on your screenshot:
+   *
+   * Polygon should NOT use transform if you want add/move/delete vertices.
+   * Polygon must use reshape.
+   *
+   * Circle should NOT use reshape because it breaks into polygon-like vertices.
+   * Circle must use transform.
+   */
+  const tool = isCircle ? "transform" : "reshape";
+
   console.log("[arc-geojson-layer] activateGraphicsEditor target", {
     geometryType: graphic.geometry?.type,
     isCircle,
-    tool: "transform",
+    tool,
+    enableUserEditVertices: this.enableUserEditVertices,
+    enableUserEditAddVertices: this.enableUserEditAddVertices,
+    enableUserEditDeleteVertices: this.enableUserEditDeleteVertices,
     attributes: graphic.attributes,
   });
 
-  /**
-   * IMPORTANT:
-   * Use transform for both circle and polygon for now.
-   * reshape was causing polygon/circle distortion and diagonal redraw behavior.
-   *
-   * Circle:
-   * - can resize bigger/smaller
-   * - uniform scaling forced
-   *
-   * Polygon:
-   * - can move/resize safely
-   * - does not corrupt vertices
-   */
   await this.graphicsEditor.update([graphic], {
-    tool: "transform",
+    tool,
 
     enableRotation: false,
-    enableScaling: true,
 
-    enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
-    preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
+    // Circle: resize bigger/smaller.
+    // Polygon: reshape vertices, not resize box.
+    enableScaling: isCircle ? true : false,
+
+    // Circle must remain circular.
+    enableUniformScaling: isCircle ? true : false,
+    preserveAspectRatio: isCircle ? true : false,
 
     multipleSelectionEnabled: false,
     toggleToolOnClick: false,
@@ -95,6 +101,6 @@ private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
   console.log("[arc-geojson-layer] editor opened", {
     geometryType: graphic.geometry?.type,
     isCircle,
-    tool: "transform",
+    tool,
   });
 }
