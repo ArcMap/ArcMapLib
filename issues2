@@ -1,19 +1,23 @@
-const graphic = hit?.results?.find((r: any) => {
-  return (
-    r.graphic &&
-    r.graphic.layer === this.featureLayer
-  );
-})?.graphic;
+await this.graphicsEditor.update([graphic], {
+  tool: isCircle ? "transform" : "reshape",
+
+  enableRotation: false,
+
+  // Circle resize handles
+  enableScaling: isCircle ? true : this.enableUserEditScaling,
+  enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
+
+  // Keep for compatibility, but don't rely only on this
+  preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
+
+  multipleSelectionEnabled: false,
+  toggleToolOnClick: false,
+} as any);
 
 
 
-
-const result = (hit?.results ?? []).find((r: any) => {
-  const graphic = r?.graphic as Graphic | undefined;
-
-  return (
-    graphic &&
-    graphic.geometry &&
-    graphic.layer === this.featureLayer
-  );
+console.log("[arc-geojson-layer] activate editor options", {
+  isCircle,
+  tool: isCircle ? "transform" : "reshape",
+  attributes: graphic.attributes,
 });
