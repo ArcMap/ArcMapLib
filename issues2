@@ -1,115 +1,33 @@
-private handleCreateComplete(graphic: Graphic): void {
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-
-  // FIX: Detect circle BEFORE applyGraphicDefaults overwrites attributes
-  const wasDrawnAsCircle =
-    this._currentDrawGeometryType === "circle" ||
-    this.isCircleGraphic(graphic);
-
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  // Stamp circle identity BEFORE applyGraphicDefaults runs
-  if (wasDrawnAsCircle) {
-    graphic.attributes.isCircle = true;
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.shape = "circle";
-  }
-
-  this.applyGraphicDefaults(graphic);
-
-  // Move from sketchLayer to featureLayer
-  this.sketchLayer?.graphics?.remove(graphic);
-
-  try {
-    this.featureLayer?.add(graphic);
-  } catch {}
-
-  this.addToGeoJSON(graphic);
-  this.enableInfoPopupWindow(true);
-
-  this.emitLayerEvent(
-    "userDrawItemAdded",
-    this.graphicToGeoJsonFeature(graphic),
-    graphic,
-    { geojson: this.geojson }
-  );
-
-  console.log("[arc-geojson-layer] draw complete", {
-    geometryType: graphic.geometry?.type,
-    isCircle: wasDrawnAsCircle,
-  });
-}
-
-
-private applyGraphicDefaults(graphic: Graphic): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const objectId =
-    graphic.attributes[this.uniqueIdPropertyName] ??
-    graphic.attributes.OBJECTID ??
-    graphic.attributes.id ??
-    Date.now() + Math.floor(Math.random() * 100000);
-
-  graphic.attributes[this.uniqueIdPropertyName] = objectId;
-  graphic.attributes.OBJECTID = objectId;
-  graphic.attributes.id = objectId;
-
-  // FIX: Never overwrite isCircle/drawGeometryType if already stamped
-  // These are set in handleCreateComplete before this method runs
-  const isCircle = this.isCircleGraphic(graphic);
-
-  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
-
-  const selectedSymbol =
-    rendererSymbol ??
-    graphic.symbol ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
-
-  graphic.symbol = this.coerceSymbolForGeometry(selectedSymbol, graphic.geometry);
-
-  graphic.popupTemplate =
-    this._editorOpen || this.inDrawingMode || this._isStartingDraw
-      ? (null as any)
-      : this.buildPopupTemplateFromCurrent(graphic);
-}
-
-
-private isCircleGraphic(graphic: Graphic): boolean {
-  const attrs = graphic?.attributes ?? {};
-
-  const fromAttrs =
-    attrs.isCircle === true ||
-    attrs.isCircle === "true" ||
-    String(attrs.drawGeometryType ?? "").toLowerCase() === "circle" ||
-    String(attrs.shapeType ?? "").toLowerCase() === "circle" ||
-    String(attrs.shape ?? "").toLowerCase() === "circle" ||
-    Object.prototype.hasOwnProperty.call(attrs, "radius");
-
-  return fromAttrs;
-}
-
-
-private addToGeoJSON(graphic: Graphic): void {
-  const convertedFeature = this.graphicToGeoJsonFeature(graphic);
-  if (!convertedFeature) {
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
     return;
   }
 
-  // FIX: Stamp circle identity into GeoJSON properties so it survives
-  // round-trip through geojson → graphic → geojson
-  const isCircle = this.isCircleGraphic(graphic);
-  if (isCircle && convertedFeature.properties) {
-    convertedFeature.properties.isCircle = true;
-    convertedFeature.properties.drawGeometryType = "circle";
-    convertedFeature.properties.shapeType = "circle";
-    convertedFeature.properties.shape = "circle";
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
+  if (!convertedFeature?.geometry) {
+    return;
   }
+
+  const isCircle = this.isCircleGraphic(graphicToUpdate);
+
+  const normalizedFeature = {
+    ...convertedFeature,
+    geometry: {
+      ...convertedFeature.geometry,
+      type: "Polygon",
+      coordinates: this.normalizePolygonCoordinates(
+        (convertedFeature.geometry as any).coordinates
+      ),
+    },
+    properties: {
+      ...(convertedFeature.properties ?? {}),
+      ...(isCircle
+        ? { drawGeometryType: "circle", shapeType: "circle", shape: "circle", isCircle: true }
+        : { drawGeometryType: "polygon", shapeType: "polygon", shape: "polygon", isCircle: false }),
+    },
+  };
 
   const parsedResult = this.getJsonForAny(this.geojson);
   const currentGeoJson =
@@ -119,14 +37,151 @@ private addToGeoJSON(graphic: Graphic): void {
       ? parsedResult.parsedJson
       : { type: "FeatureCollection", features: [] };
 
-  currentGeoJson.features.push(convertedFeature as any);
+  const updateId =
+    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    normalizedFeature.properties?.[this.uniqueIdPropertyName] ??
+    normalizedFeature.properties?.OBJECTID ??
+    normalizedFeature.properties?.id;
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.properties?.[this.uniqueIdPropertyName] ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id;
+
+    if (String(featureId) === String(updateId)) {
+      updated = true;
+      return {
+        ...feature,
+        geometry: normalizedFeature.geometry,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(normalizedFeature.properties ?? {}),
+        },
+      };
+    }
+
+    return feature;
+  });
+
+  if (!updated) {
+    updatedFeatures.push(normalizedFeature as any);
+  }
+
+  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
+    type: "FeatureCollection",
+    features: updatedFeatures as any,
+  };
+
+  // FIX: Update signature BEFORE setting geojson so updateGeoJson()
+  // skips the reload entirely when it sees the same signature
+  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
 
   this.blockGeoJsonUpdate = true;
-  this.geojson = currentGeoJson as any;
+  this.geojson = updatedGeoJson;
   this.blockGeoJsonUpdate = false;
 
-  console.log("[arc-geojson-layer] addToGeoJSON", {
-    featureCount: currentGeoJson.features.length,
-    isCircle,
+  // FIX: Manually update the graphic's symbol and popup in featureLayer
+  // instead of relying on clearGeoJSONLayer + re-add cycle
+  this.featureLayer?.graphics?.forEach((g: Graphic) => {
+    const gId =
+      g.attributes?.[this.uniqueIdPropertyName] ??
+      g.attributes?.OBJECTID ??
+      g.attributes?.id;
+
+    if (String(gId) === String(updateId)) {
+      g.geometry = graphicToUpdate.geometry;
+      g.attributes = { ...graphicToUpdate.attributes };
+      this.applyGraphicDefaults(g);
+    }
   });
+
+  this.refreshLabels();
+
+  this.emitLayerEvent("userEditItemUpdated", normalizedFeature, graphicToUpdate, {
+    geojson: updatedGeoJson,
+  });
+
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: updateId,
+    updated,
+    geometryType: graphicToUpdate.geometry?.type,
+    featureCount: updatedFeatures.length,
+  });
+}
+
+
+private async updateGeoJson(
+  value: string | FeatureCollection<GeoJsonGeometry, GeoJsonProperties> | null
+): Promise<void> {
+  if (!this.featureLayer || this._isUpdatingGeoJson) {
+    return;
+  }
+
+  // FIX: blockGeoJsonUpdate must be checked FIRST before signature check
+  if (this.blockGeoJsonUpdate) {
+    console.log("[arc-geojson-layer] updateGeoJson skipped: blocked");
+    return;
+  }
+
+  const signature = JSON.stringify(value ?? {});
+
+  if (signature === this._lastGeoJsonSignature) {
+    console.log("[arc-geojson-layer] updateGeoJson skipped: same payload");
+    return;
+  }
+
+  this._lastGeoJsonSignature = signature;
+  this._isUpdatingGeoJson = true;
+
+  try {
+    const parsedResult = this.getJsonForAny(value);
+
+    if (parsedResult.error || !parsedResult.parsedJson) {
+      console.warn("[arc-geojson-layer] invalid geojson", value);
+      return;
+    }
+
+    const parsedGeoJson = parsedResult.parsedJson;
+
+    if (
+      parsedGeoJson.type !== "FeatureCollection" ||
+      !Array.isArray(parsedGeoJson.features)
+    ) {
+      console.warn("[arc-geojson-layer] FeatureCollection expected");
+      return;
+    }
+
+    if (!this._editorOpen) {
+      this.clearGeoJSONLayer();
+    }
+
+    const graphics: Graphic[] = [];
+
+    parsedGeoJson.features.forEach((feature: any) => {
+      const graphic = this.geoJsonFeatureToGraphic(feature);
+      if (!graphic) {
+        return;
+      }
+      this.applyGraphicDefaults(graphic);
+      graphics.push(graphic);
+    });
+
+    if (graphics.length > 0) {
+      this.featureLayer.addMany(graphics);
+    }
+
+    this.refreshLabels();
+
+    console.log("[arc-geojson-layer] updateGeoJson DONE", {
+      graphics: graphics.length,
+    });
+  } catch (error) {
+    console.error("[arc-geojson-layer] updateGeoJson failed", error);
+  } finally {
+    this._isUpdatingGeoJson = false;
+  }
 }
