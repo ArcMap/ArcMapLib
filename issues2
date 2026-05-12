@@ -1,87 +1,15 @@
-private async updateEditing(enabled: boolean): Promise<void> {
-  if (this._lastEditingState === enabled) {
-    return;
-  }
-  this._lastEditingState = enabled;
-
-  // FIX: Set flag ONLY — do NOT touch this.enableUserEdit here.
-  // this.enableUserEdit is owned by LitElement property system.
-  // Writing it here causes updated() to fire again → infinite loop.
-  this._editingEnabled = enabled;
-  this._editingEnabledAt = enabled ? Date.now() : 0;
-
-  console.log("[arc-geojson-layer] updateEditing", {
-    enabled,
-    editorOpen: this._editorOpen,
-    inDrawingMode: this.inDrawingMode,
-  });
-
-  if (!enabled) {
-    this.enableInfoPopupWindow(true);
+private syncEditorOptions(): void {
+  if (!this.graphicsEditor) {
     return;
   }
 
-  await this.createEditor();
-  this.enableInfoPopupWindow(false);
-}
-
-
-protected updated(changedProps: PropertyValues<this>): void {
-  if (changedProps.has("geojson")) {
-    if (!this.initComplete) {
-      this.pendingGeoJson = this.geojson;
-    } else {
-      void this.updateGeoJson(this.geojson);
-    }
-  }
-
-  if (changedProps.has("renderer")) {
-    this.updateRenderer(this.renderer);
-  }
-
-  if (
-    changedProps.has("labelJson") ||
-    changedProps.has("labelColor") ||
-    changedProps.has("labelSize")
-  ) {
-    this.refreshLabels();
-  }
-
-  if (changedProps.has("infoTemplate")) {
-    this.updateInfoTemplate(this.infoTemplate);
-  }
-
-  if (changedProps.has("layerClass")) {
-    this.updateLayerClass(this.layerClass);
-  }
-
-  if (changedProps.has("enableUserEdit")) {
-    // FIX: Sync _editingEnabled directly from the property change
-    // Do this BEFORE calling updateEditing so the flag is correct
-    this._editingEnabled = this.enableUserEdit;
-    this._editingEnabledAt = this.enableUserEdit ? Date.now() : 0;
-
-    if (!this.initComplete) {
-      this.pendingEnableUserEdit = this.enableUserEdit;
-    } else {
-      void this.updateEditing(this.enableUserEdit);
-    }
-  }
-
-  if (
-    changedProps.has("enableUserEditMove") ||
-    changedProps.has("enableUserEditVertices") ||
-    changedProps.has("enableUserEditScaling") ||
-    changedProps.has("enableUserEditRotating") ||
-    changedProps.has("enableUserEditUniformScaling") ||
-    changedProps.has("enableUserEditAddVertices") ||
-    changedProps.has("enableUserEditDeleteVertices")
-  ) {
-    this.syncEditorOptions();
-  }
-}
-
-
-private isUserEditEnabled(): boolean {
-  return this._editingEnabled === true;
+  try {
+    (this.graphicsEditor as any).defaultUpdateOptions = {
+      enableRotation: this.enableUserEditRotating,
+      enableScaling: this.enableUserEditScaling,
+      preserveAspectRatio: this.enableUserEditUniformScaling,
+      toggleToolOnClick: false,
+      multipleSelectionEnabled: false,
+    };
+  } catch {}
 }
