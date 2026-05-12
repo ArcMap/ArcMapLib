@@ -1,19 +1,65 @@
-private isUserEditEnabled(): boolean {
-  const el = this as any;
+const doubleClickHandle = this.view.on("double-click", async (evt: any) => {
+  console.log("[arc-geojson-layer] arcgis double-click fired", {
+    layerId: this.featureLayer?.id,
+    enableUserEdit: this.enableUserEdit,
+  });
 
-  const propValue =
-    el.enableUserEdit ??
-    el["enable-user-edit"];
+  evt.stopPropagation?.();
+  evt.preventDefault?.();
 
-  const attrValue =
-    this.getAttribute("enable-user-edit") ??
-    this.getAttribute("enableUserEdit");
+  await this.handleEditorDoubleClick(evt, "arcgis-double-click");
+});
 
-  return (
-    propValue === true ||
-    propValue === "true" ||
-    attrValue === "" ||
-    attrValue === "true" ||
-    this.hasAttribute("enable-user-edit")
+
+const nativeDoubleClick = async (event: MouseEvent) => {
+  console.log("[arc-geojson-layer] native dblclick fired", {
+    layerId: this.featureLayer?.id,
+    enableUserEdit: this.enableUserEdit,
+  });
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+
+  const rect = this.view!.container.getBoundingClientRect();
+
+  const screenPoint = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+
+  const mapPoint = this.view!.toMap(screenPoint) as Point;
+
+  await this.handleEditorDoubleClick(
+    {
+      x: screenPoint.x,
+      y: screenPoint.y,
+      mapPoint,
+    },
+    "native-double-click"
   );
+};
+
+
+
+private async handleEditorDoubleClick(evtOrMapPoint: any, source: string): Promise<void> {
+  console.log("[arc-geojson-layer] handleEditorDoubleClick entered", {
+    source,
+    layerId: this.featureLayer?.id,
+    enableUserEdit: this.enableUserEdit,
+    attrEnableUserEdit: this.getAttribute("enable-user-edit"),
+  });
+
+  // existing code below
+}
+
+
+
+const editEnabled = this.isUserEditEnabled();
+
+console.log("[arc-geojson-layer] editEnabled result", editEnabled);
+
+if (!editEnabled) {
+  console.warn("[arc-geojson-layer] editor blocked: edit disabled");
+  return;
 }
