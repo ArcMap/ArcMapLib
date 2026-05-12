@@ -1,51 +1,61 @@
-private _setViewCursor(cursor: "default" | "pointer"): void {
-  const container = this.view?.container as HTMLElement | undefined;
-  if (!container) return;
+private isUserEditEnabled(): boolean {
+  // Primary check: the property itself (set programmatically by Toggle Edit)
+  if (this.enableUserEdit === true) {
+    return true;
+  }
 
-  // ArcGIS 5.x does NOT have view.cursor property.
-  // We must force the cursor on every surface element the SDK renders.
-  const selectors = [
-    ".esri-view-surface",
-    ".esri-view-root",
-    ".esri-overlay-surface",
-    "canvas",
-  ];
+  // Secondary: check HTML attribute variants
+  const attrValue =
+    this.getAttribute("enable-user-edit") ??
+    this.getAttribute("enableUserEdit");
 
-  // Set on container itself
-  container.style.setProperty("cursor", cursor, "important");
-
-  // Set on every ArcGIS surface child
-  selectors.forEach((sel) => {
-    container.querySelectorAll(sel).forEach((el) => {
-      (el as HTMLElement).style.setProperty("cursor", cursor, "important");
-    });
-  });
+  return (
+    attrValue === "true" ||
+    attrValue === "" // attribute present with no value = true
+  );
 }
 
 
-const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-  if (this._editorOpen || this.inDrawingMode) {
-    this._setViewCursor("default");
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  // FIX: Check property directly, not isUserEditEnabled()
+  // Toggle Edit sets this.enableUserEdit = true programmatically
+  if (!this.enableUserEdit) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
+      enableUserEdit: this.enableUserEdit,
+      source,
+    });
     return;
   }
 
-  // Guard: featureLayer must exist
-  if (!this.featureLayer) {
+  this._suppressPopupUntil = Date.now() + 1500;
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view!.popupEnabled = false;
+    this.view?.popup?.close();
+  } catch {}
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
     return;
   }
 
-  this.view
-    .hitTest(evt, { include: [this.featureLayer] })
-    .then((hit: any) => {
-      const hasHit = (hit?.results ?? []).some((r: any) => {
-        const g = r?.graphic;
-        return (
-          g?.geometry &&
-          (g.layer === this.featureLayer ||
-            (g.layer as any)?.id === this.featureLayer?.id)
-        );
-      });
-      this._setViewCursor(hasHit ? "pointer" : "default");
-    })
-    .catch(() => this._setViewCursor("default"));
-});
+  let graphic: Graphic | null = await this.getHitGraphic(evtOrMapPoint);
+
+  if (!graphic && evtOrMapPoint?.mapPoint) {
+    graphic = this.findNearestEditableGraphic(evtOrMapPoint.mapPoint);
+  }
+
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] double-click editor target not found", {
+      source,
+      graphicsCount: this.featureLayer?.graphics?.length ?? 0,
+    });
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
+}
