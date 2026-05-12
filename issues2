@@ -1,15 +1,20 @@
-private _editingEnabled = false;
-
+private _editingEnabledAt = 0; // timestamp when editing was enabled
 
 private async updateEditing(enabled: boolean): Promise<void> {
   if (this._lastEditingState === enabled) {
     return;
   }
   this._lastEditingState = enabled;
-
-  // FIX: Set this synchronously so double-click handler sees it immediately
   this._editingEnabled = enabled;
   this.enableUserEdit = enabled;
+
+  // FIX: Record when editing was enabled so double-click
+  // fired at same time as toggle doesn't immediately open editor
+  if (enabled) {
+    this._editingEnabledAt = Date.now();
+  } else {
+    this._editingEnabledAt = 0;
+  }
 
   console.log("[arc-geojson-layer] updateEditing", {
     enabled,
@@ -27,35 +32,23 @@ private async updateEditing(enabled: boolean): Promise<void> {
 }
 
 
-private isUserEditEnabled(): boolean {
-  // Check private flag first — set synchronously by updateEditing
-  if (this._editingEnabled === true) {
-    return true;
-  }
-
-  // Fallback: check property
-  if (this.enableUserEdit === true) {
-    return true;
-  }
-
-  // Fallback: check attribute
-  const attrValue =
-    this.getAttribute("enable-user-edit") ??
-    this.getAttribute("enableUserEdit");
-
-  return attrValue === "true" || attrValue === "";
-}
-
-
-
 private async handleEditorDoubleClick(
   evtOrMapPoint: any,
   source: string
 ): Promise<void> {
-  // FIX: Use isUserEditEnabled() which checks _editingEnabled flag
   if (!this.isUserEditEnabled()) {
     console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
       source,
+    });
+    return;
+  }
+
+  // FIX: If editing was just enabled within last 400ms, this double-click
+  // was the same click that toggled edit ON — ignore it
+  if (Date.now() - this._editingEnabledAt < 400) {
+    console.log("[arc-geojson-layer] double-click ignored: just enabled editing", {
+      source,
+      ms: Date.now() - this._editingEnabledAt,
     });
     return;
   }
@@ -73,7 +66,6 @@ private async handleEditorDoubleClick(
     return;
   }
 
-  // Only hitTest — no findNearest fallback
   const graphic = await this.getHitGraphic(evtOrMapPoint);
 
   if (!graphic) {
@@ -83,12 +75,4 @@ private async handleEditorDoubleClick(
   }
 
   await this.activateGraphicsEditor(graphic);
-}
-
-
-disconnectedCallback(): void {
-  super.disconnectedCallback();
-  this._editingEnabled = false;
-  this._lastEditingState = undefined;
-  // ... rest of existing cleanup
 }
