@@ -1,84 +1,64 @@
-private async createLayer(initialGeoJson: any): Promise<void> {
-  const layerId = `${this.name || "arc-geojson-layer"}-${Date.now()}`;
-
-  this.featureLayer = new GraphicsLayer({
-    id: `${layerId}-graphics`,
-    title: this.name,
-    listMode: "show",
-    // FIX: Enable hit testing on polygon fill areas
-    elevationInfo: undefined,
-  });
-
-  // FIX: Ensure hit test works on polygon interior, not just outline
-  (this.featureLayer as any).pickingEnabled = true;
-
-  this.labelLayer = new GraphicsLayer({
-    id: `${layerId}-labels`,
-    title: `${this.name}-labels`,
-    listMode: "hide",
-  });
-
-  (this.labelLayer as any).pickingEnabled = false;
-
-  this.sketchLayer = new GraphicsLayer({
-    id: `${layerId}-sketch`,
-    title: `${this.name}-sketch`,
-    listMode: "hide",
-  });
-
-  this.view.map.add(this.featureLayer);
-  this.view.map.add(this.labelLayer);
-  this.view.map.add(this.sketchLayer);
-
-  this.updateLayerClass(this.layerClass);
-
-  if (initialGeoJson) {
-    await this.updateGeoJson(initialGeoJson);
-  }
-}
-
-
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer) {
-    return null;
+updateGeofenceCoordinates() {
+  // Step 1: Close editor first to commit any active reshape/transform
+  if (this.drawGeoJsonLayer) {
+    const layer = this.drawGeoJsonLayer as any;
+    if (layer.isEditorOpen && layer.isEditorOpen()) {
+      layer.closeEditor();
+    }
   }
 
-  try {
-    const hit: any = await this.view.hitTest(evt, {
-      include: [this.featureLayer],
-    });
+  // Step 2: Wait for edit complete event to update geojson
+  setTimeout(() => {
+    // Step 3: Read latest features from the layer
+    const layerGeoJson = this.drawGeoJsonLayer
+      ? (this.drawGeoJsonLayer as any).geojson
+      : null;
 
-    const results = hit?.results ?? [];
+    const currentFeature = layerGeoJson?.features?.length > 0
+      ? layerGeoJson.features
+      : this.editGeofenceService.currentFeature;
 
-    console.log("[arc-geojson-layer] getHitGraphic results", {
-      count: results.length,
-      featureLayerId: this.featureLayer.id,
-      results: results.map((r: any) => ({
-        layerId: r?.graphic?.layer?.id,
-        geomType: r?.graphic?.geometry?.type,
-        match: r?.graphic?.layer === this.featureLayer ||
-          r?.graphic?.layer?.id === this.featureLayer?.id,
-      })),
-    });
-
-    // FIX: Match by layer ID string comparison — not object reference.
-    // Object reference can fail if layer was recreated.
-    const result = results.find((r: any) => {
-      const g = r?.graphic;
-      if (!g?.geometry) return false;
-
-      const layerId = g.layer?.id ?? (g as any).layerId;
-      return (
-        g.layer === this.featureLayer ||
-        layerId === this.featureLayer?.id
+    if (currentFeature && currentFeature.length > 0) {
+      this.coordinates = this.saveFenceService.toLaLon(
+        currentFeature[0].geometry.coordinates[0]
       );
-    });
 
-    return (result?.graphic as Graphic) ?? null;
-  } catch (error) {
-    console.warn("[arc-geojson-layer] hitTest failed", error);
-    return null;
-  }
+      if (
+        currentFeature[0].geometry.type === 'Circle' &&
+        this.radius
+      ) {
+        this.getCircleDataWithRadius(
+          this.saveFenceService.toLaLon(
+            currentFeature[0].geometry.coordinates[0]
+          ),
+          this.geospatialConvService.toRadiusInMetersFromMiles(this.radius)
+        );
+        this.drawnFenceType = 'Circle';
+
+      } else if (currentFeature[0].geometry.type === 'Circle') {
+        this.getCircleDataWithoutRadius(this.coordinates);
+        this.drawnFenceType = 'Circle';
+
+      } else if (
+        Object.prototype.hasOwnProperty.call(
+          currentFeature[0].properties,
+          'radius'
+        )
+      ) {
+        this.getCircleDataWithoutRadius(this.coordinates);
+
+      } else if (
+        currentFeature[0].properties?.isCircle === true ||
+        currentFeature[0].properties?.drawGeometryType === 'circle'
+      ) {
+        // FIX: Handle circles saved as Polygon geometry with isCircle flag
+        this.getCircleDataWithoutRadius(this.coordinates);
+        this.drawnFenceType = 'Circle';
+
+      } else {
+        this.circleData = undefined;
+        this.drawnFenceType = 'Polygon';
+      }
+    }
+  }, 100);
 }
-
-
