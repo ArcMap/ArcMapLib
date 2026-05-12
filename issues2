@@ -1,22 +1,25 @@
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  const editEnabled =
-    this.enableUserEdit === true ||
-    String(this.enableUserEdit) === "true" ||
-    this.hasAttribute("enable-user-edit");
-
-  if (!editEnabled) {
-    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.isUserEditEnabled() || !graphic?.geometry) {
+    console.warn("[arc-geojson-layer] editor blocked or invalid graphic", {
       enableUserEdit: this.enableUserEdit,
-      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
-      source,
+      hasGraphic: !!graphic,
+      hasGeometry: !!graphic?.geometry,
     });
     return;
   }
 
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    console.warn("[arc-geojson-layer] graphicsEditor missing");
+    return;
+  }
+
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
   this._suppressPopupUntil = Date.now() + 2000;
+
   this.enableInfoPopupWindow(false);
 
   try {
@@ -24,69 +27,74 @@ private async handleEditorDoubleClick(
     this.view?.popup?.close();
   } catch {}
 
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
+  try {
+    this.graphicsEditor.cancel();
+  } catch {}
+
+  if (!graphic.attributes) {
+    graphic.attributes = {};
   }
 
-  const hitGraphic = await this.getHitGraphic(evtOrMapPoint);
+  const isCircle = this.isCircleGraphic(graphic);
 
-  if (!hitGraphic) {
-    console.warn("[arc-geojson-layer] double-click target not found");
-    return;
+  if (isCircle) {
+    graphic.attributes = {
+      ...(graphic.attributes ?? {}),
+      isCircle: true,
+      shape: "circle",
+      shapeType: "circle",
+      drawGeometryType: "circle",
+      geometryType: "circle",
+    };
+  } else {
+    graphic.attributes = {
+      ...(graphic.attributes ?? {}),
+      isCircle: false,
+      shape: "polygon",
+      shapeType: "polygon",
+      drawGeometryType: "polygon",
+      geometryType: "polygon",
+    };
   }
 
-  const editableGraphic = this.findLiveGraphicFromLayer(hitGraphic);
+  graphic.popupTemplate = null as any;
 
-  if (!editableGraphic) {
-    console.warn("[arc-geojson-layer] live editable graphic not found", {
-      hitAttributes: hitGraphic.attributes,
-    });
-    return;
-  }
+  console.log("[arc-geojson-layer] activateGraphicsEditor target", {
+    geometryType: graphic.geometry?.type,
+    isCircle,
+    tool: "transform",
+    attributes: graphic.attributes,
+  });
 
-  await this.activateGraphicsEditor(editableGraphic);
-}
+  /**
+   * IMPORTANT:
+   * Use transform for both circle and polygon for now.
+   * reshape was causing polygon/circle distortion and diagonal redraw behavior.
+   *
+   * Circle:
+   * - can resize bigger/smaller
+   * - uniform scaling forced
+   *
+   * Polygon:
+   * - can move/resize safely
+   * - does not corrupt vertices
+   */
+  await this.graphicsEditor.update([graphic], {
+    tool: "transform",
 
+    enableRotation: false,
+    enableScaling: true,
 
-private findLiveGraphicFromLayer(hitGraphic: Graphic): Graphic | null {
-  if (!this.featureLayer || !hitGraphic) {
-    return null;
-  }
+    enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
+    preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
 
-  const hitAttrs = hitGraphic.attributes ?? {};
+    multipleSelectionEnabled: false,
+    toggleToolOnClick: false,
+  } as any);
 
-  const hitId =
-    hitAttrs[this.uniqueIdPropertyName] ??
-    hitAttrs.OBJECTID ??
-    hitAttrs.id;
-
-  const graphics = this.featureLayer.graphics.toArray();
-
-  return (
-    graphics.find((graphic: Graphic) => {
-      const attrs = graphic.attributes ?? {};
-
-      const id =
-        attrs[this.uniqueIdPropertyName] ??
-        attrs.OBJECTID ??
-        attrs.id;
-
-      return String(id) === String(hitId);
-    }) ?? null
-  );
-}
-
-
-
-
-if (
-  this.enableUserEdit ||
-  this._editorOpen ||
-  this.inDrawingMode ||
-  this._isStartingDraw ||
-  this.shouldSuppressPopup()
-) {
-  this.view?.popup?.close();
-  return;
+  console.log("[arc-geojson-layer] editor opened", {
+    geometryType: graphic.geometry?.type,
+    isCircle,
+    tool: "transform",
+  });
 }
