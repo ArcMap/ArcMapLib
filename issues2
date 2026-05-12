@@ -1,210 +1,62 @@
 private _cursorResetTimer: any = null;
+private _currentCursor: "default" | "pointer" = "default"; // NEW
 
-private bindViewEvents(): void {
-  if (!this.view) {
+
+const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
+  if (this._editorOpen || this.inDrawingMode) {
+    if (this._cursorResetTimer) {
+      clearTimeout(this._cursorResetTimer);
+      this._cursorResetTimer = null;
+    }
+    if (this._currentCursor !== "default") {
+      this._currentCursor = "default";
+      this._setViewCursor("default");
+    }
     return;
   }
 
-  this.cleanupViewEvents();
-
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
-    }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      if (
-        this._editorOpen ||
-        this.inDrawingMode ||
-        this._isStartingDraw ||
-        this.shouldSuppressPopup()
-      ) {
-        try {
-          this.view?.popup?.close();
-        } catch {}
-        return;
-      }
-
-      const graphic = await this.getHitGraphic(evt);
-      if (!graphic) {
-        return;
-      }
-
-      this.showGraphicPopup(graphic, evt.mapPoint);
-
-      this.emitLayerEvent(
-        "layerClick",
-        this.graphicToGeoJsonFeature(graphic),
-        graphic,
-        {
-          event: {
-            coordinates: {
-              latitude: evt.mapPoint?.latitude ?? 0,
-              longitude: evt.mapPoint?.longitude ?? 0,
-            },
-            attributes: graphic.attributes ?? {},
-          },
-        }
-      );
-    }, 280);
-  });
-
-  const doubleClickHandle = this.view.on("double-click", async (evt: any) => {
-    evt.stopPropagation?.();
-    evt.preventDefault?.();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
-
-    try {
-      this.view!.popupEnabled = false;
-      this.view?.popup?.close();
-    } catch {}
-
-    await this.handleEditorDoubleClick(evt, "arcgis-double-click");
-  });
-
-  const nativeDoubleClick = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
-
-    try {
-      this.view!.popupEnabled = false;
-      this.view?.popup?.close();
-    } catch {}
-
-    const rect = this.view!.container.getBoundingClientRect();
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    const mapPoint = this.view!.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(
-      { x: screenPoint.x, y: screenPoint.y, mapPoint },
-      "native-double-click"
-    );
-  };
-
-  this.view.container?.addEventListener("dblclick", nativeDoubleClick, true);
-
-  const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-    if (this._editorOpen || this.inDrawingMode) {
-      if (this._cursorResetTimer) {
-        clearTimeout(this._cursorResetTimer);
-        this._cursorResetTimer = null;
-      }
-      this._setViewCursor("default");
-      return;
-    }
-
-    if (!this.featureLayer) {
-      return;
-    }
-
-    this.view
-      .hitTest(evt, { include: [this.featureLayer] })
-      .then((hit: any) => {
-        const hasHit = (hit?.results ?? []).some((r: any) => {
-          const g = r?.graphic;
-          return (
-            g?.geometry &&
-            (g.layer === this.featureLayer ||
-              (g.layer as any)?.id === this.featureLayer?.id)
-          );
-        });
-
-        if (hasHit) {
-          // Hit — set pointer immediately and cancel any pending reset
-          if (this._cursorResetTimer) {
-            clearTimeout(this._cursorResetTimer);
-            this._cursorResetTimer = null;
-          }
-          this._setViewCursor("pointer");
-        } else {
-          // No hit — debounce the reset so rapid misses don't flicker
-          if (!this._cursorResetTimer) {
-            this._cursorResetTimer = setTimeout(() => {
-              this._cursorResetTimer = null;
-              this._setViewCursor("default");
-            }, 80);
-          }
-        }
-      })
-      .catch(() => {
-        this._setViewCursor("default");
-      });
-  });
-
-  this.eventHandles.push(
-    { remove: () => clickHandle?.remove?.() },
-    { remove: () => doubleClickHandle?.remove?.() },
-    { remove: () => pointerMoveHandle?.remove?.() },
-    {
-      remove: () => {
-        this.view?.container?.removeEventListener(
-          "dblclick",
-          nativeDoubleClick,
-          true
-        );
-      },
-    }
-  );
-}
-
-private _setViewCursor(cursor: "default" | "pointer"): void {
-  const container = this.view?.container as HTMLElement | undefined;
-  if (!container) return;
-
-  const selectors = [
-    ".esri-view-surface",
-    ".esri-view-root",
-    ".esri-overlay-surface",
-    "canvas",
-  ];
-
-  container.style.setProperty("cursor", cursor, "important");
-
-  selectors.forEach((sel) => {
-    container.querySelectorAll(sel).forEach((el) => {
-      (el as HTMLElement).style.setProperty("cursor", cursor, "important");
-    });
-  });
-}
-
-
-private cleanupViewEvents(): void {
-  this.eventHandles?.forEach((handle: any) => {
-    try {
-      handle?.remove?.();
-    } catch {}
-  });
-  this.eventHandles = [];
-
-  // FIX: Clear cursor debounce timer on cleanup
-  if (this._cursorResetTimer) {
-    clearTimeout(this._cursorResetTimer);
-    this._cursorResetTimer = null;
+  if (!this.featureLayer) {
+    return;
   }
-}
+
+  this.view
+    .hitTest(evt, { include: [this.featureLayer] })
+    .then((hit: any) => {
+      const hasHit = (hit?.results ?? []).some((r: any) => {
+        const g = r?.graphic;
+        return (
+          g?.geometry &&
+          (g.layer === this.featureLayer ||
+            (g.layer as any)?.id === this.featureLayer?.id)
+        );
+      });
+
+      if (hasHit) {
+        // Cancel any pending reset
+        if (this._cursorResetTimer) {
+          clearTimeout(this._cursorResetTimer);
+          this._cursorResetTimer = null;
+        }
+        // Only call DOM update if cursor isn't already pointer
+        if (this._currentCursor !== "pointer") {
+          this._currentCursor = "pointer";
+          this._setViewCursor("pointer");
+        }
+      } else {
+        // Only start reset timer if cursor is currently pointer
+        if (this._currentCursor === "pointer" && !this._cursorResetTimer) {
+          this._cursorResetTimer = setTimeout(() => {
+            this._cursorResetTimer = null;
+            this._currentCursor = "default";
+            this._setViewCursor("default");
+          }, 150); // 150ms — stable enough to not flicker
+        }
+      }
+    })
+    .catch(() => {
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this._setViewCursor("default");
+      }
+    });
+});
