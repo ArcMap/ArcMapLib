@@ -1,115 +1,15 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
-    return;
-  }
+const isCircle = this.isCircleGraphic(graphic);
 
-  this.applyGraphicDefaults(graphicToUpdate);
+await this.graphicsEditor.update([graphic], {
+  tool: isCircle ? "transform" : "reshape",
 
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
+  enableRotation: false,
 
-  if (!convertedFeature?.geometry) {
-    return;
-  }
+  // Circle should resize bigger/smaller
+  enableScaling: isCircle ? true : this.enableUserEditScaling,
+  enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
+  preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
 
-  const isCircle = this.isCircleGraphic(graphicToUpdate);
-
-  const normalizedFeature: Feature<GeoJsonGeometry, GeoJsonProperties> = {
-    type: "Feature",
-    id: convertedFeature.id,
-    bbox: convertedFeature.bbox,
-    geometry: convertedFeature.geometry,
-    properties: {
-      ...(convertedFeature.properties ?? {}),
-      ...(isCircle
-        ? {
-            isCircle: true,
-            shape: "circle",
-            shapeType: "circle",
-            drawGeometryType: "circle",
-            geometryType: "circle",
-          }
-        : {
-            isCircle: false,
-            shape: "polygon",
-            shapeType: "polygon",
-            drawGeometryType: "polygon",
-            geometryType: "polygon",
-          }),
-    },
-  };
-
-  const parsedResult = this.getJsonForAny(this.geojson);
-
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : {
-          type: "FeatureCollection",
-          features: [],
-        };
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    graphicToUpdate.attributes?.id ??
-    normalizedFeature.properties?.[this.uniqueIdPropertyName] ??
-    normalizedFeature.properties?.OBJECTID ??
-    normalizedFeature.properties?.id;
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.id ??
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id;
-
-    if (String(featureId) === String(updateId)) {
-      updated = true;
-
-      return {
-        ...feature,
-        id: feature?.id ?? updateId,
-        geometry: normalizedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(normalizedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(normalizedFeature as any);
-  }
-
-  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
-    type: "FeatureCollection",
-    features: updatedFeatures as any,
-  };
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.blockGeoJsonUpdate = false;
-
-  this.emitLayerEvent("userEditItemUpdated", normalizedFeature, graphicToUpdate, {
-    geojson: updatedGeoJson,
-    feature: normalizedFeature,
-    geometry: normalizedFeature.geometry,
-    properties: normalizedFeature.properties,
-    attributes: normalizedFeature.properties,
-  });
-
-  this.enableInfoPopupWindow(false);
-
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: updateId,
-    updated,
-    geometry: normalizedFeature.geometry,
-  });
-}
+  multipleSelectionEnabled: false,
+  toggleToolOnClick: false,
+} as any);
