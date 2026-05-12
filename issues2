@@ -1,65 +1,48 @@
-const doubleClickHandle = this.view.on("double-click", async (evt: any) => {
-  console.log("[arc-geojson-layer] arcgis double-click fired", {
-    layerId: this.featureLayer?.id,
-    enableUserEdit: this.enableUserEdit,
-  });
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) {
+    return null;
+  }
 
-  evt.stopPropagation?.();
-  evt.preventDefault?.();
+  try {
+    const hit = await this.view.hitTest(evt);
 
-  await this.handleEditorDoubleClick(evt, "arcgis-double-click");
-});
+    if (!hit?.results?.length) {
+      return null;
+    }
 
+    console.log("[arc-geojson-layer] raw hit results", hit.results);
 
-const nativeDoubleClick = async (event: MouseEvent) => {
-  console.log("[arc-geojson-layer] native dblclick fired", {
-    layerId: this.featureLayer?.id,
-    enableUserEdit: this.enableUserEdit,
-  });
+    const matchingResult = hit.results.find((result: any) => {
+      const graphic = result?.graphic;
 
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
+      if (!graphic) {
+        return false;
+      }
 
-  const rect = this.view!.container.getBoundingClientRect();
+      const layer = graphic.layer as any;
 
-  const screenPoint = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
-  };
+      const isMatch =
+        layer === this.featureLayer ||
+        layer?.id === this.featureLayer?.id ||
+        layer?.id === `${this.featureLayer.id}-graphics`;
 
-  const mapPoint = this.view!.toMap(screenPoint) as Point;
+      if (isMatch) {
+        console.log("[arc-geojson-layer] matched graphic", {
+          featureLayerId: this.featureLayer?.id,
+          graphicLayerId: layer?.id,
+          geometryType: graphic.geometry?.type,
+          attributes: graphic.attributes,
+        });
+      }
 
-  await this.handleEditorDoubleClick(
-    {
-      x: screenPoint.x,
-      y: screenPoint.y,
-      mapPoint,
-    },
-    "native-double-click"
-  );
-};
+      return isMatch;
+    });
 
-
-
-private async handleEditorDoubleClick(evtOrMapPoint: any, source: string): Promise<void> {
-  console.log("[arc-geojson-layer] handleEditorDoubleClick entered", {
-    source,
-    layerId: this.featureLayer?.id,
-    enableUserEdit: this.enableUserEdit,
-    attrEnableUserEdit: this.getAttribute("enable-user-edit"),
-  });
-
-  // existing code below
+    return matchingResult?.graphic ?? null;
+  } catch (error) {
+    console.error("[arc-geojson-layer] getHitGraphic failed", error);
+    return null;
+  }
 }
 
 
-
-const editEnabled = this.isUserEditEnabled();
-
-console.log("[arc-geojson-layer] editEnabled result", editEnabled);
-
-if (!editEnabled) {
-  console.warn("[arc-geojson-layer] editor blocked: edit disabled");
-  return;
-}
