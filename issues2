@@ -1,46 +1,115 @@
-private _lastCursor: "default" | "pointer" = "default";
-
-private setMapCursor(cursor: "default" | "pointer"): void {
-  if (this._lastCursor === cursor) {
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
     return;
   }
 
-  this._lastCursor = cursor;
+  this.applyGraphicDefaults(graphicToUpdate);
 
-  const container = this.view?.container as HTMLElement | undefined;
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
 
-  if (!container) {
+  if (!convertedFeature?.geometry) {
     return;
   }
 
-  const value = cursor === "pointer" ? "pointer" : "default";
+  const isCircle = this.isCircleGraphic(graphicToUpdate);
 
-  container.style.setProperty("cursor", value, "important");
+  const normalizedFeature: Feature<GeoJsonGeometry, GeoJsonProperties> = {
+    type: "Feature",
+    id: convertedFeature.id,
+    bbox: convertedFeature.bbox,
+    geometry: convertedFeature.geometry,
+    properties: {
+      ...(convertedFeature.properties ?? {}),
+      ...(isCircle
+        ? {
+            isCircle: true,
+            shape: "circle",
+            shapeType: "circle",
+            drawGeometryType: "circle",
+            geometryType: "circle",
+          }
+        : {
+            isCircle: false,
+            shape: "polygon",
+            shapeType: "polygon",
+            drawGeometryType: "polygon",
+            geometryType: "polygon",
+          }),
+    },
+  };
 
-  const targets = container.querySelectorAll(
-    [
-      ".esri-view-root",
-      ".esri-view-surface",
-      ".esri-view-surface canvas",
-      ".esri-view-surface--touch-none",
-      "canvas",
-      "div"
-    ].join(",")
-  );
+  const parsedResult = this.getJsonForAny(this.geojson);
 
-  targets.forEach((el: Element) => {
-    (el as HTMLElement).style.setProperty("cursor", value, "important");
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : {
+          type: "FeatureCollection",
+          features: [],
+        };
+
+  const updateId =
+    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    graphicToUpdate.attributes?.id ??
+    normalizedFeature.properties?.[this.uniqueIdPropertyName] ??
+    normalizedFeature.properties?.OBJECTID ??
+    normalizedFeature.properties?.id;
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.id ??
+      feature?.properties?.[this.uniqueIdPropertyName] ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id;
+
+    if (String(featureId) === String(updateId)) {
+      updated = true;
+
+      return {
+        ...feature,
+        id: feature?.id ?? updateId,
+        geometry: normalizedFeature.geometry,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(normalizedFeature.properties ?? {}),
+        },
+      };
+    }
+
+    return feature;
   });
 
-  /**
-   * ArcGIS sometimes keeps cursor on the event target / canvas.
-   * Force it one frame later also.
-   */
-  requestAnimationFrame(() => {
-    container.style.setProperty("cursor", value, "important");
+  if (!updated) {
+    updatedFeatures.push(normalizedFeature as any);
+  }
 
-    container.querySelectorAll("canvas, .esri-view-surface").forEach((el: Element) => {
-      (el as HTMLElement).style.setProperty("cursor", value, "important");
-    });
+  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
+    type: "FeatureCollection",
+    features: updatedFeatures as any,
+  };
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.blockGeoJsonUpdate = false;
+
+  this.emitLayerEvent("userEditItemUpdated", normalizedFeature, graphicToUpdate, {
+    geojson: updatedGeoJson,
+    feature: normalizedFeature,
+    geometry: normalizedFeature.geometry,
+    properties: normalizedFeature.properties,
+    attributes: normalizedFeature.properties,
+  });
+
+  this.enableInfoPopupWindow(false);
+
+  console.log("[arc-geojson-layer] edited geometry saved", {
+    objectId: updateId,
+    updated,
+    geometry: normalizedFeature.geometry,
   });
 }
