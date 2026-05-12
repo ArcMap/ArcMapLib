@@ -1,43 +1,357 @@
-const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-  if (this._editorOpen || this.inDrawingMode) {
-    this.setMapCursor("default");
+private bindViewEvents(): void {
+  if (!this.view) {
     return;
   }
 
-  // Use synchronous hitTest with a callback instead of async/await
-  this.view.hitTest(evt, { include: [this.featureLayer] }).then((hit: any) => {
-    const hasHit = (hit?.results ?? []).some((r: any) => {
-      const g = r?.graphic;
-      return (
-        g &&
-        g.geometry &&
-        (g.layer === this.featureLayer ||
-          (g.layer as any)?.id === this.featureLayer?.id)
+  this.cleanupViewEvents();
+
+  let clickTimer: any = null;
+
+  const clickHandle = this.view.on("click", async (evt: any) => {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
+    }
+
+    clickTimer = setTimeout(async () => {
+      clickTimer = null;
+
+      if (
+        this._editorOpen ||
+        this.inDrawingMode ||
+        this._isStartingDraw ||
+        this.shouldSuppressPopup()
+      ) {
+        try {
+          this.view?.popup?.close();
+        } catch {}
+        return;
+      }
+
+      const graphic = await this.getHitGraphic(evt);
+      if (!graphic) {
+        return;
+      }
+
+      this.showGraphicPopup(graphic, evt.mapPoint);
+
+      this.emitLayerEvent(
+        "layerClick",
+        this.graphicToGeoJsonFeature(graphic),
+        graphic,
+        {
+          event: {
+            coordinates: {
+              latitude: evt.mapPoint?.latitude ?? 0,
+              longitude: evt.mapPoint?.longitude ?? 0,
+            },
+            attributes: graphic.attributes ?? {},
+          },
+        }
       );
-    });
-
-    this.setMapCursor(hasHit ? "pointer" : "default");
-  }).catch(() => {
-    this.setMapCursor("default");
+    }, 280);
   });
-});
 
+  const doubleClickHandle = this.view.on("double-click", async (evt: any) => {
+    evt.stopPropagation?.();
+    evt.preventDefault?.();
 
-private setMapCursor(cursor: "default" | "pointer"): void {
-  // ArcGIS renders into a container div; we need to target it directly
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+
+    try {
+      this.view!.popupEnabled = false;
+      this.view?.popup?.close();
+    } catch {}
+
+    await this.handleEditorDoubleClick(evt, "arcgis-double-click");
+  });
+
+  const nativeDoubleClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+
+    try {
+      this.view!.popupEnabled = false;
+      this.view?.popup?.close();
+    } catch {}
+
+    const rect = this.view!.container.getBoundingClientRect();
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const mapPoint = this.view!.toMap(screenPoint) as Point;
+
+    await this.handleEditorDoubleClick(
+      { x: screenPoint.x, y: screenPoint.y, mapPoint },
+      "native-double-click"
+    );
+  };
+
+  this.view.container?.addEventListener("dblclick", nativeDoubleClick, true);
+
+  // FIX: Use .then() instead of async/await to avoid blocking on every move.
+  // Also use view.cursor (ArcGIS SDK native) instead of style.cursor.
+  const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
+    if (this._editorOpen || this.inDrawingMode) {
+      this._setViewCursor("default");
+      return;
+    }
+
+    this.view
+      .hitTest(evt, { include: [this.featureLayer] })
+      .then((hit: any) => {
+        const hasHit = (hit?.results ?? []).some((r: any) => {
+          const g = r?.graphic;
+          return (
+            g?.geometry &&
+            (g.layer === this.featureLayer ||
+              (g.layer as any)?.id === this.featureLayer?.id)
+          );
+        });
+        this._setViewCursor(hasHit ? "pointer" : "default");
+      })
+      .catch(() => this._setViewCursor("default"));
+  });
+
+  this.eventHandles.push(
+    { remove: () => clickHandle?.remove?.() },
+    { remove: () => doubleClickHandle?.remove?.() },
+    { remove: () => pointerMoveHandle?.remove?.() },
+    {
+      remove: () => {
+        this.view?.container?.removeEventListener(
+          "dblclick",
+          nativeDoubleClick,
+          true
+        );
+      },
+    }
+  );
+}
+
+private _setViewCursor(cursor: "default" | "pointer"): void {
+  // Method 1: ArcGIS SDK native cursor property (correct for 5.x)
+  // This works with the SDK's internal cursor management.
+  if (this.view?.cursor !== undefined) {
+    try {
+      this.view.cursor = cursor;
+      return;
+    } catch {}
+  }
+
+  // Method 2: Fallback — force via DOM if SDK property unavailable
   const container = this.view?.container as HTMLElement | undefined;
   if (!container) return;
 
-  const value = cursor === "pointer" ? "pointer" : "default";
+  const targets = [
+    container,
+    container.querySelector(".esri-view-surface"),
+    container.querySelector(".esri-view-root"),
+    container.querySelector("canvas"),
+  ].filter(Boolean) as HTMLElement[];
 
-  // Set on all possible surfaces ArcGIS uses
-  container.style.cursor = value;
+  targets.forEach((el) => {
+    el.style.setProperty("cursor", cursor, "important");
+  });
+}
 
-  const surface = container.querySelector(
-    ".esri-view-surface, .esri-display-object"
-  ) as HTMLElement | null;
-  if (surface) surface.style.cursor = value;
+// Keep cancelDrawing, finishActiveEditor, and update-complete handler
+// calling _setViewCursor instead of setMapCursor:
 
-  const canvas = container.querySelector("canvas") as HTMLElement | null;
-  if (canvas) canvas.style.cursor = value;
+public cancelDrawing(): void {
+  console.log("[arc-geojson-layer] cancelDrawing START");
+
+  try {
+    this.graphicsEditor?.cancel();
+  } catch {}
+
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._currentDrawGeometryType = undefined;
+  this._lastCreatedByDrawing = false;
+
+  try {
+    this.view?.popup?.close();
+  } catch {}
+
+  // Only clear sketchLayer — featureLayer and labelLayer hold loaded GeoJSON
+  try {
+    this.sketchLayer?.graphics?.removeAll();
+  } catch {}
+
+  this.enableInfoPopupWindow(true);
+  this._setViewCursor("default");
+
+  console.log("[arc-geojson-layer] cancelDrawing DONE", {
+    featureLayerGraphics: this.featureLayer?.graphics?.length ?? 0,
+    sketchLayerGraphics: this.sketchLayer?.graphics?.length ?? 0,
+  });
+}
+
+private bindEditorEvents(): void {
+  this.editorHandles?.forEach((handle: any) => {
+    try {
+      handle?.remove?.();
+    } catch {}
+  });
+
+  this.editorHandles = [];
+
+  if (!this.graphicsEditor) {
+    return;
+  }
+
+  const createHandle = this.graphicsEditor.on("create", (event: any) => {
+    console.log("[arc-geojson-layer] sketch create event", {
+      state: event.state,
+      tool: event.tool,
+      geometryType: event.graphic?.geometry?.type,
+    });
+
+    if (event.state === "start" || event.state === "active") {
+      this.inDrawingMode = true;
+      this._isStartingDraw = true;
+      this._editorOpen = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+
+      if (event.graphic) {
+        event.graphic.attributes = {
+          ...(event.graphic.attributes ?? {}),
+          __isTemporaryDrawing: true,
+        };
+      }
+      return;
+    }
+
+    if (event.state === "complete") {
+      const graphic = event.graphic as Graphic;
+
+      if (!graphic?.geometry) {
+        this.cancelDrawing();
+        return;
+      }
+
+      graphic.attributes = {
+        ...(graphic.attributes ?? {}),
+        __isTemporaryDrawing: false,
+      };
+
+      this.handleCreateComplete(graphic);
+      return;
+    }
+
+    if (event.state === "cancel") {
+      this.cancelDrawing();
+      return;
+    }
+  });
+
+  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+    console.log("[arc-geojson-layer] sketch update event", {
+      state: event.state,
+      tool: event.tool,
+      graphicsCount: event.graphics?.length ?? 0,
+    });
+
+    if (event.state === "start" || event.state === "active") {
+      this._editorOpen = true;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+      return;
+    }
+
+    if (event.state === "complete") {
+      const graphics = event.graphics ?? [];
+
+      graphics.forEach((graphic: Graphic) => {
+        if (!graphic?.geometry) {
+          return;
+        }
+
+        if (this.isCircleGraphic(graphic)) {
+          graphic.attributes = {
+            ...(graphic.attributes ?? {}),
+            drawGeometryType: "circle",
+            shapeType: "circle",
+            shape: "circle",
+            isCircle: true,
+          };
+        }
+
+        // Move graphic back from sketchLayer to featureLayer
+        this.sketchLayer?.graphics?.remove(graphic);
+        this.applyGraphicDefaults(graphic);
+        this.featureLayer?.add(graphic);
+
+        this.updateGeoJsonWithChanges(graphic);
+      });
+
+      this._editorOpen = false;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this._suppressPopupUntil = Date.now() + 700;
+      this.enableInfoPopupWindow(true);
+      this._setViewCursor("default");
+      return;
+    }
+
+    if (event.state === "cancel") {
+      // Edit cancelled — move graphic back to featureLayer without saving
+      const graphics = event.graphics ?? [];
+      graphics.forEach((graphic: Graphic) => {
+        this.sketchLayer?.graphics?.remove(graphic);
+        this.applyGraphicDefaults(graphic);
+        this.featureLayer?.add(graphic);
+      });
+
+      this._editorOpen = false;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this.enableInfoPopupWindow(true);
+      this._setViewCursor("default");
+      return;
+    }
+  });
+
+  this.editorHandles.push(createHandle, updateHandle);
+}
+
+private finishActiveEditor(): void {
+  if (!this._editorOpen) {
+    console.log("[arc-geojson-layer] finishActiveEditor skipped: editor not open");
+    return;
+  }
+
+  console.log("[arc-geojson-layer] finishActiveEditor START");
+
+  // Only call complete() — NOT complete() then cancel()
+  try {
+    this.graphicsEditor?.complete();
+  } catch {}
+
+  this._setViewCursor("default");
+
+  console.log("[arc-geojson-layer] finishActiveEditor: complete() called");
 }
