@@ -1,187 +1,40 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
-    return;
-  }
-
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-  if (!convertedFeature?.geometry) {
-    return;
-  }
-
-  const isCircle = this.isCircleGraphic(graphicToUpdate);
-
-  const normalizedFeature = {
-    ...convertedFeature,
-    geometry: {
-      ...convertedFeature.geometry,
-      type: "Polygon",
-      coordinates: this.normalizePolygonCoordinates(
-        (convertedFeature.geometry as any).coordinates
-      ),
-    },
-    properties: {
-      ...(convertedFeature.properties ?? {}),
-      ...(isCircle
-        ? { drawGeometryType: "circle", shapeType: "circle", shape: "circle", isCircle: true }
-        : { drawGeometryType: "polygon", shapeType: "polygon", shape: "polygon", isCircle: false }),
-    },
-  };
-
-  const parsedResult = this.getJsonForAny(this.geojson);
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : { type: "FeatureCollection", features: [] };
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    normalizedFeature.properties?.[this.uniqueIdPropertyName] ??
-    normalizedFeature.properties?.OBJECTID ??
-    normalizedFeature.properties?.id;
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id;
-
-    if (String(featureId) === String(updateId)) {
-      updated = true;
-      return {
-        ...feature,
-        geometry: normalizedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(normalizedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(normalizedFeature as any);
-  }
-
-  const updatedGeoJson: FeatureCollection<GeoJsonGeometry, GeoJsonProperties> = {
-    type: "FeatureCollection",
-    features: updatedFeatures as any,
-  };
-
-  // FIX: Update signature BEFORE setting geojson so updateGeoJson()
-  // skips the reload entirely when it sees the same signature
-  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.blockGeoJsonUpdate = false;
-
-  // FIX: Manually update the graphic's symbol and popup in featureLayer
-  // instead of relying on clearGeoJSONLayer + re-add cycle
-  this.featureLayer?.graphics?.forEach((g: Graphic) => {
-    const gId =
-      g.attributes?.[this.uniqueIdPropertyName] ??
-      g.attributes?.OBJECTID ??
-      g.attributes?.id;
-
-    if (String(gId) === String(updateId)) {
-      g.geometry = graphicToUpdate.geometry;
-      g.attributes = { ...graphicToUpdate.attributes };
-      this.applyGraphicDefaults(g);
-    }
-  });
-
-  this.refreshLabels();
-
-  this.emitLayerEvent("userEditItemUpdated", normalizedFeature, graphicToUpdate, {
-    geojson: updatedGeoJson,
-  });
-
-  console.log("[arc-geojson-layer] edited geometry saved", {
-    objectId: updateId,
-    updated,
-    geometryType: graphicToUpdate.geometry?.type,
-    featureCount: updatedFeatures.length,
-  });
-}
-
-
-private async updateGeoJson(
-  value: string | FeatureCollection<GeoJsonGeometry, GeoJsonProperties> | null
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
 ): Promise<void> {
-  if (!this.featureLayer || this._isUpdatingGeoJson) {
+  if (!this.enableUserEdit) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
+      source,
+    });
     return;
   }
 
-  // FIX: blockGeoJsonUpdate must be checked FIRST before signature check
-  if (this.blockGeoJsonUpdate) {
-    console.log("[arc-geojson-layer] updateGeoJson skipped: blocked");
-    return;
-  }
-
-  const signature = JSON.stringify(value ?? {});
-
-  if (signature === this._lastGeoJsonSignature) {
-    console.log("[arc-geojson-layer] updateGeoJson skipped: same payload");
-    return;
-  }
-
-  this._lastGeoJsonSignature = signature;
-  this._isUpdatingGeoJson = true;
+  this._suppressPopupUntil = Date.now() + 1500;
+  this.enableInfoPopupWindow(false);
 
   try {
-    const parsedResult = this.getJsonForAny(value);
+    this.view!.popupEnabled = false;
+    this.view?.popup?.close();
+  } catch {}
 
-    if (parsedResult.error || !parsedResult.parsedJson) {
-      console.warn("[arc-geojson-layer] invalid geojson", value);
-      return;
-    }
-
-    const parsedGeoJson = parsedResult.parsedJson;
-
-    if (
-      parsedGeoJson.type !== "FeatureCollection" ||
-      !Array.isArray(parsedGeoJson.features)
-    ) {
-      console.warn("[arc-geojson-layer] FeatureCollection expected");
-      return;
-    }
-
-    if (!this._editorOpen) {
-      this.clearGeoJSONLayer();
-    }
-
-    const graphics: Graphic[] = [];
-
-    parsedGeoJson.features.forEach((feature: any) => {
-      const graphic = this.geoJsonFeatureToGraphic(feature);
-      if (!graphic) {
-        return;
-      }
-      this.applyGraphicDefaults(graphic);
-      graphics.push(graphic);
-    });
-
-    if (graphics.length > 0) {
-      this.featureLayer.addMany(graphics);
-    }
-
-    this.refreshLabels();
-
-    console.log("[arc-geojson-layer] updateGeoJson DONE", {
-      graphics: graphics.length,
-    });
-  } catch (error) {
-    console.error("[arc-geojson-layer] updateGeoJson failed", error);
-  } finally {
-    this._isUpdatingGeoJson = false;
+  // If editor already open — close it, do NOT reopen
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
   }
+
+  // Only use hitTest — never fallback to findNearest on double-click
+  // findNearest opens editor even when clicking empty space far away
+  const graphic = await this.getHitGraphic(evtOrMapPoint);
+
+  if (!graphic) {
+    console.log("[arc-geojson-layer] double-click on empty space — editor stays closed", {
+      source,
+    });
+    // Double-click on empty space: just close popup, don't open editor
+    this.enableInfoPopupWindow(true);
+    return;
+  }
+
+  await this.activateGraphicsEditor(graphic);
 }
