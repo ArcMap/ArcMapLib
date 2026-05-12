@@ -1,153 +1,51 @@
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) {
-    return;
-  }
+private _setViewCursor(cursor: "default" | "pointer"): void {
+  const container = this.view?.container as HTMLElement | undefined;
+  if (!container) return;
 
-  await this.createEditor();
+  // ArcGIS 5.x does NOT have view.cursor property.
+  // We must force the cursor on every surface element the SDK renders.
+  const selectors = [
+    ".esri-view-surface",
+    ".esri-view-root",
+    ".esri-overlay-surface",
+    "canvas",
+  ];
 
-  if (!this.graphicsEditor) {
-    return;
-  }
+  // Set on container itself
+  container.style.setProperty("cursor", cursor, "important");
 
-  // Wait for SVM to be idle
-  let waited = 0;
-  while (
-    (this.graphicsEditor as any).state === "active" &&
-    waited < 2000
-  ) {
-    await new Promise((r) => setTimeout(r, 50));
-    waited += 50;
-  }
-
-  if ((this.graphicsEditor as any).state === "active") {
-    try {
-      this.graphicsEditor.cancel();
-    } catch {}
-    await new Promise((r) => setTimeout(r, 50));
-  }
-
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._suppressPopupUntil = Date.now() + 1500;
-
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
-
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const isCircle = this.isCircleGraphic(graphic);
-  const tool = this.resolveUpdateTool(graphic);
-
-  if (isCircle) {
-    graphic.attributes.drawGeometryType = "circle";
-    graphic.attributes.shapeType = "circle";
-    graphic.attributes.shape = "circle";
-    graphic.attributes.isCircle = true;
-  } else {
-    delete graphic.attributes.isCircle;
-    if (String(graphic.attributes.drawGeometryType ?? "").toLowerCase() === "circle") {
-      delete graphic.attributes.drawGeometryType;
-    }
-    if (String(graphic.attributes.shapeType ?? "").toLowerCase() === "circle") {
-      delete graphic.attributes.shapeType;
-    }
-    if (String(graphic.attributes.shape ?? "").toLowerCase() === "circle") {
-      delete graphic.attributes.shape;
-    }
-  }
-
-  graphic.popupTemplate = null as any;
-
-  // Remove from featureLayer
-  this.featureLayer?.graphics?.remove(graphic);
-
-  // FIX: For circles, preserve the exact symbol ArcGIS uses internally.
-  // For polygons, use default fill symbol.
-  // Never let symbol be null/undefined when passing to SVM.update().
-  if (!graphic.symbol) {
-    if (isCircle) {
-      graphic.symbol = {
-        type: "simple-fill",
-        style: "solid",
-        color: [0, 120, 255, 0.18],
-        outline: {
-          type: "simple-line",
-          color: [0, 120, 255, 1],
-          width: 2,
-          style: "solid",
-        },
-      } as any;
-    } else {
-      graphic.symbol = this.getDefaultSymbolForGeometry(graphic.geometry);
-    }
-  }
-
-  // Add to sketchLayer
-  this.sketchLayer?.graphics?.add(graphic);
-
-  // FIX: For circles, tool must be "transform" with these exact options.
-  // enableScaling=true + preserveAspectRatio=true gives the scale handles.
-  // toggleToolOnClick=false prevents accidentally switching to move mode.
-  const updateOptions: any = isCircle
-    ? {
-        tool: "transform",
-        enableRotation: false,
-        enableScaling: true,
-        preserveAspectRatio: true,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      }
-    : {
-        tool: "reshape",
-        enableRotation: this.enableUserEditRotating,
-        enableScaling: this.enableUserEditScaling,
-        preserveAspectRatio: this.enableUserEditUniformScaling,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      };
-
-  try {
-    await this.graphicsEditor.update([graphic], updateOptions);
-  } catch (err: any) {
-    console.warn("[arc-geojson-layer] editor.update() failed", err?.message);
-    // Rollback
-    this.sketchLayer?.graphics?.remove(graphic);
-    this.applyGraphicDefaults(graphic);
-    this.featureLayer?.graphics?.add(graphic);
-    this._editorOpen = false;
-    this.enableInfoPopupWindow(true);
-    return;
-  }
-
-  console.log("[arc-geojson-layer] editor opened", {
-    geometryType: graphic.geometry?.type,
-    isCircle,
-    tool: updateOptions.tool,
-    attributes: graphic.attributes,
+  // Set on every ArcGIS surface child
+  selectors.forEach((sel) => {
+    container.querySelectorAll(sel).forEach((el) => {
+      (el as HTMLElement).style.setProperty("cursor", cursor, "important");
+    });
   });
 }
 
 
-private resolveUpdateTool(
-  graphic: Graphic
-): "move" | "reshape" | "transform" {
-  // Circles MUST use transform — reshape breaks circle geometry
-  if (this.isCircleGraphic(graphic)) {
-    return "transform";
+const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
+  if (this._editorOpen || this.inDrawingMode) {
+    this._setViewCursor("default");
+    return;
   }
 
-  // Polygons use reshape for vertex editing
-  if (graphic.geometry?.type === "polygon") {
-    return "reshape";
+  // Guard: featureLayer must exist
+  if (!this.featureLayer) {
+    return;
   }
 
-  // Points and lines use move
-  return "move";
-}
+  this.view
+    .hitTest(evt, { include: [this.featureLayer] })
+    .then((hit: any) => {
+      const hasHit = (hit?.results ?? []).some((r: any) => {
+        const g = r?.graphic;
+        return (
+          g?.geometry &&
+          (g.layer === this.featureLayer ||
+            (g.layer as any)?.id === this.featureLayer?.id)
+        );
+      });
+      this._setViewCursor(hasHit ? "pointer" : "default");
+    })
+    .catch(() => this._setViewCursor("default"));
+});
