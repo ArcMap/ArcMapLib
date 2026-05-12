@@ -1,48 +1,43 @@
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer) {
-    return null;
+const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
+  if (this._editorOpen || this.inDrawingMode) {
+    this.setMapCursor("default");
+    return;
   }
 
-  try {
-    const hit = await this.view.hitTest(evt);
-
-    if (!hit?.results?.length) {
-      return null;
-    }
-
-    console.log("[arc-geojson-layer] raw hit results", hit.results);
-
-    const matchingResult = hit.results.find((result: any) => {
-      const graphic = result?.graphic;
-
-      if (!graphic) {
-        return false;
-      }
-
-      const layer = graphic.layer as any;
-
-      const isMatch =
-        layer === this.featureLayer ||
-        layer?.id === this.featureLayer?.id ||
-        layer?.id === `${this.featureLayer.id}-graphics`;
-
-      if (isMatch) {
-        console.log("[arc-geojson-layer] matched graphic", {
-          featureLayerId: this.featureLayer?.id,
-          graphicLayerId: layer?.id,
-          geometryType: graphic.geometry?.type,
-          attributes: graphic.attributes,
-        });
-      }
-
-      return isMatch;
+  // Use synchronous hitTest with a callback instead of async/await
+  this.view.hitTest(evt, { include: [this.featureLayer] }).then((hit: any) => {
+    const hasHit = (hit?.results ?? []).some((r: any) => {
+      const g = r?.graphic;
+      return (
+        g &&
+        g.geometry &&
+        (g.layer === this.featureLayer ||
+          (g.layer as any)?.id === this.featureLayer?.id)
+      );
     });
 
-    return matchingResult?.graphic ?? null;
-  } catch (error) {
-    console.error("[arc-geojson-layer] getHitGraphic failed", error);
-    return null;
-  }
+    this.setMapCursor(hasHit ? "pointer" : "default");
+  }).catch(() => {
+    this.setMapCursor("default");
+  });
+});
+
+
+private setMapCursor(cursor: "default" | "pointer"): void {
+  // ArcGIS renders into a container div; we need to target it directly
+  const container = this.view?.container as HTMLElement | undefined;
+  if (!container) return;
+
+  const value = cursor === "pointer" ? "pointer" : "default";
+
+  // Set on all possible surfaces ArcGIS uses
+  container.style.cursor = value;
+
+  const surface = container.querySelector(
+    ".esri-view-surface, .esri-display-object"
+  ) as HTMLElement | null;
+  if (surface) surface.style.cursor = value;
+
+  const canvas = container.querySelector("canvas") as HTMLElement | null;
+  if (canvas) canvas.style.cursor = value;
 }
-
-
