@@ -1,98 +1,75 @@
-const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
-  if (!this.view || !this.featureLayer || this.inDrawingMode || this._isStartingDraw) {
-    this.setMapCursor("default");
-    return;
-  }
+const pointerMoveHandle = this.view.on(
+  "pointer-move",
+  async (evt: any) => {
 
-  try {
-    const hit = await this.view.hitTest(evt);
-
-    const hitGraphic = (hit?.results ?? []).find((result: any) => {
-      const graphic = result?.graphic as Graphic | undefined;
-
-      return (
-        graphic &&
-        graphic.geometry &&
-        (
-          graphic.layer === this.featureLayer ||
-          (graphic.layer as any)?.id === this.featureLayer?.id
-        )
-      );
-    })?.graphic as Graphic | undefined;
-
-    if (hitGraphic) {
-      this.setMapCursor("pointer");
+    if (!this.view || !this.featureLayer) {
+      this.setMapCursor("default");
       return;
     }
 
-    const fallbackGraphic = this.findGraphicUnderPointer(evt.mapPoint);
+    try {
+      const hit = await this.view.hitTest(evt);
 
-    if (fallbackGraphic) {
-      this.setMapCursor("pointer");
-      return;
-    }
+      const graphic = hit?.results?.find((r: any) => {
+        const g = r?.graphic;
 
-    this.setMapCursor("default");
-  } catch (error) {
-    this.setMapCursor("default");
-  }
-});
+        return (
+          g &&
+          g.geometry &&
+          (
+            g.layer === this.featureLayer ||
+            g.sourceLayer === this.featureLayer
+          )
+        );
+      })?.graphic;
 
-private findGraphicUnderPointer(mapPoint: any): Graphic | null {
-  if (!mapPoint || !this.featureLayer) {
-    return null;
-  }
-
-  const graphics = this.featureLayer.graphics.toArray();
-
-  for (const graphic of graphics) {
-    const geometry: any = graphic.geometry;
-
-    if (!geometry) {
-      continue;
-    }
-
-    if (geometry.type === "polygon" && geometry.extent?.contains?.(mapPoint)) {
-      return graphic;
-    }
-
-    if (geometry.type === "polyline" && geometry.extent?.contains?.(mapPoint)) {
-      return graphic;
-    }
-
-    if (geometry.type === "point") {
-      const dx = Number(geometry.x ?? geometry.longitude ?? 0) - Number(mapPoint.x ?? 0);
-      const dy = Number(geometry.y ?? geometry.latitude ?? 0) - Number(mapPoint.y ?? 0);
-
-      if (Math.sqrt(dx * dx + dy * dy) < 0.5) {
-        return graphic;
+      if (graphic) {
+        this.setMapCursor("pointer");
+      } else {
+        this.setMapCursor("default");
       }
+
+    } catch (error) {
+      this.setMapCursor("default");
     }
   }
-
-  return null;
-}
+);
 
 
-private setMapCursor(cursor: "default" | "pointer"): void {
-  const container = this.view?.container as HTMLElement | undefined;
+
+graphic.symbol = {
+  ...graphic.symbol,
+  style: "solid",
+};
+
+
+
+private setMapCursor(cursor: string): void {
+
+  const container = this.view?.container as HTMLElement;
 
   if (!container) {
     return;
   }
 
-  const value = cursor === "pointer" ? "pointer" : "default";
+  container.style.cursor = cursor;
 
-  container.style.setProperty("cursor", value, "important");
+  const canvas = container.querySelector("canvas") as HTMLElement;
 
-  const elements = container.querySelectorAll(
-    ".esri-view-surface, .esri-view-root, .esri-view, canvas"
-  );
+  if (canvas) {
+    canvas.style.cursor = cursor;
+  }
 
-  elements.forEach((element: Element) => {
-    (element as HTMLElement).style.setProperty("cursor", value, "important");
-  });
+  const surface = container.querySelector(".esri-view-surface") as HTMLElement;
+
+  if (surface) {
+    surface.style.cursor = cursor;
+  }
 }
 
 
-this.viewHandles.push({ remove: () => pointerMoveHandle?.remove?.() });
+console.log(
+  "[arc-geojson-layer] hover",
+  graphic?.geometry?.type,
+  graphic
+);
