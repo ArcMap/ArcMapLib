@@ -1,23 +1,98 @@
-await this.graphicsEditor.update([graphic], {
-  tool: isCircle ? "transform" : "reshape",
+const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+  if (!this.view || !this.featureLayer || this.inDrawingMode || this._isStartingDraw) {
+    this.setMapCursor("default");
+    return;
+  }
 
-  enableRotation: false,
+  try {
+    const hit = await this.view.hitTest(evt);
 
-  // Circle resize handles
-  enableScaling: isCircle ? true : this.enableUserEditScaling,
-  enableUniformScaling: isCircle ? true : this.enableUserEditUniformScaling,
+    const hitGraphic = (hit?.results ?? []).find((result: any) => {
+      const graphic = result?.graphic as Graphic | undefined;
 
-  // Keep for compatibility, but don't rely only on this
-  preserveAspectRatio: isCircle ? true : this.enableUserEditUniformScaling,
+      return (
+        graphic &&
+        graphic.geometry &&
+        (
+          graphic.layer === this.featureLayer ||
+          (graphic.layer as any)?.id === this.featureLayer?.id
+        )
+      );
+    })?.graphic as Graphic | undefined;
 
-  multipleSelectionEnabled: false,
-  toggleToolOnClick: false,
-} as any);
+    if (hitGraphic) {
+      this.setMapCursor("pointer");
+      return;
+    }
 
+    const fallbackGraphic = this.findGraphicUnderPointer(evt.mapPoint);
 
+    if (fallbackGraphic) {
+      this.setMapCursor("pointer");
+      return;
+    }
 
-console.log("[arc-geojson-layer] activate editor options", {
-  isCircle,
-  tool: isCircle ? "transform" : "reshape",
-  attributes: graphic.attributes,
+    this.setMapCursor("default");
+  } catch (error) {
+    this.setMapCursor("default");
+  }
 });
+
+private findGraphicUnderPointer(mapPoint: any): Graphic | null {
+  if (!mapPoint || !this.featureLayer) {
+    return null;
+  }
+
+  const graphics = this.featureLayer.graphics.toArray();
+
+  for (const graphic of graphics) {
+    const geometry: any = graphic.geometry;
+
+    if (!geometry) {
+      continue;
+    }
+
+    if (geometry.type === "polygon" && geometry.extent?.contains?.(mapPoint)) {
+      return graphic;
+    }
+
+    if (geometry.type === "polyline" && geometry.extent?.contains?.(mapPoint)) {
+      return graphic;
+    }
+
+    if (geometry.type === "point") {
+      const dx = Number(geometry.x ?? geometry.longitude ?? 0) - Number(mapPoint.x ?? 0);
+      const dy = Number(geometry.y ?? geometry.latitude ?? 0) - Number(mapPoint.y ?? 0);
+
+      if (Math.sqrt(dx * dx + dy * dy) < 0.5) {
+        return graphic;
+      }
+    }
+  }
+
+  return null;
+}
+
+
+private setMapCursor(cursor: "default" | "pointer"): void {
+  const container = this.view?.container as HTMLElement | undefined;
+
+  if (!container) {
+    return;
+  }
+
+  const value = cursor === "pointer" ? "pointer" : "default";
+
+  container.style.setProperty("cursor", value, "important");
+
+  const elements = container.querySelectorAll(
+    ".esri-view-surface, .esri-view-root, .esri-view, canvas"
+  );
+
+  elements.forEach((element: Element) => {
+    (element as HTMLElement).style.setProperty("cursor", value, "important");
+  });
+}
+
+
+this.viewHandles.push({ remove: () => pointerMoveHandle?.remove?.() });
