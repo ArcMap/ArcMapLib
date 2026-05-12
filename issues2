@@ -1,20 +1,14 @@
-private _editingEnabledAt = 0; // timestamp when editing was enabled
-
 private async updateEditing(enabled: boolean): Promise<void> {
   if (this._lastEditingState === enabled) {
     return;
   }
   this._lastEditingState = enabled;
-  this._editingEnabled = enabled;
-  this.enableUserEdit = enabled;
 
-  // FIX: Record when editing was enabled so double-click
-  // fired at same time as toggle doesn't immediately open editor
-  if (enabled) {
-    this._editingEnabledAt = Date.now();
-  } else {
-    this._editingEnabledAt = 0;
-  }
+  // FIX: Set flag ONLY — do NOT touch this.enableUserEdit here.
+  // this.enableUserEdit is owned by LitElement property system.
+  // Writing it here causes updated() to fire again → infinite loop.
+  this._editingEnabled = enabled;
+  this._editingEnabledAt = enabled ? Date.now() : 0;
 
   console.log("[arc-geojson-layer] updateEditing", {
     enabled,
@@ -32,47 +26,62 @@ private async updateEditing(enabled: boolean): Promise<void> {
 }
 
 
-private async handleEditorDoubleClick(
-  evtOrMapPoint: any,
-  source: string
-): Promise<void> {
-  if (!this.isUserEditEnabled()) {
-    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
-      source,
-    });
-    return;
+protected updated(changedProps: PropertyValues<this>): void {
+  if (changedProps.has("geojson")) {
+    if (!this.initComplete) {
+      this.pendingGeoJson = this.geojson;
+    } else {
+      void this.updateGeoJson(this.geojson);
+    }
   }
 
-  // FIX: If editing was just enabled within last 400ms, this double-click
-  // was the same click that toggled edit ON — ignore it
-  if (Date.now() - this._editingEnabledAt < 400) {
-    console.log("[arc-geojson-layer] double-click ignored: just enabled editing", {
-      source,
-      ms: Date.now() - this._editingEnabledAt,
-    });
-    return;
+  if (changedProps.has("renderer")) {
+    this.updateRenderer(this.renderer);
   }
 
-  this._suppressPopupUntil = Date.now() + 1500;
-  this.enableInfoPopupWindow(false);
-
-  try {
-    this.view!.popupEnabled = false;
-    this.view?.popup?.close();
-  } catch {}
-
-  if (this._editorOpen) {
-    this.finishActiveEditor();
-    return;
+  if (
+    changedProps.has("labelJson") ||
+    changedProps.has("labelColor") ||
+    changedProps.has("labelSize")
+  ) {
+    this.refreshLabels();
   }
 
-  const graphic = await this.getHitGraphic(evtOrMapPoint);
-
-  if (!graphic) {
-    console.log("[arc-geojson-layer] double-click on empty space", { source });
-    this.enableInfoPopupWindow(true);
-    return;
+  if (changedProps.has("infoTemplate")) {
+    this.updateInfoTemplate(this.infoTemplate);
   }
 
-  await this.activateGraphicsEditor(graphic);
+  if (changedProps.has("layerClass")) {
+    this.updateLayerClass(this.layerClass);
+  }
+
+  if (changedProps.has("enableUserEdit")) {
+    // FIX: Sync _editingEnabled directly from the property change
+    // Do this BEFORE calling updateEditing so the flag is correct
+    this._editingEnabled = this.enableUserEdit;
+    this._editingEnabledAt = this.enableUserEdit ? Date.now() : 0;
+
+    if (!this.initComplete) {
+      this.pendingEnableUserEdit = this.enableUserEdit;
+    } else {
+      void this.updateEditing(this.enableUserEdit);
+    }
+  }
+
+  if (
+    changedProps.has("enableUserEditMove") ||
+    changedProps.has("enableUserEditVertices") ||
+    changedProps.has("enableUserEditScaling") ||
+    changedProps.has("enableUserEditRotating") ||
+    changedProps.has("enableUserEditUniformScaling") ||
+    changedProps.has("enableUserEditAddVertices") ||
+    changedProps.has("enableUserEditDeleteVertices")
+  ) {
+    this.syncEditorOptions();
+  }
+}
+
+
+private isUserEditEnabled(): boolean {
+  return this._editingEnabled === true;
 }
