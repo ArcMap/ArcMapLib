@@ -1,15 +1,17 @@
-private addToGeoJson(graphicToAdd: Graphic): void {
-  if (!graphicToAdd?.geometry) {
-    return;
-  }
+this.addToGeoJson(graphic);
+this.enableInfoPopupWindow(true);
 
-  // ✅ Same fix as updateGeoJsonWithChanges
-  if (graphicToAdd.geometry?.spatialReference?.isWebMercator) {
-    graphicToAdd = graphicToAdd.clone();
-    graphicToAdd.geometry = webMercatorUtils.webMercatorToGeographic(
-      graphicToAdd.geometry!
-    ) as Geometry;
-  }
-
-  // ... rest of your existing addToGeoJson logic
+// ✅ Convert before emitting
+const geoGraphic = graphic.clone();
+if (geoGraphic.geometry?.spatialReference?.isWebMercator) {
+  geoGraphic.geometry = webMercatorUtils.webMercatorToGeographic(
+    geoGraphic.geometry!
+  ) as Geometry;
 }
+
+this.emitLayerEvent(
+  'userDrawItemAdded',
+  this.graphicToGeoJsonFeature(geoGraphic),
+  geoGraphic,
+  { geojson: this.geojson },
+);
