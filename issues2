@@ -1,15 +1,84 @@
-private syncEditorOptions(): void {
-  if (!this.graphicsEditor) {
-    return;
+private async createLayer(initialGeoJson: any): Promise<void> {
+  const layerId = `${this.name || "arc-geojson-layer"}-${Date.now()}`;
+
+  this.featureLayer = new GraphicsLayer({
+    id: `${layerId}-graphics`,
+    title: this.name,
+    listMode: "show",
+    // FIX: Enable hit testing on polygon fill areas
+    elevationInfo: undefined,
+  });
+
+  // FIX: Ensure hit test works on polygon interior, not just outline
+  (this.featureLayer as any).pickingEnabled = true;
+
+  this.labelLayer = new GraphicsLayer({
+    id: `${layerId}-labels`,
+    title: `${this.name}-labels`,
+    listMode: "hide",
+  });
+
+  (this.labelLayer as any).pickingEnabled = false;
+
+  this.sketchLayer = new GraphicsLayer({
+    id: `${layerId}-sketch`,
+    title: `${this.name}-sketch`,
+    listMode: "hide",
+  });
+
+  this.view.map.add(this.featureLayer);
+  this.view.map.add(this.labelLayer);
+  this.view.map.add(this.sketchLayer);
+
+  this.updateLayerClass(this.layerClass);
+
+  if (initialGeoJson) {
+    await this.updateGeoJson(initialGeoJson);
+  }
+}
+
+
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) {
+    return null;
   }
 
   try {
-    (this.graphicsEditor as any).defaultUpdateOptions = {
-      enableRotation: this.enableUserEditRotating,
-      enableScaling: this.enableUserEditScaling,
-      preserveAspectRatio: this.enableUserEditUniformScaling,
-      toggleToolOnClick: false,
-      multipleSelectionEnabled: false,
-    };
-  } catch {}
+    const hit: any = await this.view.hitTest(evt, {
+      include: [this.featureLayer],
+    });
+
+    const results = hit?.results ?? [];
+
+    console.log("[arc-geojson-layer] getHitGraphic results", {
+      count: results.length,
+      featureLayerId: this.featureLayer.id,
+      results: results.map((r: any) => ({
+        layerId: r?.graphic?.layer?.id,
+        geomType: r?.graphic?.geometry?.type,
+        match: r?.graphic?.layer === this.featureLayer ||
+          r?.graphic?.layer?.id === this.featureLayer?.id,
+      })),
+    });
+
+    // FIX: Match by layer ID string comparison — not object reference.
+    // Object reference can fail if layer was recreated.
+    const result = results.find((r: any) => {
+      const g = r?.graphic;
+      if (!g?.geometry) return false;
+
+      const layerId = g.layer?.id ?? (g as any).layerId;
+      return (
+        g.layer === this.featureLayer ||
+        layerId === this.featureLayer?.id
+      );
+    });
+
+    return (result?.graphic as Graphic) ?? null;
+  } catch (error) {
+    console.warn("[arc-geojson-layer] hitTest failed", error);
+    return null;
+  }
 }
+
+
