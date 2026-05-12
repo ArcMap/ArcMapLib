@@ -1,23 +1,22 @@
-const INTERNAL_KEYS = new Set([
-  'OBJECTID',
-  'isCircle',
-  'isTemporaryDrawing',
-  'drawGeometryType',
-  'shapeType',
-  'shape',
-  this.uniqueIdPropertyName,
-]);
+public openPopup(featureId: string): void {
+  const graphic = (this._sourceCache ?? []).find((g: Graphic) =>
+    String(g.attributes?.[this.uniqueIdPropertyName]) === String(featureId) ||
+    String(g.attributes?.OBJECTID) === String(featureId) ||
+    String(g.attributes?.id) === String(featureId)
+  );
 
-const fieldInfos = Object.keys(attributes)
-  .filter((key) => !INTERNAL_KEYS.has(key))
-  .filter((key) => {
-    const value = attributes[key];
-    return value !== undefined && 
-           value !== null && 
-           typeof value !== 'object';
-  })
-  .map((key) => ({
-    fieldName: key,
-    label: key,
-    visible: true,
-  }));
+  if (!graphic) {
+    console.warn('[arc-geojson-layer] openPopup: not found', featureId);
+    return;
+  }
+
+  const location =
+    graphic.geometry?.type === 'point'
+      ? (graphic.geometry as Point)
+      : (graphic.geometry as Polygon).centroid;
+
+  this.view?.popup?.open({
+    features: [graphic],
+    location,
+  });
+}
