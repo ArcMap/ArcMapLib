@@ -1,7 +1,15 @@
-// Convert Web Mercator → Geographic before processing
-if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
-  graphicToUpdate = graphicToUpdate.clone();
-  graphicToUpdate.geometry = webMercatorUtils.webMercatorToGeographic(
-    graphicToUpdate.geometry
-  ) as Geometry;
+private addToGeoJson(graphicToAdd: Graphic): void {
+  if (!graphicToAdd?.geometry) {
+    return;
+  }
+
+  // ✅ Same fix as updateGeoJsonWithChanges
+  if (graphicToAdd.geometry?.spatialReference?.isWebMercator) {
+    graphicToAdd = graphicToAdd.clone();
+    graphicToAdd.geometry = webMercatorUtils.webMercatorToGeographic(
+      graphicToAdd.geometry!
+    ) as Geometry;
+  }
+
+  // ... rest of your existing addToGeoJson logic
 }
