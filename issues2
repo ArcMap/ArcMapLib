@@ -1,40 +1,92 @@
-console.log("[arc-geojson-layer] editor target", {
-  geometryType: graphic.geometry?.type,
-  isCircle,
-  attributes: graphic.attributes,
-});
+private async handleEditorDoubleClick(
+  evtOrMapPoint: any,
+  source: string
+): Promise<void> {
+  const editEnabled =
+    this.enableUserEdit === true ||
+    String(this.enableUserEdit) === "true" ||
+    this.hasAttribute("enable-user-edit");
+
+  if (!editEnabled) {
+    console.warn("[arc-geojson-layer] editor blocked: enableUserEdit is false", {
+      enableUserEdit: this.enableUserEdit,
+      attrEnableUserEdit: this.getAttribute("enable-user-edit"),
+      source,
+    });
+    return;
+  }
+
+  this._suppressPopupUntil = Date.now() + 2000;
+  this.enableInfoPopupWindow(false);
+
+  try {
+    this.view!.popupEnabled = false;
+    this.view?.popup?.close();
+  } catch {}
+
+  if (this._editorOpen) {
+    this.finishActiveEditor();
+    return;
+  }
+
+  const hitGraphic = await this.getHitGraphic(evtOrMapPoint);
+
+  if (!hitGraphic) {
+    console.warn("[arc-geojson-layer] double-click target not found");
+    return;
+  }
+
+  const editableGraphic = this.findLiveGraphicFromLayer(hitGraphic);
+
+  if (!editableGraphic) {
+    console.warn("[arc-geojson-layer] live editable graphic not found", {
+      hitAttributes: hitGraphic.attributes,
+    });
+    return;
+  }
+
+  await this.activateGraphicsEditor(editableGraphic);
+}
+
+
+private findLiveGraphicFromLayer(hitGraphic: Graphic): Graphic | null {
+  if (!this.featureLayer || !hitGraphic) {
+    return null;
+  }
+
+  const hitAttrs = hitGraphic.attributes ?? {};
+
+  const hitId =
+    hitAttrs[this.uniqueIdPropertyName] ??
+    hitAttrs.OBJECTID ??
+    hitAttrs.id;
+
+  const graphics = this.featureLayer.graphics.toArray();
+
+  return (
+    graphics.find((graphic: Graphic) => {
+      const attrs = graphic.attributes ?? {};
+
+      const id =
+        attrs[this.uniqueIdPropertyName] ??
+        attrs.OBJECTID ??
+        attrs.id;
+
+      return String(id) === String(hitId);
+    }) ?? null
+  );
+}
 
 
 
-if (isCircle) {
 
-  await this.graphicsEditor.update([graphic], {
-    tool: "transform",
-
-    enableRotation: false,
-
-    enableScaling: true,
-
-    enableUniformScaling: true,
-
-    preserveAspectRatio: true,
-
-    multipleSelectionEnabled: false,
-
-    toggleToolOnClick: false,
-  } as any);
-
-} else {
-
-  await this.graphicsEditor.update([graphic], {
-    tool: "reshape",
-
-    enableRotation: false,
-
-    enableScaling: false,
-
-    multipleSelectionEnabled: false,
-
-    toggleToolOnClick: false,
-  } as any);
+if (
+  this.enableUserEdit ||
+  this._editorOpen ||
+  this.inDrawingMode ||
+  this._isStartingDraw ||
+  this.shouldSuppressPopup()
+) {
+  this.view?.popup?.close();
+  return;
 }
