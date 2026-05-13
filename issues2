@@ -1,6 +1,3 @@
-this.cleanupViewEvents();
-let clickTimer: any = null;
-
 const clickHandle = this.view.on('click', async (evt: any) => {
   if (clickTimer) {
     clearTimeout(clickTimer);
@@ -8,12 +5,13 @@ const clickHandle = this.view.on('click', async (evt: any) => {
     return;
   }
 
+  // ✅ Call getHitGraphic ONCE and reuse
   const graphic = await this.getHitGraphic(evt);
   if (!graphic) {
     return;
   }
 
-  // ✅ Always emit layerClick immediately
+  // ✅ Emit layerClick immediately
   this.emitLayerEvent(
     'layerClick',
     this.graphicToGeoJsonFeature(graphic),
@@ -29,10 +27,9 @@ const clickHandle = this.view.on('click', async (evt: any) => {
     }
   );
 
-  clickTimer = setTimeout(async () => {
+  clickTimer = setTimeout(() => {
     clickTimer = null;
 
-    // If editor is open or drawing — close popup and bail
     if (
       this._editorOpen ||
       this.inDrawingMode ||
@@ -45,15 +42,15 @@ const clickHandle = this.view.on('click', async (evt: any) => {
       return;
     }
 
-    // ✅ Only show popup when edit is NOT enabled
+    // ✅ Only show popup when edit NOT enabled
+    // Use already-fetched graphic — no second getHitGraphic call
     if (!this.enableUserEdit) {
       this.showGraphicPopup(graphic, evt.mapPoint);
     } else {
-      // Edit is enabled — close any stale popup
       try {
         this.view?.popup?.close();
       } catch {}
     }
 
-  }, 280);
+  }, 280); // ✅ Reduce to 280ms for snappiness
 });
