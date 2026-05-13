@@ -1,62 +1,18 @@
-const clickHandle = this.view.on('click', async (evt: any) => {
-  if (clickTimer) {
-    clearTimeout(clickTimer);
-    clickTimer = null;
+const updateHandle = this.graphicsEditor.on('update', (event: any) => {
+  if (event.state === 'start' || event.state === 'active') {
+    this._editorOpen = true;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
     return;
   }
 
-  const graphic = await this.getHitGraphic(evt);
-  if (!graphic) {
-    return;
+  if (event.state === 'complete') {
+    const graphics = event.graphics ?? [];
+    graphics.forEach((graphic: Graphic) => {
+      if (!graphic?.geometry) return;
+      this.updateGeoJsonWithChanges(graphic);
+    });
   }
-
-  // ✅ Emit layerClick immediately
-  this.emitLayerEvent(
-    'layerClick',
-    this.graphicToGeoJsonFeature(graphic),
-    graphic,
-    {
-      event: {
-        coordinates: {
-          latitude: evt.mapPoint?.latitude ?? 0,
-          longitude: evt.mapPoint?.longitude ?? 0,
-        },
-        attributes: graphic.attributes ?? {},
-      },
-    }
-  );
-
-  // ✅ Activate editor on single click if edit enabled
-  if (this.enableUserEdit && !this._editorOpen && !this.inDrawingMode) {
-    if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-      this.removingItem = true;
-      this.removeFromGeoJson(graphic);
-      this.graphicsEditor?.deactivate();
-      this.removingItem = false;
-      return;
-    }
-    this.activateGraphicsEditor(graphic);
-    return; // ✅ return early — no popup needed
-  }
-
-  clickTimer = setTimeout(() => {
-    clickTimer = null;
-
-    if (
-      this._editorOpen ||
-      this.inDrawingMode ||
-      this._isStartingDraw ||
-      this._shouldSuppressPopup()
-    ) {
-      try { this.view?.popup?.close(); } catch {}
-      return;
-    }
-
-    if (!this.enableUserEdit) {
-      this.showGraphicPopup(graphic, evt.mapPoint);
-    } else {
-      try { this.view?.popup?.close(); } catch {}
-    }
-
-  }, 280);
 });
