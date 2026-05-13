@@ -1,193 +1,59 @@
-private bindViewEvents(): void {
-  if (!this.view) {
+this.cleanupViewEvents();
+let clickTimer: any = null;
+
+const clickHandle = this.view.on('click', async (evt: any) => {
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
     return;
   }
 
-  this.cleanupViewEvents();
-  let clickTimer: any = null;
+  const graphic = await this.getHitGraphic(evt);
+  if (!graphic) {
+    return;
+  }
 
-  const clickHandle = this.view.on('click', async (evt: any) => {
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
-    }
-
-    const graphic = await this.getHitGraphic(evt);
-    if (!graphic) {
-      return;
-    }
-
-    // ✅ Always emit layerClick immediately
-    this.emitLayerEvent(
-      'layerClick',
-      this.graphicToGeoJsonFeature(graphic),
-      graphic,
-      {
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: graphic.attributes ?? {},
+  // ✅ Always emit layerClick immediately
+  this.emitLayerEvent(
+    'layerClick',
+    this.graphicToGeoJsonFeature(graphic),
+    graphic,
+    {
+      event: {
+        coordinates: {
+          latitude: evt.mapPoint?.latitude ?? 0,
+          longitude: evt.mapPoint?.longitude ?? 0,
         },
-      }
-    );
+        attributes: graphic.attributes ?? {},
+      },
+    }
+  );
 
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
+  clickTimer = setTimeout(async () => {
+    clickTimer = null;
 
-      if (
-        this._editorOpen ||
-        this.inDrawingMode ||
-        this._isStartingDraw ||
-        this._shouldSuppressPopup()
-      ) {
-        try {
-          this.view?.popup?.close();
-        } catch {}
-        return;
-      }
-
-      this.showGraphicPopup(graphic, evt.mapPoint);
-    }, 280);
-  });
-
-  // ✅ Double-click — just suppress popup and stop propagation
-  // Editor now opens on single click, double-click only needed
-  // to finish polygon drawing
-  const doubleClickHandle = this.view.on(
-    'double-click',
-    async (evt: any) => {
-      evt.stopPropagation?.();
-      evt.preventDefault?.();
-
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-        clickTimer = null;
-      }
-
-      this._suppressPopupUntil = Date.now() + 1500;
-      this.enableInfoPopupWindow(false);
-
+    // If editor is open or drawing — close popup and bail
+    if (
+      this._editorOpen ||
+      this.inDrawingMode ||
+      this._isStartingDraw ||
+      this._shouldSuppressPopup()
+    ) {
       try {
-        this.view!.popupEnabled = false;
         this.view?.popup?.close();
       } catch {}
-
-      await this.handleEditorDoubleClick(evt, 'arcgis-double-click');
-    }
-  );
-
-  const nativeDoubleClick = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
-
-    try {
-      this.view!.popupEnabled = false;
-      this.view?.popup?.close();
-    } catch {}
-
-    const rect = this.view!.container.getBoundingClientRect();
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    const mapPoint = this.view!.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(
-      { x: screenPoint.x, y: screenPoint.y, mapPoint },
-      'native-double-click'
-    );
-  };
-
-  this.view.container?.addEventListener(
-    'dblclick',
-    nativeDoubleClick,
-    true,
-  );
-
-  const pointerMoveHandle = this.view.on('pointer-move', (evt: any) => {
-    if (this._editorOpen || this.inDrawingMode) {
-      if (this._cursorResetTimer) {
-        clearTimeout(this._cursorResetTimer);
-        this._cursorResetTimer = null;
-      }
-      if (this._currentCursor !== 'default') {
-        this._currentCursor = 'default';
-        this.setViewCursor('default');
-      }
       return;
     }
 
-    if (!this.featureLayer) {
-      return;
+    // ✅ Only show popup when edit is NOT enabled
+    if (!this.enableUserEdit) {
+      this.showGraphicPopup(graphic, evt.mapPoint);
+    } else {
+      // Edit is enabled — close any stale popup
+      try {
+        this.view?.popup?.close();
+      } catch {}
     }
 
-    this.view
-      .hitTest(evt, { include: [this.featureLayer] })
-      .then((hit: any) => {
-        const hasHit = (hit?.results ?? []).some((r: any) => {
-          const g = r?.graphic;
-          return (
-            g?.geometry &&
-            (g.layer === this.featureLayer ||
-              (g.layer as any)?.id === this.featureLayer?.id)
-          );
-        });
-
-        if (hasHit) {
-          if (this._cursorResetTimer) {
-            clearTimeout(this._cursorResetTimer);
-            this._cursorResetTimer = null;
-          }
-          if (this._currentCursor !== 'pointer') {
-            this._currentCursor = 'pointer';
-            this.setViewCursor('pointer');
-          }
-        } else {
-          if (
-            this._currentCursor === 'pointer' &&
-            !this._cursorResetTimer
-          ) {
-            this._cursorResetTimer = setTimeout(() => {
-              this._cursorResetTimer = null;
-              this._currentCursor = 'default';
-              this.setViewCursor('default');
-            }, 150);
-          }
-        }
-      })
-      .catch(() => {
-        if (this._currentCursor !== 'default') {
-          this._currentCursor = 'default';
-          this.setViewCursor('default');
-        }
-      });
-  });
-
-  this.eventHandles.push(
-    { remove: () => clickHandle?.remove?.() },
-    { remove: () => doubleClickHandle?.remove?.() },
-    { remove: () => pointerMoveHandle?.remove?.() },
-    {
-      remove: () => {
-        this.view?.container?.removeEventListener(
-          'dblclick',
-          nativeDoubleClick,
-          true,
-        );
-      },
-    },
-  );
-}
+  }, 280);
+});
