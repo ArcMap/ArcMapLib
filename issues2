@@ -5,7 +5,6 @@ const clickHandle = this.view.on('click', async (evt: any) => {
     return;
   }
 
-  // ✅ Call getHitGraphic ONCE and reuse
   const graphic = await this.getHitGraphic(evt);
   if (!graphic) {
     return;
@@ -27,6 +26,19 @@ const clickHandle = this.view.on('click', async (evt: any) => {
     }
   );
 
+  // ✅ Activate editor on single click if edit enabled
+  if (this.enableUserEdit && !this._editorOpen && !this.inDrawingMode) {
+    if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+      this.removingItem = true;
+      this.removeFromGeoJson(graphic);
+      this.graphicsEditor?.deactivate();
+      this.removingItem = false;
+      return;
+    }
+    this.activateGraphicsEditor(graphic);
+    return; // ✅ return early — no popup needed
+  }
+
   clickTimer = setTimeout(() => {
     clickTimer = null;
 
@@ -36,21 +48,15 @@ const clickHandle = this.view.on('click', async (evt: any) => {
       this._isStartingDraw ||
       this._shouldSuppressPopup()
     ) {
-      try {
-        this.view?.popup?.close();
-      } catch {}
+      try { this.view?.popup?.close(); } catch {}
       return;
     }
 
-    // ✅ Only show popup when edit NOT enabled
-    // Use already-fetched graphic — no second getHitGraphic call
     if (!this.enableUserEdit) {
       this.showGraphicPopup(graphic, evt.mapPoint);
     } else {
-      try {
-        this.view?.popup?.close();
-      } catch {}
+      try { this.view?.popup?.close(); } catch {}
     }
 
-  }, 280); // ✅ Reduce to 280ms for snappiness
+  }, 280);
 });
