@@ -1,28 +1,12 @@
-if (event.state === 'active') {
-  if (
-    event.toolEventInfo?.type === 'vertex-move' ||
-    event.toolEventInfo?.type === 'move' ||
-    event.toolEventInfo?.type === 'scale' ||
-    event.toolEventInfo?.type === 'rotate'
-  ) {
-    const graphic = event.graphics?.[0];
-    if (graphic?.geometry) {
-      this.emitLayerEvent(
-        'userEditItemUpdated',
-        this.graphicToGeoJsonFeature(graphic),
-        graphic,
-        { geojson: this.geojson }
-      );
-    }
-  }
-  return;
-}
-
-
-if (event.state === 'complete') {
-  const graphics = event.graphics ?? [];
-  graphics.forEach((graphic: Graphic) => {
-    if (!graphic?.geometry) return;
-    this.updateGeoJsonWithChanges(graphic);
-  });
-}
+const attrs = {
+  ...(feature.properties ?? {}),
+  [this.uniqueIdPropertyName]: 
+    feature.properties?.[this.uniqueIdPropertyName] ?? 
+    (feature as any).id ?? 
+    Date.now(),
+  OBJECTID: 
+    feature.properties?.[this.uniqueIdPropertyName] ?? 
+    feature.properties?.OBJECTID ??
+    (feature as any).id ?? 
+    Date.now(),
+};
