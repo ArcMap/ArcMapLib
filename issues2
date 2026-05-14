@@ -1,6 +1,6 @@
 private normalizeZoom(value: number | undefined): number {
   if (typeof value !== "number" || Number.isNaN(value)) {
-    return UpMap.DEFAULT_ZOOM;
+    return .DEFAULT_ZOOM;
   }
 
   const roundedZoom = Math.round(value);
