@@ -1,90 +1,149 @@
-private addToGeoJson(graphic: Graphic): void {
+private async updateGeoJson(
+  value:
+    | string
+    | FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
+    | null
+): Promise<void> {
+  if (!this.featureLayer || this._isUpdatingGeoJson) {
+    return;
+  }
+
+  // FIX: blockGeoJsonUpdate must be checked FIRST before signature check
+  if (this.blockGeoJsonUpdate) {
+    return;
+  }
+
+  const signature = JSON.stringify(value ?? {});
+
+  if (signature === this._lastGeoJsonSignature) {
+    return;
+  }
+
+  this._lastGeoJsonSignature = signature;
+  this._isUpdatingGeoJson = true;
+
+  try {
+    const parsedResult = this.getJsonForAny(value);
+
+    if (parsedResult.error || !parsedResult.parsedJson) {
+      console.warn('[up-geojson-layer] invalid geojson', value);
+      return;
+    }
+
+    const parsedGeoJson = parsedResult.parsedJson;
+
+    if (
+      parsedGeoJson.type !== 'FeatureCollection' ||
+      !Array.isArray(parsedGeoJson.features)
+    ) {
+      console.warn('[up-geojson-layer] FeatureCollection expected');
+      return;
+    }
+
+    if (!this._editorOpen) {
+      this.clearGeoJSONLayer();
+    }
+
+    const graphics: Graphic[] = [];
+
+    parsedGeoJson.features.forEach((feature: any) => {
+      const graphic = this.geoJsonFeatureToGraphic(feature);
+      if (!graphic) {
+        return;
+      }
+
+      // ✅ Use actual feature ID — not random timestamp
+      const featureId =
+        feature?.properties?.[this.uniqueIdPropertyName] ??
+        feature?.properties?.OBJECTID ??
+        feature?.id ??
+        feature?.properties?.id ??
+        0;
+
+      graphic.attributes = {
+        ...(graphic.attributes ?? {}),
+        [this.uniqueIdPropertyName]: featureId,
+        OBJECTID: featureId,
+        id: featureId,
+      };
+
+      this.applyGraphicDefaults(graphic);
+      graphics.push(graphic);
+    });
+
+    if (graphics.length > 0) {
+      this.featureLayer.addMany(graphics);
+    }
+
+    this.refreshLabels();
+    // FIX: Re-apply active type filter after reload
+    this.filterGraphicsByActiveType(this._activeVisibleType);
+
+  } catch (error) {
+    console.error('[up-geojson-layer] updateGeoJson failed', error);
+  } finally {
+    this._isUpdatingGeoJson = false;
+  }
+}
+
+
+private geoJsonFeatureToGraphic(feature: Feature): Graphic | null {
+  if (!feature?.geometry) {
+    return null;
+  }
+
+  const geometry = this.geoJsonGeometryToUpGeometry(feature.geometry);
+  if (!geometry) {
+    return null;
+  }
+
+  const properties = { ...(feature.properties ?? {}) } as Record<string, any>;
+
+  // ✅ Use actual feature ID — never random
+  const objectId =
+    feature.id ??
+    properties[this.uniqueIdPropertyName] ??
+    properties.OBJECTID ??
+    properties.id ??
+    0;  // ✅ default to 0 not random
+
+  properties[this.uniqueIdPropertyName] = objectId;
+  properties.OBJECTID = objectId;
+  properties.id = objectId;
+
+  const graphic = new Graphic({ geometry, attributes: properties });
+  this.applyGraphicDefaults(graphic);
+  return graphic;
+}
+
+
+
+private graphicToGeoJsonFeature(graphic: Graphic): Feature | null {
   if (!graphic?.geometry) {
-    return;
+    return null;
   }
 
-  // Convert Web Mercator → Geographic before processing
-  if (graphic.geometry?.spatialReference?.isWebMercator) {
-    graphic = graphic.clone();
-    graphic.geometry = webMercatorUtils.webMercatorToGeographic(
-      graphic.geometry!
-    ) as Geometry;
+  const geometry = this.arcGeometryToGeoJson(graphic.geometry);
+  if (!geometry) {
+    return null;
   }
 
-  const convertedFeature = this.graphicToGeoJsonFeature(graphic);
-  if (!convertedFeature) {
-    return;
-  }
-
-  const isCircle = this.isCircleGraphic(graphic);
-  if (isCircle && convertedFeature.properties) {
-    convertedFeature.properties.isCircle = true;
-    convertedFeature.properties.drawGeometryType = 'circle';
-    convertedFeature.properties.shapeType = 'circle';
-    convertedFeature.properties.shape = 'circle';
-  }
-
-  // ✅ Strip internal fields — same as Stencil
-  const INTERNAL_KEYS = new Set([
-    'drawGeometryType',
-    'shapeType',
-    'shape',
-    'isCircle',
-    'isTemporaryDrawing',
-    'id',
-    'OBJECTID',
-    this.uniqueIdPropertyName,
-  ]);
-
-  const userProperties = Object.fromEntries(
-    Object.entries(convertedFeature.properties ?? {}).filter(
-      ([key]) => !INTERNAL_KEYS.has(key)
-    )
-  );
-
-  // ✅ OBJECTID and id should be 0 for new draws — same as Stencil
-  const featureId =
+  // ✅ Use actual graphic attribute ID — never random
+  const objectId =
     graphic.attributes?.[this.uniqueIdPropertyName] ??
     graphic.attributes?.OBJECTID ??
-    0;
+    graphic.attributes?.id ??
+    0;  // ✅ default to 0 not random
 
-  const normalizedFeature = {
-    ...convertedFeature,
-    id: featureId,
+  return {
+    type: 'Feature',
+    id: objectId,
+    geometry,
     properties: {
-      ...userProperties,
-      OBJECTID: featureId,
+      ...(graphic.attributes ?? {}),
+      [this.uniqueIdPropertyName]: objectId,
+      OBJECTID: objectId,
+      id: objectId,
     },
   };
-
-  const parsedResult = this.getJsonForAny(this.geojson);
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : { type: 'FeatureCollection', features: [] };
-
-  currentGeoJson.features.push(normalizedFeature as any);
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = currentGeoJson as any;
-  this.blockGeoJsonUpdate = false;
-
-  this.enableInfoPopupWindow(true);
-
-  // ✅ Convert before emitting
-  const geoGraphic = graphic.clone();
-  if (geoGraphic.geometry?.spatialReference?.isWebMercator) {
-    geoGraphic.geometry = webMercatorUtils.webMercatorToGeographic(
-      geoGraphic.geometry!
-    ) as Geometry;
-  }
-
-  this.emitLayerEvent(
-    'userDrawItemAdded',
-    this.graphicToGeoJsonFeature(geoGraphic),
-    geoGraphic,
-    { geojson: this.geojson }
-  );
 }
