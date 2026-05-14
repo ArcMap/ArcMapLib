@@ -1,37 +1,39 @@
-const updateHandle = this.graphicsEditor.on('update', (event: any) => {
-  if (event.state === 'start') {
-    this._editorOpen = true;
-    this.inDrawingMode = false;
-    this._isStartingDraw = false;
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
-    return;
-  }
+private syncMouseWheelZoom(): void {
+  if (!this.view) return;
 
-  if (event.state === 'active') {
-    // ✅ Only update on actual geometry changes
-    const toolType = event.toolEventInfo?.type;
-    if (
-      toolType === 'vertex-move-stop' ||
-      toolType === 'move-stop' ||
-      toolType === 'scale-stop' ||
-      toolType === 'rotate-stop' ||
-      toolType === 'reshape-stop'
-    ) {
-      const graphics = event.graphics ?? [];
-      graphics.forEach((graphic: Graphic) => {
-        if (!graphic?.geometry) return;
-        this.updateGeoJsonWithChanges(graphic);
-      });
-    }
-    return;
-  }
+  this.eventHandles.remove('mouse-wheel');
 
-  if (event.state === 'complete') {
-    const graphics = event.graphics ?? [];
-    graphics.forEach((graphic: Graphic) => {
-      if (!graphic?.geometry) return;
-      this.updateGeoJsonWithChanges(graphic);
-    });
+  if (this.disableMapScrollWheelZoom) {
+    const handle = this.view.on(
+      'mouse-wheel',
+      (event: ViewMouseWheelEvent) => {
+        event.stopPropagation();
+      },
+    );
+    this.eventHandles.add(handle, 'mouse-wheel');
+  } else {
+    // ✅ Fix shaky zoom — disable momentum and set smooth zoom factor
+    try {
+      (this.view as any).navigation = {
+        ...(this.view as any).navigation,
+        momentumEnabled: false,
+        mouseWheelZoomEnabled: true,
+      };
+    } catch {}
+
+    // ✅ Smooth out scroll by adding slight delay between wheel events
+    let wheelTimer: any = null;
+    const handle = this.view.on(
+      'mouse-wheel',
+      (event: ViewMouseWheelEvent) => {
+        if (wheelTimer) {
+          clearTimeout(wheelTimer);
+        }
+        wheelTimer = setTimeout(() => {
+          wheelTimer = null;
+        }, 50); // ✅ 50ms debounce smooths out rapid scroll events
+      },
+    );
+    this.eventHandles.add(handle, 'mouse-wheel');
   }
-});
+}
