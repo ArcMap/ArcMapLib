@@ -1,16 +1,31 @@
-public static hasValidInfoTemplate(infoTemplate: any): boolean {
-  if (!infoTemplate) return false;
+private updateInfoTemplate(newInfoTemplate: any): void {
+  if (!this.featureLayer) return;
 
-  if (typeof infoTemplate === "string") {
-    return infoTemplate.trim().length > 0;
+  const hasTemplate =
+    newInfoTemplate &&
+    typeof newInfoTemplate === "object" &&
+    Object.keys(newInfoTemplate).length > 0;
+
+  if (!hasTemplate) {
+    // Disable popup completely for THIS layer only
+    this.featureLayer.popupEnabled = false;
+    this.featureLayer.popupTemplate = null as any;
+
+    // Close popup if currently opened for this layer
+    if (this.view?.popup?.visible) {
+      this.view.popup.close();
+    }
+
+    return;
   }
 
-  if (typeof infoTemplate === "object") {
-    return Object.keys(infoTemplate).some((key) => {
-      const value = infoTemplate[key];
-      return value !== undefined && value !== null && String(value).trim().length > 0;
-    });
-  }
+  // Enable popup only when template exists
+  this.featureLayer.popupEnabled = true;
 
-  return false;
+  this.featureLayer.popupTemplate =
+    PopupUtils.updatePopup(
+      newInfoTemplate,
+      this.ancestorMap,
+      this.featureLayer
+    );
 }
