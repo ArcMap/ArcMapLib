@@ -1,82 +1,16 @@
-protected override firstUpdated(): void {
-  // Do nothing here.
-  // Layer creation is controlled by connectedCallback after map/view is ready.
-}
-
-override async connectedCallback(): Promise<void> {
+override connectedCallback(): void {
   super.connectedCallback();
 
-  if (this.isConnectedToMap) return;
-  this.isConnectedToMap = true;
-
-  await this.resolveAncestorMapAndView();
-
-  if (!this.view || !this.ancestorMap) return;
-
-  await this.createLayer();
+  queueMicrotask(() => {
+    void this.initializeAfterMapReady();
+  });
 }
 
-
-private async resolveAncestorMapAndView(): Promise<void> {
-  this.ancestorMap =
-    (this.closest("a") as any) ||
-    (this.closest("map") as any);
-
-  if (!this.ancestorMap) {
-    throw new Error("arc-esri-feature-layer must be inside arc-map/up-map");
+private async initializeAfterMapReady(): Promise<void> {
+  try {
+    await this.resolveAncestorMapAndView();
+    await this.createLayer();
+  } catch (error) {
+    console.error("[arc-esri-feature-layer] failed to initialize", error);
   }
-
-  if (typeof this.ancestorMap.getViewInstance !== "function") {
-    throw new Error("ancestor map must expose getViewInstance()");
-  }
-
-  this.view = await this.ancestorMap.getViewInstance();
-
-  if (!this.view) {
-    throw new Error("ancestor map getViewInstance() returned undefined");
-  }
-
-  await this.view.when();
-}
-
-
-private async createLayer(): Promise<void> {
-  if (this.featureLayer) return;
-
-  await this.resolveAncestorMapAndView();
-
-  const map = await this.ancestorMap.getMapInstance();
-
-  const feature = new FeatureLayer({
-    url: this.url,
-  });
-
-  feature.maxScale = this.convertZoomToScale(this.maxZoom);
-  feature.minScale = this.convertZoomToScale(this.minZoom);
-  feature.title = this.name;
-
-  feature.load().catch((error: any) => {
-    console.error(
-      "Failed to load feature layer with url of",
-      this.url,
-      error,
-    );
-  });
-
-  this.featureLayer = feature;
-
-  this.updateShowLabels(this.showLabels);
-  this.updateFilter(this.filter);
-  this.updateInfoTemplate(this.infoTemplate);
-  this.updateClusterPoints(this.clusterPoints);
-
-  if (this.labelJson !== undefined) {
-    this.updateLabelJson(this.labelJson);
-  }
-
-  if (this.renderer) {
-    this.updateRenderer(this.renderer);
-  }
-
-  map.add(feature);
 }
