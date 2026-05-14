@@ -1,14 +1,13 @@
-private hasValidInfoTemplate(value: unknown): boolean {
-  if (value == null) return false;
+public static hasValidInfoTemplate(infoTemplate: any): boolean {
+  if (!infoTemplate) return false;
 
-  if (typeof value === "string") {
-    return value.trim().length > 0;
+  if (typeof infoTemplate === "string") {
+    return infoTemplate.trim().length > 0;
   }
 
-  if (typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>).length > 0;
+  if (typeof infoTemplate === "object") {
+    return Object.keys(infoTemplate).length > 0;
   }
 
   return false;
 }
-
