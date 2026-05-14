@@ -1,57 +1,32 @@
-private static getPopupPoint(geometry: Geometry): Point {
-  if (!geometry) {
-    return null as unknown as Point;
-  }
+// ✅ Carry over OBJECTID from existing graphic — same as Stencil
+const existingGraphic = this.featureLayer?.graphics?.find(
+  (g: Graphic) =>
+    String(g.attributes?.[this.uniqueIdPropertyName]) === String(updateId) ||
+    String(g.attributes?.OBJECTID) === String(updateId) ||
+    String(g.attributes?.id) === String(updateId)
+);
 
-  // Point — return as-is
-  if (geometry.type === 'point') {
-    return geometry as Point;
-  }
-
-  // Polyline — return midpoint of first path
-  if (geometry.type === 'polyline') {
-    const polyline = geometry as Polyline;
-    const paths = polyline.paths;
-    if (paths && paths.length > 0 && paths[0].length > 0) {
-      const midIndex = Math.floor(paths[0].length / 2);
-      const midPoint = paths[0][midIndex];
-      return new Point({
-        x: midPoint[0],
-        y: midPoint[1],
-        spatialReference: polyline.spatialReference,
-      });
-    }
-  }
-
-  // Polygon — return centroid
-  if (geometry.type === 'polygon') {
-    return (geometry as Polygon).centroid;
-  }
-
-  // Fallback
-  return null as unknown as Point;
+if (existingGraphic) {
+  graphicToUpdate.attributes.OBJECTID = existingGraphic.attributes.OBJECTID;
 }
 
-
-
-async openPopup(id: string | number): Promise<void> {
-  const graphicMatch: Graphic = await this.findFeatureByUniqueId(id);
-
-  if (graphicMatch === undefined) {
-    console.warn(
-      'No feature found with a',
-      this.uniqueIdPropertyName,
-      'value of',
-      id,
-      '. Cannot open popup.'
-    );
-    return;
-  }
-
-  const popupPoint = UpGeojsonLayer.getPopupPoint(graphicMatch.geometry);
-
-  this.view?.popup?.open({
-    features: [graphicMatch],
-    location: popupPoint,
-  });
-}
+// ✅ Build normalizedFeature AFTER setting OBJECTID
+const normalizedProperties = {
+  ...(convertedFeature.properties ?? {}),
+  ...(isCircle
+    ? {
+        drawGeometryType: 'circle',
+        shapeType: 'circle',
+        shape: 'circle',
+        isCircle: true,
+      }
+    : {
+        drawGeometryType: 'polygon',
+        shapeType: 'polygon',
+        shape: 'polygon',
+        isCircle: false,
+      }),
+  ...(existingGraphic
+    ? { OBJECTID: existingGraphic.attributes.OBJECTID }
+    : {}),
+};
