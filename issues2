@@ -1,54 +1,168 @@
-private static getPopupPoint(geometry: Geometry | null | undefined): Point | null {
-  if (!geometry) {
-    return null;
-  }
-
-  if (geometry.type === 'point') {
-    return geometry as Point;
-  }
-
-  if (geometry.type === 'polyline') {
-    const polyline = geometry as Polyline;
-    const paths = polyline.paths;
-    if (paths && paths.length > 0 && paths[0].length > 0) {
-      const midIndex = Math.floor(paths[0].length / 2);
-      const midPoint = paths[0][midIndex];
-      return new Point({
-        x: midPoint[0],
-        y: midPoint[1],
-        spatialReference: polyline.spatialReference,
-      });
-    }
-  }
-
-  if (geometry.type === 'polygon') {
-    return (geometry as Polygon).centroid;
-  }
-
-  return null;
-}
-
-
-async openPopup(id: string | number): Promise<void> {
-  const graphicMatch: Graphic | undefined = await this.findFeatureByUniqueId(id);
-
-  if (graphicMatch === undefined) {
-    console.warn(
-      'No feature found with a',
-      this.uniqueIdPropertyName,
-      'value of',
-      id,
-      '. Cannot open popup.'
-    );
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
     return;
   }
 
-  const popupPoint = graphicMatch.geometry
-    ? UpGeojsonLayer.getPopupPoint(graphicMatch.geometry)
-    : null;
+  this.applyGraphicDefaults(graphicToUpdate);
 
-  this.view?.popup?.open({
-    features: [graphicMatch],
-    location: popupPoint ?? undefined,
+  // Convert Web Mercator → Geographic before processing
+  if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
+    graphicToUpdate = graphicToUpdate.clone();
+    graphicToUpdate.geometry = webMercatorUtils.webMercatorToGeographic(
+      graphicToUpdate.geometry!
+    ) as Geometry;
+  }
+
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
+  if (!convertedFeature?.geometry) {
+    return;
+  }
+
+  const isCircle = this.isCircleGraphic(graphicToUpdate);
+
+  const parsedResult = this.getJsonForAny(this.geojson);
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : { type: 'FeatureCollection', features: [] };
+
+  const normalizedProperties = (convertedFeature.properties ??
+    {}) as Record<string, any>;
+
+  const updateId =
+    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+    graphicToUpdate.attributes?.OBJECTID ??
+    normalizedProperties[this.uniqueIdPropertyName] ??
+    normalizedProperties.OBJECTID ??
+    normalizedProperties.id;
+
+  // ✅ Carry over OBJECTID from existing graphic — same as Stencil
+  const existingGraphic = this.featureLayer?.graphics?.find(
+    (g: Graphic) =>
+      String(g.attributes?.[this.uniqueIdPropertyName]) === String(updateId) ||
+      String(g.attributes?.OBJECTID) === String(updateId) ||
+      String(g.attributes?.id) === String(updateId)
+  );
+
+  if (existingGraphic) {
+    graphicToUpdate.attributes.OBJECTID = existingGraphic.attributes.OBJECTID;
+  }
+
+  // ✅ Strip internal fields from properties — same as Stencil
+  const INTERNAL_KEYS = new Set([
+    'OBJECTID',
+    'drawGeometryType',
+    'shapeType',
+    'shape',
+    'isCircle',
+    'isTemporaryDrawing',
+    this.uniqueIdPropertyName,
+    'id',
+  ]);
+
+  const userProperties = Object.fromEntries(
+    Object.entries(convertedFeature.properties ?? {}).filter(
+      ([key]) => !INTERNAL_KEYS.has(key)
+    )
+  );
+
+  const normalizedFeature = {
+    ...convertedFeature,
+    geometry: {
+      ...convertedFeature.geometry,
+      type: 'Polygon',
+      coordinates: this.normalizePolygonCoordinates(
+        (convertedFeature.geometry as any).coordinates,
+      ),
+    },
+    properties: {
+      ...userProperties,
+      OBJECTID:
+        existingGraphic?.attributes?.OBJECTID ??
+        graphicToUpdate.attributes?.OBJECTID,
+      ...(isCircle
+        ? {
+            drawGeometryType: 'circle',
+            shapeType: 'circle',
+            shape: 'circle',
+            isCircle: true,
+          }
+        : {
+            drawGeometryType: 'polygon',
+            shapeType: 'polygon',
+            shape: 'polygon',
+            isCircle: false,
+          }),
+    },
+  };
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.properties?.[this.uniqueIdPropertyName] ??
+      feature?.properties?.OBJECTID ??
+      feature?.properties?.id;
+
+    if (String(featureId) === String(updateId)) {
+      updated = true;
+      return {
+        ...feature,
+        geometry: normalizedFeature.geometry,
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(normalizedFeature.properties ?? {}),
+        },
+      };
+    }
+
+    return feature;
   });
+
+  if (!updated) {
+    updatedFeatures.push(normalizedFeature as any);
+  }
+
+  const updatedGeoJson: FeatureCollection<
+    GeoJsonGeometry,
+    GeoJsonProperties
+  > = {
+    type: 'FeatureCollection',
+    features: updatedFeatures as any,
+  };
+
+  // FIX: Update signature BEFORE setting geojson so updateGeoJson()
+  // skips the reload entirely when it sees the same signature
+  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.blockGeoJsonUpdate = false;
+
+  // FIX: Manually update the graphic's symbol and popup in featureLayer
+  this.featureLayer?.graphics?.forEach((g: Graphic) => {
+    const gId =
+      g.attributes?.[this.uniqueIdPropertyName] ??
+      g.attributes?.OBJECTID ??
+      g.attributes?.id;
+
+    if (String(gId) === String(updateId)) {
+      g.geometry = graphicToUpdate.geometry;
+      g.attributes = { ...graphicToUpdate.attributes };
+      this.applyGraphicDefaults(g);
+    }
+  });
+
+  this.refreshLabels();
+
+  this.emitLayerEvent(
+    'userEditItemUpdated',
+    normalizedFeature as any,
+    graphicToUpdate,
+    {
+      geojson: updatedGeoJson,
+    }
+  );
 }
