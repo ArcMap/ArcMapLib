@@ -1,39 +1,136 @@
-private syncMouseWheelZoom(): void {
+private isUserInteractingWithMap = false;
+private reflectMapStateTimer: number | undefined;
+
+
+private setupViewStateWatchers(): void {
   if (!this.view) return;
 
-  this.eventHandles.remove('mouse-wheel');
+  this.eventHandles.remove("view-state-watchers");
 
-  if (this.disableMapScrollWheelZoom) {
-    const handle = this.view.on(
-      'mouse-wheel',
-      (event: ViewMouseWheelEvent) => {
-        event.stopPropagation();
-      },
+  const interactingHandle = reactiveUtils.watch(
+    () => this.view?.interacting,
+    (isInteracting) => {
+      this.isUserInteractingWithMap = !!isInteracting;
+    },
+    { initial: true },
+  );
+
+  const stationaryHandle = reactiveUtils.watch(
+    () => this.view?.stationary,
+    (isStationary) => {
+      if (!isStationary || this.suppressViewStateReflection) return;
+
+      window.clearTimeout(this.reflectMapStateTimer);
+
+      this.reflectMapStateTimer = window.setTimeout(() => {
+        this.reflectCurrentMapState();
+      }, 120);
+    },
+    { initial: false },
+  );
+
+  this.eventHandles.add(
+    [interactingHandle, stationaryHandle],
+    "view-state-watchers",
+  );
+}
+
+
+
+private reflectCurrentMapState(): void {
+  if (!this.view || this.suppressViewStateReflection) return;
+
+  const currentZoom = this.normalizeZoom(this.view.zoom);
+  const centerPoint = this.view.center;
+  const currentExtent = this.view.extent;
+
+  this.suppressPropertyUpdate = true;
+
+  try {
+    // IMPORTANT:
+    // Do not update this.zoom / this.center / this.extent while user is wheel-zooming.
+    // Only emit events after the map becomes stationary.
+    if (!this.isUserInteractingWithMap) {
+      this.zoom = currentZoom;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent<number>("zoom", {
+        detail: currentZoom,
+        bubbles: true,
+        composed: true,
+      }),
     );
-    this.eventHandles.add(handle, 'mouse-wheel');
-  } else {
-    // ✅ Fix shaky zoom — disable momentum and set smooth zoom factor
-    try {
-      (this.view as any).navigation = {
-        ...(this.view as any).navigation,
-        momentumEnabled: false,
-        mouseWheelZoomEnabled: true,
+
+    if (centerPoint) {
+      const centerToEmit: LatLongPoint = {
+        latitude: ValidationService.validateLatitude(
+          centerPoint.latitude,
+          ArcMap.DEFAULT_CENTER_LATITUDE,
+        ),
+        longitude: ValidationService.validateLongitude(
+          centerPoint.longitude,
+          ArcMap.DEFAULT_CENTER_LONGITUDE,
+        ),
       };
-    } catch {}
 
-    // ✅ Smooth out scroll by adding slight delay between wheel events
-    let wheelTimer: any = null;
-    const handle = this.view.on(
-      'mouse-wheel',
-      (event: ViewMouseWheelEvent) => {
-        if (wheelTimer) {
-          clearTimeout(wheelTimer);
+      if (!this.isUserInteractingWithMap) {
+        this.center = centerToEmit;
+      }
+
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>("center-change", {
+          detail: centerToEmit,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+
+    if (currentExtent) {
+      const geographicExtent =
+        webMercatorUtils.webMercatorToGeographic(currentExtent) as Extent;
+
+      if (geographicExtent) {
+        const extentToEmit: ArcMapExtent = {
+          bottomLatitude: geographicExtent.ymin,
+          topLatitude: geographicExtent.ymax,
+          leftLongitude: geographicExtent.xmin,
+          rightLongitude: geographicExtent.xmax,
+        };
+
+        if (!this.isUserInteractingWithMap) {
+          this.extent = extentToEmit;
         }
-        wheelTimer = setTimeout(() => {
-          wheelTimer = null;
-        }, 50); // ✅ 50ms debounce smooths out rapid scroll events
-      },
-    );
-    this.eventHandles.add(handle, 'mouse-wheel');
+
+        this.dispatchEvent(
+          new CustomEvent<ArcMapExtent>("extent-change", {
+            detail: extentToEmit,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+
+        this.dispatchEvent(
+          new CustomEvent<ArcMapExtent>("extentChange", {
+            detail: extentToEmit,
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }
+    }
+  } finally {
+    queueMicrotask(() => {
+      this.suppressPropertyUpdate = false;
+    });
   }
 }
+
+
+
+.zoom=${this.isMapInitialized ? undefined : parsedExtent ? undefined : this.zoom}
+
+
+.center=${this.isMapInitialized ? undefined : parsedExtent ? undefined : parsedCenter}
+.extent=${this.isMapInitialized ? undefined : parsedExtent}
