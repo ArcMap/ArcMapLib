@@ -1,12 +1,14 @@
-private normalizeZoom(value: number | undefined): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return .DEFAULT_ZOOM;
+private hasValidInfoTemplate(value: unknown): boolean {
+  if (value == null) return false;
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
   }
 
-  const roundedZoom = Math.round(value);
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
 
-  return Math.max(
-    this.minZoom,
-    Math.min(this.maxZoom, roundedZoom),
-  );
+  return false;
 }
+
