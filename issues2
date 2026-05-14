@@ -1,23 +1,3 @@
-private updateInfoTemplate(newInfoTemplate: any): void {
-  const hasTemplate = PopupUtils.hasValidInfoTemplate(newInfoTemplate);
-
-  this.infoTemplate = hasTemplate ? newInfoTemplate : null;
-
-  if (!this.featureLayer) return;
-
-  // IMPORTANT: layer-level only
-  this.featureLayer.popupEnabled = hasTemplate;
-
-  if (!hasTemplate) {
-    this.featureLayer.popupTemplate = null as any;
-    return;
-  }
-
-  this.featureLayer.popupTemplate = PopupUtils.buildPopupTemplate(
-    this.infoTemplate,
-  );
-}
-
 public static hasValidInfoTemplate(infoTemplate: any): boolean {
   if (!infoTemplate) return false;
 
@@ -26,13 +6,11 @@ public static hasValidInfoTemplate(infoTemplate: any): boolean {
   }
 
   if (typeof infoTemplate === "object") {
-    return Object.keys(infoTemplate).length > 0;
+    return Object.keys(infoTemplate).some((key) => {
+      const value = infoTemplate[key];
+      return value !== undefined && value !== null && String(value).trim().length > 0;
+    });
   }
 
   return false;
 }
-
-
-this.featureLayer = feature;
-
-this.updateInfoTemplate(this.infoTemplate);
