@@ -1,198 +1,37 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
+const updateHandle = this.graphicsEditor.on('update', (event: any) => {
+  if (event.state === 'start') {
+    this._editorOpen = true;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
     return;
   }
 
-  this.applyGraphicDefaults(graphicToUpdate);
-
-  // Convert Web Mercator → Geographic before processing
-  if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
-    graphicToUpdate = graphicToUpdate.clone();
-    graphicToUpdate.geometry = webMercatorUtils.webMercatorToGeographic(
-      graphicToUpdate.geometry!
-    ) as Geometry;
-  }
-
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-  if (!convertedFeature?.geometry) {
+  if (event.state === 'active') {
+    // ✅ Only update on actual geometry changes
+    const toolType = event.toolEventInfo?.type;
+    if (
+      toolType === 'vertex-move-stop' ||
+      toolType === 'move-stop' ||
+      toolType === 'scale-stop' ||
+      toolType === 'rotate-stop' ||
+      toolType === 'reshape-stop'
+    ) {
+      const graphics = event.graphics ?? [];
+      graphics.forEach((graphic: Graphic) => {
+        if (!graphic?.geometry) return;
+        this.updateGeoJsonWithChanges(graphic);
+      });
+    }
     return;
   }
 
-  const isCircle = this.isCircleGraphic(graphicToUpdate);
-
-  const parsedResult = this.getJsonForAny(this.geojson);
-  const currentGeoJson =
-    !parsedResult.error &&
-    parsedResult.parsedJson &&
-    Array.isArray(parsedResult.parsedJson.features)
-      ? parsedResult.parsedJson
-      : { type: 'FeatureCollection', features: [] };
-
-  // ✅ Get updateId from graphic attributes
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    graphicToUpdate.attributes?.id ??
-    0;
-
-  // ✅ Carry over OBJECTID from existing GeoJSON feature — not from graphic
-  const existingFeature = currentGeoJson.features.find((f: any) => {
-    const fId =
-      f?.properties?.[this.uniqueIdPropertyName] ??
-      f?.properties?.OBJECTID ??
-      f?.id ??
-      f?.properties?.id ??
-      0;
-    return String(fId) === String(updateId);
-  });
-
-  // ✅ Use existing feature's OBJECTID — preserve original ID
-  const preservedObjectId =
-    existingFeature?.properties?.OBJECTID ??
-    existingFeature?.properties?.[this.uniqueIdPropertyName] ??
-    existingFeature?.id ??
-    updateId;
-
-  // ✅ Strip internal fields — only keep user properties
-  const INTERNAL_KEYS = new Set([
-    'OBJECTID',
-    'drawGeometryType',
-    'shapeType',
-    'shape',
-    'isCircle',
-    'isTemporaryDrawing',
-    this.uniqueIdPropertyName,
-    'id',
-  ]);
-
-  const userProperties = Object.fromEntries(
-    Object.entries(
-      existingFeature?.properties ??
-      convertedFeature.properties ??
-      {}
-    ).filter(([key]) => !INTERNAL_KEYS.has(key))
-  );
-
-  const normalizedFeature = {
-    ...convertedFeature,
-    id: preservedObjectId,
-    geometry: {
-      ...convertedFeature.geometry,
-      type: 'Polygon',
-      coordinates: this.normalizePolygonCoordinates(
-        (convertedFeature.geometry as any).coordinates,
-      ),
-    },
-    properties: {
-      ...userProperties,
-      OBJECTID: preservedObjectId,
-      ...(isCircle
-        ? {
-            drawGeometryType: 'circle',
-            shapeType: 'circle',
-            shape: 'circle',
-            isCircle: true,
-          }
-        : {
-            drawGeometryType: 'polygon',
-            shapeType: 'polygon',
-            shape: 'polygon',
-            isCircle: false,
-          }),
-    },
-  };
-
-  // ✅ Deduplicate first
-  const deduplicatedFeatures = currentGeoJson.features.filter(
-    (feature: any, index: number, self: any[]) => {
-      const fId =
-        feature?.properties?.[this.uniqueIdPropertyName] ??
-        feature?.properties?.OBJECTID ??
-        feature?.id ??
-        feature?.properties?.id ??
-        0;
-      return (
-        index ===
-        self.findIndex((f: any) => {
-          const otherId =
-            f?.properties?.[this.uniqueIdPropertyName] ??
-            f?.properties?.OBJECTID ??
-            f?.id ??
-            f?.properties?.id ??
-            0;
-          return String(fId) === String(otherId);
-        })
-      );
-    }
-  );
-
-  let updated = false;
-
-  const updatedFeatures = deduplicatedFeatures.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.id ??
-      feature?.properties?.id ??
-      0;
-
-    if (String(featureId) === String(updateId)) {
-      updated = true;
-      return {
-        ...feature,
-        id: preservedObjectId,
-        geometry: normalizedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(normalizedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(normalizedFeature as any);
+  if (event.state === 'complete') {
+    const graphics = event.graphics ?? [];
+    graphics.forEach((graphic: Graphic) => {
+      if (!graphic?.geometry) return;
+      this.updateGeoJsonWithChanges(graphic);
+    });
   }
-
-  const updatedGeoJson: FeatureCollection<
-    GeoJsonGeometry,
-    GeoJsonProperties
-  > = {
-    type: 'FeatureCollection',
-    features: updatedFeatures as any,
-  };
-
-  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
-
-  this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
-  this.blockGeoJsonUpdate = false;
-
-  // Manually update graphic in featureLayer
-  this.featureLayer?.graphics?.forEach((g: Graphic) => {
-    const gId =
-      g.attributes?.[this.uniqueIdPropertyName] ??
-      g.attributes?.OBJECTID ??
-      g.attributes?.id ??
-      0;
-
-    if (String(gId) === String(updateId)) {
-      g.geometry = graphicToUpdate.geometry;
-      g.attributes = { ...graphicToUpdate.attributes };
-      this.applyGraphicDefaults(g);
-    }
-  });
-
-  this.refreshLabels();
-
-  this.emitLayerEvent(
-    'userEditItemUpdated',
-    normalizedFeature as any,
-    graphicToUpdate,
-    {
-      geojson: updatedGeoJson,
-    }
-  );
-}
+});
