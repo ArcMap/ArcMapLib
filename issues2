@@ -1,24 +1,61 @@
-private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
-  if (!graphicToUpdate?.geometry) {
+private addToGeoJson(graphic: Graphic): void {
+  if (!graphic?.geometry) {
     return;
   }
 
-  this.applyGraphicDefaults(graphicToUpdate);
-
   // Convert Web Mercator → Geographic before processing
-  if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
-    graphicToUpdate = graphicToUpdate.clone();
-    graphicToUpdate.geometry = webMercatorUtils.webMercatorToGeographic(
-      graphicToUpdate.geometry!
+  if (graphic.geometry?.spatialReference?.isWebMercator) {
+    graphic = graphic.clone();
+    graphic.geometry = webMercatorUtils.webMercatorToGeographic(
+      graphic.geometry!
     ) as Geometry;
   }
 
-  const convertedFeature = this.graphicToGeoJsonFeature(graphicToUpdate);
-  if (!convertedFeature?.geometry) {
+  const convertedFeature = this.graphicToGeoJsonFeature(graphic);
+  if (!convertedFeature) {
     return;
   }
 
-  const isCircle = this.isCircleGraphic(graphicToUpdate);
+  const isCircle = this.isCircleGraphic(graphic);
+  if (isCircle && convertedFeature.properties) {
+    convertedFeature.properties.isCircle = true;
+    convertedFeature.properties.drawGeometryType = 'circle';
+    convertedFeature.properties.shapeType = 'circle';
+    convertedFeature.properties.shape = 'circle';
+  }
+
+  // ✅ Strip internal fields — same as Stencil
+  const INTERNAL_KEYS = new Set([
+    'drawGeometryType',
+    'shapeType',
+    'shape',
+    'isCircle',
+    'isTemporaryDrawing',
+    'id',
+    'OBJECTID',
+    this.uniqueIdPropertyName,
+  ]);
+
+  const userProperties = Object.fromEntries(
+    Object.entries(convertedFeature.properties ?? {}).filter(
+      ([key]) => !INTERNAL_KEYS.has(key)
+    )
+  );
+
+  // ✅ OBJECTID and id should be 0 for new draws — same as Stencil
+  const featureId =
+    graphic.attributes?.[this.uniqueIdPropertyName] ??
+    graphic.attributes?.OBJECTID ??
+    0;
+
+  const normalizedFeature = {
+    ...convertedFeature,
+    id: featureId,
+    properties: {
+      ...userProperties,
+      OBJECTID: featureId,
+    },
+  };
 
   const parsedResult = this.getJsonForAny(this.geojson);
   const currentGeoJson =
@@ -28,141 +65,26 @@ private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
       ? parsedResult.parsedJson
       : { type: 'FeatureCollection', features: [] };
 
-  const normalizedProperties = (convertedFeature.properties ??
-    {}) as Record<string, any>;
-
-  const updateId =
-    graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
-    graphicToUpdate.attributes?.OBJECTID ??
-    normalizedProperties[this.uniqueIdPropertyName] ??
-    normalizedProperties.OBJECTID ??
-    normalizedProperties.id;
-
-  // ✅ Carry over OBJECTID from existing graphic — same as Stencil
-  const existingGraphic = this.featureLayer?.graphics?.find(
-    (g: Graphic) =>
-      String(g.attributes?.[this.uniqueIdPropertyName]) === String(updateId) ||
-      String(g.attributes?.OBJECTID) === String(updateId) ||
-      String(g.attributes?.id) === String(updateId)
-  );
-
-  if (existingGraphic) {
-    graphicToUpdate.attributes.OBJECTID = existingGraphic.attributes.OBJECTID;
-  }
-
-  // ✅ Strip internal fields from properties — same as Stencil
-  const INTERNAL_KEYS = new Set([
-    'OBJECTID',
-    'drawGeometryType',
-    'shapeType',
-    'shape',
-    'isCircle',
-    'isTemporaryDrawing',
-    this.uniqueIdPropertyName,
-    'id',
-  ]);
-
-  const userProperties = Object.fromEntries(
-    Object.entries(convertedFeature.properties ?? {}).filter(
-      ([key]) => !INTERNAL_KEYS.has(key)
-    )
-  );
-
-  const normalizedFeature = {
-    ...convertedFeature,
-    geometry: {
-      ...convertedFeature.geometry,
-      type: 'Polygon',
-      coordinates: this.normalizePolygonCoordinates(
-        (convertedFeature.geometry as any).coordinates,
-      ),
-    },
-    properties: {
-      ...userProperties,
-      OBJECTID:
-        existingGraphic?.attributes?.OBJECTID ??
-        graphicToUpdate.attributes?.OBJECTID,
-      ...(isCircle
-        ? {
-            drawGeometryType: 'circle',
-            shapeType: 'circle',
-            shape: 'circle',
-            isCircle: true,
-          }
-        : {
-            drawGeometryType: 'polygon',
-            shapeType: 'polygon',
-            shape: 'polygon',
-            isCircle: false,
-          }),
-    },
-  };
-
-  let updated = false;
-
-  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
-    const featureId =
-      feature?.properties?.[this.uniqueIdPropertyName] ??
-      feature?.properties?.OBJECTID ??
-      feature?.properties?.id;
-
-    if (String(featureId) === String(updateId)) {
-      updated = true;
-      return {
-        ...feature,
-        geometry: normalizedFeature.geometry,
-        properties: {
-          ...(feature.properties ?? {}),
-          ...(normalizedFeature.properties ?? {}),
-        },
-      };
-    }
-
-    return feature;
-  });
-
-  if (!updated) {
-    updatedFeatures.push(normalizedFeature as any);
-  }
-
-  const updatedGeoJson: FeatureCollection<
-    GeoJsonGeometry,
-    GeoJsonProperties
-  > = {
-    type: 'FeatureCollection',
-    features: updatedFeatures as any,
-  };
-
-  // FIX: Update signature BEFORE setting geojson so updateGeoJson()
-  // skips the reload entirely when it sees the same signature
-  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
+  currentGeoJson.features.push(normalizedFeature as any);
 
   this.blockGeoJsonUpdate = true;
-  this.geojson = updatedGeoJson;
+  this.geojson = currentGeoJson as any;
   this.blockGeoJsonUpdate = false;
 
-  // FIX: Manually update the graphic's symbol and popup in featureLayer
-  this.featureLayer?.graphics?.forEach((g: Graphic) => {
-    const gId =
-      g.attributes?.[this.uniqueIdPropertyName] ??
-      g.attributes?.OBJECTID ??
-      g.attributes?.id;
+  this.enableInfoPopupWindow(true);
 
-    if (String(gId) === String(updateId)) {
-      g.geometry = graphicToUpdate.geometry;
-      g.attributes = { ...graphicToUpdate.attributes };
-      this.applyGraphicDefaults(g);
-    }
-  });
-
-  this.refreshLabels();
+  // ✅ Convert before emitting
+  const geoGraphic = graphic.clone();
+  if (geoGraphic.geometry?.spatialReference?.isWebMercator) {
+    geoGraphic.geometry = webMercatorUtils.webMercatorToGeographic(
+      geoGraphic.geometry!
+    ) as Geometry;
+  }
 
   this.emitLayerEvent(
-    'userEditItemUpdated',
-    normalizedFeature as any,
-    graphicToUpdate,
-    {
-      geojson: updatedGeoJson,
-    }
+    'userDrawItemAdded',
+    this.graphicToGeoJsonFeature(geoGraphic),
+    geoGraphic,
+    { geojson: this.geojson }
   );
 }
