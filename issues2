@@ -1,72 +1,15 @@
-private registerViewHandles(): void {
-  if (!this.view || !this.featureLayer) return;
+const clickedGraphic = clickedResult.graphic as Graphic;
 
-  this.eventHandles.removeAll();
+this.featureLayer.popupEnabled = true;
 
-  const clickHandle = this.view.on("click", async (event: any) => {
-    if (!this.view || !this.featureLayer) return;
+(this.featureLayer as any).popupTemplate =
+  this.buildPopupTemplate(this.infoTemplate);
 
-    const response = await this.view.hitTest(event);
+clickedGraphic.popupTemplate = (this.featureLayer as any).popupTemplate;
 
-    const clickedResult = response.results.find((result: any) => {
-      return (
-        result.graphic &&
-        result.graphic.layer &&
-        result.graphic.layer.id === this.featureLayer.id
-      );
-    });
+this.view.popup.open({
+  features: [clickedGraphic],
+  location: event.mapPoint,
+});
 
-    if (!clickedResult) return;
-
-    const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
-
-    if (!hasTemplate) {
-      this.featureLayer.popupEnabled = false;
-      (this.featureLayer as any).popupTemplate = undefined;
-
-      if (this.view.popup?.visible) {
-        this.view.popup.close();
-      }
-
-      return;
-    }
-
-    this.featureLayer.popupEnabled = true;
-
-    // IMPORTANT: build/assign popup template directly
-    (this.featureLayer as any).popupTemplate =
-      PopupUtils.buildPopupTemplate(this.infoTemplate);
-
-    this.view.popup.open({
-      features: [clickedResult.graphic],
-      location: event.mapPoint,
-    });
-
-    this.dispatchEvent(this.layerClick);
-  });
-
-  this.eventHandles.add(clickHandle);
-}
-
-public static buildPopupTemplate(infoTemplate: any): any {
-  if (!PopupUtils.hasValidInfoTemplate(infoTemplate)) {
-    return undefined;
-  }
-
-  if (typeof infoTemplate === "string") {
-    return {
-      title: "",
-      content: infoTemplate,
-    };
-  }
-
-  return {
-    title: infoTemplate.title ?? "",
-    content:
-      infoTemplate.content ??
-      infoTemplate.details ??
-      infoTemplate.description ??
-      infoTemplate.listItem ??
-      "",
-  };
-}
+this.dispatchEvent(this.layerClick);
