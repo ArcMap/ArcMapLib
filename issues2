@@ -4,13 +4,15 @@ private registerViewHandles(): void {
   this.eventHandles.removeAll();
 
   const clickHandle = this.view.on("click", async (event: any) => {
-    const response = await this.view!.hitTest(event);
+    if (!this.view || !this.featureLayer) return;
+
+    const response = await this.view.hitTest(event);
 
     const clickedResult = response.results.find((result: any) => {
       return (
         result.graphic &&
         result.graphic.layer &&
-        result.graphic.layer.id === this.featureLayer!.id
+        result.graphic.layer.id === this.featureLayer.id
       );
     });
 
@@ -19,24 +21,23 @@ private registerViewHandles(): void {
     const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
 
     if (!hasTemplate) {
-      this.featureLayer!.popupEnabled = false;
+      this.featureLayer.popupEnabled = false;
       (this.featureLayer as any).popupTemplate = undefined;
 
-      if (this.view?.popup?.visible) {
+      if (this.view.popup?.visible) {
         this.view.popup.close();
       }
 
       return;
     }
 
-    this.featureLayer!.popupEnabled = true;
-    (this.featureLayer as any).popupTemplate = PopupUtils.updatePopup(
-      this.infoTemplate,
-      this.ancestorMap,
-      this.featureLayer!,
-    );
+    this.featureLayer.popupEnabled = true;
 
-    this.view!.popup.open({
+    // IMPORTANT: build/assign popup template directly
+    (this.featureLayer as any).popupTemplate =
+      PopupUtils.buildPopupTemplate(this.infoTemplate);
+
+    this.view.popup.open({
       features: [clickedResult.graphic],
       location: event.mapPoint,
     });
@@ -47,10 +48,25 @@ private registerViewHandles(): void {
   this.eventHandles.add(clickHandle);
 }
 
-const feature = new FeatureLayer({
-  url: this.url,
-  id: this.id || this.generatedElementId,
-  title: this.name,
-  popupEnabled: false,
-  popupTemplate: undefined,
-});
+public static buildPopupTemplate(infoTemplate: any): any {
+  if (!PopupUtils.hasValidInfoTemplate(infoTemplate)) {
+    return undefined;
+  }
+
+  if (typeof infoTemplate === "string") {
+    return {
+      title: "",
+      content: infoTemplate,
+    };
+  }
+
+  return {
+    title: infoTemplate.title ?? "",
+    content:
+      infoTemplate.content ??
+      infoTemplate.details ??
+      infoTemplate.description ??
+      infoTemplate.listItem ??
+      "",
+  };
+}
