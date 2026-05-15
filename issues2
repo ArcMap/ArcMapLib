@@ -1,3 +1,28 @@
+private updateInfoTemplate(newInfoTemplate: any): void {
+  this.infoTemplate = newInfoTemplate;
+
+  if (!this.featureLayer) return;
+
+  const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
+
+  if (!hasTemplate) {
+    this.featureLayer.popupEnabled = false;
+    (this.featureLayer as any).popupTemplate = undefined;
+    this.view?.popup?.close();
+    return;
+  }
+
+  this.featureLayer.popupEnabled = true;
+
+  // IMPORTANT: do not assign return value
+  PopupUtils.updatePopup(
+    this.infoTemplate,
+    this.ancestorMap,
+    this.featureLayer,
+  );
+}
+
+
 private registerViewHandles(): void {
   if (!this.view || !this.featureLayer) return;
 
@@ -18,28 +43,18 @@ private registerViewHandles(): void {
 
     if (!clickedResult) return;
 
-    const clickedGraphic = (clickedResult as any).graphic as Graphic;
+    const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
 
-    const popupTemplate = this.buildPopupTemplate(this.infoTemplate);
-
-    if (!popupTemplate) {
+    if (!hasTemplate) {
       this.featureLayer.popupEnabled = false;
       (this.featureLayer as any).popupTemplate = undefined;
-      clickedGraphic.popupTemplate = undefined as any;
       this.view.popup?.close();
       return;
     }
 
     this.featureLayer.popupEnabled = true;
 
-    (this.featureLayer as any).popupTemplate = popupTemplate;
-    clickedGraphic.popupTemplate = popupTemplate;
-
-    await this.view.popup.open({
-      features: [clickedGraphic],
-      location: event.mapPoint,
-    });
-
+    // Let ArcGIS open the layer popup using featureLayer.popupTemplate
     this.dispatchEvent(this.layerClick);
   });
 
@@ -47,36 +62,35 @@ private registerViewHandles(): void {
 }
 
 
-private buildPopupTemplate(infoTemplate: any): any {
-  if (!PopupUtils.hasValidInfoTemplate(infoTemplate)) {
-    return undefined;
+public static hasValidInfoTemplate(infoTemplate: any): boolean {
+  if (!infoTemplate) return false;
+
+  if (typeof infoTemplate === "string") {
+    return infoTemplate.trim().length > 0;
   }
 
-  const title =
-    infoTemplate.title ??
-    infoTemplate.header ??
-    infoTemplate.name ??
-    "";
-
-  const content =
-    infoTemplate.content ??
-    infoTemplate.details ??
-    infoTemplate.description;
-
-  if (!content && !title) {
-    return undefined;
+  if (Array.isArray(infoTemplate)) {
+    return infoTemplate.some((item) => PopupUtils.hasValidInfoTemplate(item));
   }
 
-  return {
-    title: typeof title === "function" ? title : String(title),
-    content: (event: any) => {
-      const graphic = event?.graphic;
+  if (typeof infoTemplate === "object") {
+    const title =
+      infoTemplate.title ??
+      infoTemplate.header ??
+      infoTemplate.name ??
+      "";
 
-      if (typeof content === "function") {
-        return content(graphic);
-      }
+    const content =
+      infoTemplate.content ??
+      infoTemplate.details ??
+      infoTemplate.description ??
+      "";
 
-      return String(content ?? "").trim();
-    },
-  };
+    return (
+      String(title).trim().length > 0 ||
+      String(content).trim().length > 0
+    );
+  }
+
+  return false;
 }
