@@ -1,280 +1,42 @@
-// @ts-nocheck
-import { LitElement, property } from "lit";
-import { customElement } from "lit/decorators.js";
-import ClassBreaksRenderer from "@arcgis/core/renderers/ClassBreaksRenderer";
-import SimpleRenderer from "@arcgis/core/renderers/SimpleRenderer";
-import UniqueValueRenderer from "@arcgis/core/renderers/UniqueValueRenderer";
-import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
-import MapView from "@arcgis/core/views/MapView";
-import Handles from "@arcgis/core/core/Handles";
-import { JsonUtils } from "../common/json-utils";
-import { PopupUtils } from "../common/popup-utils";
+async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
+  const graphicMatch: Graphic | undefined = await this.findFeatureByUniqueId(id);
 
-@customElement("arc-esri-feature-layer")
-export class ArcEsriFeatureLayer extends LitElement {
+  if (graphicMatch === undefined) {
+    console.warn(
+      'No feature found with a',
+      this.uniqueIdPropertyName,
+      'value of',
+      id,
+      '. Cannot zoom to.'
+    );
+    return;
+  }
 
-  @property({ reflect: true })
-  id: string = "";
+  if (!this.view) return;
 
-  @property({ type: Boolean, attribute: "cluster-points" })
-  clusterPoints: boolean = false;
+  const geometry = graphicMatch.geometry;
+  if (!geometry) return;
 
-  @property()
-  filter: string = "";
-
-  @property({ attribute: "info-template" })
-  infoTemplate: string | InfoTemplateDetails = "{}";
-
-  @property({ attribute: "label-json" })
-  labelJson?: string | object | object[];
-
-  @property({ type: Number, attribute: "max-zoom" })
-  maxZoom: number = 23;
-
-  @property({ type: Number, attribute: "min-zoom" })
-  minZoom: number = 0;
-
-  @property({ reflect: true })
-  name: string = "";
-
-  @property()
-  renderer?: string | Renderer;
-
-  @property({ type: Boolean, reflect: true, attribute: "show-labels" })
-  showLabels: boolean = true;
-
-  @property()
-  url: string = "";
-
-  private ancestorMap: any;
-  private featureLayer: FeatureLayer = new FeatureLayer();
-  private generatedElementId: string = this.id ? this.id : "_generated_" + this.createRandomFeatureLayerId() + "_generated";
-  private view: MapView;
-  private layerClick: CustomEvent<MouseEvent>;
-  private doubleClick: CustomEvent<MouseEvent>;
-  private eventHandles: Handles = new Handles();
-
-  constructor() {
-    super();
-    this.layerClick = new CustomEvent<MouseEvent>('layerClick', {
-      this.id = this.generatedElementId;
+  if (geometry.type === 'point') {
+    // ✅ Replaces Stencil's map.centerAndZoom()
+    await this.view.goTo({
+      center: geometry as Point,
+      zoom: zoomLevel,
     });
-  }
-
-  async firstUpdated() {
-    this.createLayer();
-  }
-
-  updated(changedProperties: Map<string, any>) {
-    if(changedProperties.has('clusterPoints')) {
-      this.updateClusterPoints(this.clusterPoints);
+  } else if (
+    geometry.type === 'polyline' ||
+    geometry.type === 'polygon'
+  ) {
+    // ✅ Replaces Stencil's map.setExtent()
+    const extent = (geometry as Polygon | Polyline).extent;
+    if (extent) {
+      await this.view.goTo(extent);
     }
-
-    if(changedProperties.has('filter')) {
-      this.updateFilter(this.filter);
-    }
-
-    if(changedProperties.has('infoTemplate')) {
-      this.updateInfoTemplate(this.infoTemplate);
-    }
-
-    if(changedProperties.has('labelJson')) {
-      if (this.labelJson !== undefined) {
-        this.updateLabelJson(this.labelJson);
-      }
-    }
-
-    if(changedProperties.has('renderer')) {
-      this.updateRenderer(this.renderer);
-    }
-
-    if(changedProperties.has('showLabels')) {
-      this.updateShowLabels(this.showLabels);
-    }
-  }
-
-  async connectedCallback(): Promise<void> {
-    super.connectedCallback();
-    if (!this.isConnected) {
-      return;
-    }
-
-    this.ancestorMap = this.closest("arc-map") as ArcMap;
-
-    if(!this.ancestorMap) {
-      console.error('<arc-esri-feature-layer> must be a descendent of an <arc-map> element');
-      // return;
-    }
-
-    // Listen for click events on the map view and check if the clicked graphic is this point
-    // const view = await this.ancestorMap.getViewInstance();
-    await this.resolveAncestorMapAndView();
-
-    if (this.view) {
-      const handle = this.view.on("click", (event: any) => {
-        this.view.hitTest(event).then((response: any) => {
-          if (response.results.some((result: any) => {
-            return (
-              result.graphic &&
-              result.layer === this.featureLayer
-            );
-          })) {
-            {
-              this.dispatchEvent(this.layerClick);
-            }
-          }
-        });
-      });
-
-      const handleDoubleClick = this.view.on("double-click", (event: any) => {
-        this.view.hitTest(event).then((response: any) => {
-          if (response.results.some((result: any) => {
-            return (
-              result.graphic &&
-              result.layer === this.featureLayer
-            );
-          })) {
-            {
-              this.dispatchEvent(this.doubleClick);
-            }
-          }
-        });
-      });
-
-      this.eventHandles.add(handle);
-    }
-  }
-
-  private async resolveAncestorMapAndView(): Promise<void> {
-    this.ancestorMap = this.closest("arc-map") as any;
-
-    if (!this.ancestorMap) {
-      throw new Error('arc-geojson-layer must be a descendant of an <arc-map> element');
-    }
-
-    if (typeof this.ancestorMap.componentOnReady === 'function') {
-      await this.ancestorMap.componentOnReady();
-    }
-
-    if (typeof this.ancestorMap.getViewInstance !== 'function') {
-      throw new Error('ancestor arc-map must expose getView()');
-    }
-
-    this.view = await this.ancestorMap.getViewInstance();
-    if (!this.view) {
-      throw new Error('ancestor arc-map getViewInstance() returned undefined');
-    }
-  }
-
-  async disconnectedCallback() {
-    super.disconnectedCallback();
-    if (this.ancestorMap) {
-      const map = await this.ancestorMap.getMapInstance();
-      map.remove(this.featureLayer);
-    }
-
-    this.eventHandles.removeAll();
-  }
-
-  private async createLayer(): Promise<void> {
-    const map = await this.ancestorMap.getMapInstance();
-    const feature = new FeatureLayer({
-      url: this.url
-    });
-
-    feature.maxScale = this.convertZoomToScale(this.maxZoom);
-    feature.minScale = this.convertZoomToScale(this.minZoom);
-    feature.title = this.name;
-    feature.load().catch((error: any) => {
-      // only log for load errors, other errors may trigger this handler, but those are not the responsibility of component client dev
-      console.error('Failed to load feature layer with url of', this.url, error);
-    });
-
-    this.featureLayer = feature;
-
-    // Wait for view to be ready before adding layer
-    await this.resolveAncestorMapAndView();
-
-    // Disable popup by default — only enable if infoTemplate is explicitly provided
-    if (!this.infoTemplate || this.infoTemplate === '{}') {
-      this.featureLayer.popupEnabled = false;
-    }
-
-    this.updateShowLabels(this.showLabels);
-    this.updateFilter(this.filter);
-    this.updateInfoTemplate(this.infoTemplate);
-    this.updateClusterPoints(this.clusterPoints);
-
-    // do not update labelJson if property is undefined, otherwise you will remove the default service defined labels
-    if (this.labelJson) {
-      this.updateLabelJson(this.labelJson);
-    }
-
-    // If a renderer exists then call the update otherwise the defaults will be used
-    if (this.renderer) {
-      this.updateRenderer(this.renderer);
-    }
-
-    map.add(feature);
-  }
-
-  private updateShowLabels(newShowLabels: boolean) {
-    this.featureLayer.labelsVisible = newShowLabels;
-  }
-
-  private updateFilter(newFilter: string) {
-    this.featureLayer.definitionExpression = newFilter;
-  }
-
-  private convertZoomToScale(zoom: number) {
-    if (zoom === 23) {
-      // The formula below works for every zoom level except 23, which is the maximum zoom
-      return 0;
-    }
-
-    // random looking magic number below pulled from https://developers.arcgis.com/documentation/mapping-and-location-services/reference/zoom-levels-and-scale/
-    // for every increase in zoom level by 1, the scale is halved
-    return Number.parseFloat((591657527.591555 * Math.pow(2, -1 * zoom)).toFixed(6));
-  }
-
-  private updateInfoTemplate(newInfoTemplate: any) {
-    // If no infoTemplate provided, disable popup entirely — do not show blank [object Object]
-    if (!newInfoTemplate || newInfoTemplate === '{}') {
-      if (this.featureLayer) {
-        this.featureLayer.popupEnabled = false;
-      }
-      return;
-    }
-    this.featureLayer.popupEnabled = true;
-    PopupUtils.updatePopup(newInfoTemplate, this.ancestorMap, this.featureLayer);
-  }
-
-  private updateClusterPoints(newClusterPoints: boolean) {
-    if (newClusterPoints) {
-      this.featureLayer.featureReduction = { type: 'cluster' };
-    } else {
-      this.featureLayer.featureReduction = null;
-    }
-  }
-
-  private updateLabelJson(newLabelJsonArg: string | object | object[]) {
-    JsonUtils.updateLabelJson(newLabelJsonArg, this.featureLayer);
-  }
-
-  private updateRenderer(newRenderer: any) {
-    const geomType = this.featureLayer.geometryType;
-    const symbolJson = JsonUtils.getJsonSymbolFor(geomType ?? "polyline", [0, 0, 0], 10);
-
-    const rendererTypeToModule = {
-      simple: SimpleRenderer,
-      "unique-value": UniqueValueRenderer,
-      "class-breaks": ClassBreaksRenderer
-    };
-
-    JsonUtils.updateRenderer(newRenderer, this.featureLayer, rendererTypeToModule, symbolJson);
-  }
-
-  createRandomFeatureLayerId() {
-    return "esri_feature_layer_" + Math.floor(Math.random() * 10000);
+  } else {
+    console.error(
+      'Unrecognized geometry type',
+      geometry.type,
+      'this isn\'t supposed to be possible. Please contact the GIS team for assistance.'
+    );
   }
 }
