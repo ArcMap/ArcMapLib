@@ -1,11 +1,27 @@
+private hasOwnInfoTemplate(): boolean {
+  return PopupUtils.hasValidInfoTemplate(this.infoTemplate);
+}
+
+const feature = new FeatureLayer({
+  url: this.url,
+  id: this.id || this.generatedElementId,
+  title: this.name,
+  popupEnabled: false,
+  popupTemplate: undefined,
+});
+
+this.featureLayer = feature;
+
+this.updateInfoTemplate(this.infoTemplate);
+
+
+
 private updateInfoTemplate(newInfoTemplate: any): void {
   this.infoTemplate = newInfoTemplate;
 
   if (!this.featureLayer) return;
 
-  const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
-
-  if (!hasTemplate) {
+  if (!this.hasOwnInfoTemplate()) {
     this.featureLayer.popupEnabled = false;
     (this.featureLayer as any).popupTemplate = undefined;
     this.view?.popup?.close();
@@ -14,7 +30,6 @@ private updateInfoTemplate(newInfoTemplate: any): void {
 
   this.featureLayer.popupEnabled = true;
 
-  // IMPORTANT: do not assign return value
   PopupUtils.updatePopup(
     this.infoTemplate,
     this.ancestorMap,
@@ -23,74 +38,9 @@ private updateInfoTemplate(newInfoTemplate: any): void {
 }
 
 
-private registerViewHandles(): void {
-  if (!this.view || !this.featureLayer) return;
-
-  this.eventHandles.removeAll();
-
-  const clickHandle = this.view.on("click", async (event: any) => {
-    if (!this.view || !this.featureLayer) return;
-
-    const response = await this.view.hitTest(event);
-
-    const clickedResult = response.results.find((result: any) => {
-      return (
-        result.graphic &&
-        result.graphic.layer &&
-        result.graphic.layer.id === this.featureLayer!.id
-      );
-    });
-
-    if (!clickedResult) return;
-
-    const hasTemplate = PopupUtils.hasValidInfoTemplate(this.infoTemplate);
-
-    if (!hasTemplate) {
-      this.featureLayer.popupEnabled = false;
-      (this.featureLayer as any).popupTemplate = undefined;
-      this.view.popup?.close();
-      return;
-    }
-
-    this.featureLayer.popupEnabled = true;
-
-    // Let ArcGIS open the layer popup using featureLayer.popupTemplate
-    this.dispatchEvent(this.layerClick);
-  });
-
-  this.eventHandles.add(clickHandle);
-}
-
-
-public static hasValidInfoTemplate(infoTemplate: any): boolean {
-  if (!infoTemplate) return false;
-
-  if (typeof infoTemplate === "string") {
-    return infoTemplate.trim().length > 0;
-  }
-
-  if (Array.isArray(infoTemplate)) {
-    return infoTemplate.some((item) => PopupUtils.hasValidInfoTemplate(item));
-  }
-
-  if (typeof infoTemplate === "object") {
-    const title =
-      infoTemplate.title ??
-      infoTemplate.header ??
-      infoTemplate.name ??
-      "";
-
-    const content =
-      infoTemplate.content ??
-      infoTemplate.details ??
-      infoTemplate.description ??
-      "";
-
-    return (
-      String(title).trim().length > 0 ||
-      String(content).trim().length > 0
-    );
-  }
-
-  return false;
+if (!this.hasOwnInfoTemplate()) {
+  this.featureLayer.popupEnabled = false;
+  (this.featureLayer as any).popupTemplate = undefined;
+  this.view?.popup?.close();
+  return;
 }
