@@ -1,63 +1,82 @@
+private registerViewHandles(): void {
+  if (!this.view || !this.featureLayer) return;
+
+  this.eventHandles.removeAll();
+
+  const clickHandle = this.view.on("click", async (event: any) => {
+    if (!this.view || !this.featureLayer) return;
+
+    const response = await this.view.hitTest(event);
+
+    const clickedResult = response.results.find((result: any) => {
+      return (
+        result.graphic &&
+        result.graphic.layer &&
+        result.graphic.layer.id === this.featureLayer!.id
+      );
+    });
+
+    if (!clickedResult) return;
+
+    const clickedGraphic = (clickedResult as any).graphic as Graphic;
+
+    const popupTemplate = this.buildPopupTemplate(this.infoTemplate);
+
+    if (!popupTemplate) {
+      this.featureLayer.popupEnabled = false;
+      (this.featureLayer as any).popupTemplate = undefined;
+      clickedGraphic.popupTemplate = undefined as any;
+      this.view.popup?.close();
+      return;
+    }
+
+    this.featureLayer.popupEnabled = true;
+
+    (this.featureLayer as any).popupTemplate = popupTemplate;
+    clickedGraphic.popupTemplate = popupTemplate;
+
+    await this.view.popup.open({
+      features: [clickedGraphic],
+      location: event.mapPoint,
+    });
+
+    this.dispatchEvent(this.layerClick);
+  });
+
+  this.eventHandles.add(clickHandle);
+}
+
+
 private buildPopupTemplate(infoTemplate: any): any {
   if (!PopupUtils.hasValidInfoTemplate(infoTemplate)) {
     return undefined;
   }
 
-  const title = String(
+  const title =
     infoTemplate.title ??
     infoTemplate.header ??
     infoTemplate.name ??
-    "",
-  ).trim();
+    "";
 
-  const content = String(
+  const content =
     infoTemplate.content ??
     infoTemplate.details ??
-    infoTemplate.description ??
-    "",
-  ).trim();
+    infoTemplate.description;
 
-  if (!title && !content) {
+  if (!content && !title) {
     return undefined;
   }
 
   return {
-    title,
-    content,
+    title: typeof title === "function" ? title : String(title),
+    content: (event: any) => {
+      const graphic = event?.graphic;
+
+      if (typeof content === "function") {
+        return content(graphic);
+      }
+
+      return String(content ?? "").trim();
+    },
   };
 }
-
-
-
-
-const popupTemplate = this.buildPopupTemplate(this.infoTemplate);
-
-const popupContent =
-  typeof popupTemplate?.content === "string"
-    ? popupTemplate.content.trim()
-    : popupTemplate?.content;
-
-const popupTitle =
-  typeof popupTemplate?.title === "string"
-    ? popupTemplate.title.trim()
-    : popupTemplate?.title;
-
-if (!popupTemplate || (!popupTitle && !popupContent)) {
-  this.featureLayer.popupEnabled = false;
-  clickedGraphic.popupTemplate = undefined as any;
-
-  if (this.view?.popup?.visible) {
-    this.view.popup.close();
-  }
-
-  return;
-}
-
-this.featureLayer.popupEnabled = true;
-(this.featureLayer as any).popupTemplate = popupTemplate;
-clickedGraphic.popupTemplate = popupTemplate;
-
-this.view.popup.open({
-  features: [clickedGraphic],
-  location: event.mapPoint,
-});
