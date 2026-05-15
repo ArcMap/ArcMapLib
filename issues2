@@ -3,26 +3,61 @@ private buildPopupTemplate(infoTemplate: any): any {
     return undefined;
   }
 
+  const title = String(
+    infoTemplate.title ??
+    infoTemplate.header ??
+    infoTemplate.name ??
+    "",
+  ).trim();
+
+  const content = String(
+    infoTemplate.content ??
+    infoTemplate.details ??
+    infoTemplate.description ??
+    "",
+  ).trim();
+
+  if (!title && !content) {
+    return undefined;
+  }
+
   return {
-    title: infoTemplate.title ?? "",
-    content: (feature: any) => {
-      if (typeof infoTemplate.details === "function") {
-        return infoTemplate.details(feature.graphic);
-      }
-
-      if (typeof infoTemplate.content === "function") {
-        return infoTemplate.content(feature.graphic);
-      }
-
-      return String(
-        infoTemplate.content ??
-        infoTemplate.details ??
-        infoTemplate.description ??
-        "",
-      )
-        .replace(/^{|}$/g, "")
-        .replace(/"/g, "")
-        .trim();
-    },
+    title,
+    content,
   };
 }
+
+
+
+
+const popupTemplate = this.buildPopupTemplate(this.infoTemplate);
+
+const popupContent =
+  typeof popupTemplate?.content === "string"
+    ? popupTemplate.content.trim()
+    : popupTemplate?.content;
+
+const popupTitle =
+  typeof popupTemplate?.title === "string"
+    ? popupTemplate.title.trim()
+    : popupTemplate?.title;
+
+if (!popupTemplate || (!popupTitle && !popupContent)) {
+  this.featureLayer.popupEnabled = false;
+  clickedGraphic.popupTemplate = undefined as any;
+
+  if (this.view?.popup?.visible) {
+    this.view.popup.close();
+  }
+
+  return;
+}
+
+this.featureLayer.popupEnabled = true;
+(this.featureLayer as any).popupTemplate = popupTemplate;
+clickedGraphic.popupTemplate = popupTemplate;
+
+this.view.popup.open({
+  features: [clickedGraphic],
+  location: event.mapPoint,
+});
