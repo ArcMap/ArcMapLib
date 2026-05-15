@@ -1,15 +1,28 @@
-const clickedGraphic = clickedResult.graphic as Graphic;
+private buildPopupTemplate(infoTemplate: any): any {
+  if (!PopupUtils.hasValidInfoTemplate(infoTemplate)) {
+    return undefined;
+  }
 
-this.featureLayer.popupEnabled = true;
+  return {
+    title: infoTemplate.title ?? "",
+    content: (feature: any) => {
+      if (typeof infoTemplate.details === "function") {
+        return infoTemplate.details(feature.graphic);
+      }
 
-(this.featureLayer as any).popupTemplate =
-  this.buildPopupTemplate(this.infoTemplate);
+      if (typeof infoTemplate.content === "function") {
+        return infoTemplate.content(feature.graphic);
+      }
 
-clickedGraphic.popupTemplate = (this.featureLayer as any).popupTemplate;
-
-this.view.popup.open({
-  features: [clickedGraphic],
-  location: event.mapPoint,
-});
-
-this.dispatchEvent(this.layerClick);
+      return String(
+        infoTemplate.content ??
+        infoTemplate.details ??
+        infoTemplate.description ??
+        "",
+      )
+        .replace(/^{|}$/g, "")
+        .replace(/"/g, "")
+        .trim();
+    },
+  };
+}
