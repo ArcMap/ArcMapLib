@@ -1,39 +1,52 @@
-private handleArcgisMapReady = (event: Event) => {
-  // The event target is the arcgis-map element
-  const arcgisMap = event.target as any;
-  this.map = arcgisMap.map;
-  this.view = arcgisMap.view;
-  this.requestUpdate();
+try {
+  // DO NOT set view.popupEnabled = false. Leave the view alone.
+  // The arcgis-popup component handles opening itself.
 
-  // Resolve all pending promises with the map instance
-  this._mapReadyResolvers.forEach((resolver) => resolver(this.map!));
-  this._mapReadyResolvers = [];
-  this._viewReadyResolvers.forEach((resolver) => resolver(this.view!));
-  this._viewReadyResolvers = [];
+  // Set the template on the graphic
+  graphic.popupTemplate = popupTemplate;
+  console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
 
-  // Pre-warm the <arcgis-popup> component to avoid first-click layout glitch.
-  // The new component caches layout on its first open; opening + closing once
-  // during init makes the user's first real click render at correct height.
-  void this.prewarmPopup();
-};
+  // Find the <arcgis-popup> component
+  const arcMap = this.closest("arc-map") as any;
+  const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
+  console.log("[LOG 3] popupEl found?", !!popupEl);
 
-/**
- * Opens and immediately closes the popup once on init.
- * This avoids the first-click empty-space layout bug in <arcgis-popup>.
- */
+  if (!popupEl) {
+    console.warn("[up-geojson-layer] <arcgis-popup> not found");
+    return;
+  }
+
+  await popupEl.componentOnReady();
+
+  // Set features and location as properties on the component
+  popupEl.features = [graphic];
+  popupEl.location = location;
+  popupEl.visible = true;
+
+  console.log("[LOG 3] popup opened via component properties");
+  console.log("[LOG 3] popup features count:", popupEl.features?.length);
+  console.log("[LOG 3] popup selectedFeature attrs:", popupEl.selectedFeature?.attributes);
+} catch (err) {
+  console.warn("[up-geojson-layer] showGraphicPopup failed", err);
+}
+
+
 private async prewarmPopup(): Promise<void> {
   if (!this.view) return;
   try {
     await this.view.when();
-    await this.view.openPopup({
-      title: " ",
-      content: " ",
-      location: this.view.center,
+    const popupEl = this.shadowRoot?.querySelector("arcgis-popup") as any;
+    if (!popupEl) return;
+    await popupEl.componentOnReady();
+    popupEl.features = [];
+    popupEl.location = this.view.center;
+    popupEl.visible = true;
+    // Close immediately
+    requestAnimationFrame(() => {
+      popupEl.visible = false;
     });
-    this.view.closePopup();
-    console.log("[prewarmPopup] popup pre-warmed successfully");
+    console.log("[prewarmPopup] popup pre-warmed");
   } catch (err) {
-    // Best-effort; ignore failures
-    console.warn("[prewarmPopup] pre-warm failed (non-critical):", err);
+    console.warn("[prewarmPopup] failed (non-critical):", err);
   }
 }
