@@ -1,52 +1,83 @@
-try {
-  // DO NOT set view.popupEnabled = false. Leave the view alone.
-  // The arcgis-popup component handles opening itself.
-
-  // Set the template on the graphic
-  graphic.popupTemplate = popupTemplate;
-  console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
-
-  // Find the <arcgis-popup> component
-  const arcMap = this.closest("arc-map") as any;
-  const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
-  console.log("[LOG 3] popupEl found?", !!popupEl);
-
-  if (!popupEl) {
-    console.warn("[up-geojson-layer] <arcgis-popup> not found");
+private async showGraphicPopup(
+  graphic: Graphic,
+  mapPoint?: Point,
+): Promise<void> {
+  if (this._popupOpening) {
+    console.log("[showGraphicPopup] already opening, skipping re-entrant call");
     return;
   }
 
-  await popupEl.componentOnReady();
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    console.log("[LOG 2] Popup suppressed by guards");
+    this.closePopup();
+    return;
+  }
 
-  // Set features and location as properties on the component
-  popupEl.features = [graphic];
-  popupEl.location = location;
-  popupEl.visible = true;
+  if (!graphic?.geometry) {
+    console.log("[LOG 2] Missing geometry, returning");
+    return;
+  }
 
-  console.log("[LOG 3] popup opened via component properties");
-  console.log("[LOG 3] popup features count:", popupEl.features?.length);
-  console.log("[LOG 3] popup selectedFeature attrs:", popupEl.selectedFeature?.attributes);
-} catch (err) {
-  console.warn("[up-geojson-layer] showGraphicPopup failed", err);
-}
+  const location =
+    mapPoint ??
+    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
+    undefined;
 
+  if (!location) {
+    console.log("[LOG 2] No location resolved, returning");
+    return;
+  }
 
-private async prewarmPopup(): Promise<void> {
-  if (!this.view) return;
+  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+  console.log("[LOG 2] buildPopupTemplateFromCurrent returned:", popupTemplate);
+
+  if (!popupTemplate) {
+    console.log("[LOG 2] No template built, closing popup and returning");
+    this.closePopup();
+    return;
+  }
+
+  this._popupOpening = true;
   try {
-    await this.view.when();
-    const popupEl = this.shadowRoot?.querySelector("arcgis-popup") as any;
-    if (!popupEl) return;
+    graphic.popupTemplate = popupTemplate;
+    console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
+
+    const arcMap = this.closest("arc-map") as any;
+    const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
+    console.log("[LOG 3] popupEl found?", !!popupEl);
+
+    if (!popupEl) {
+      console.warn("[up-geojson-layer] <arcgis-popup> not found in arc-map shadow DOM");
+      return;
+    }
+
     await popupEl.componentOnReady();
-    popupEl.features = [];
-    popupEl.location = this.view.center;
-    popupEl.visible = true;
-    // Close immediately
-    requestAnimationFrame(() => {
+
+    // Close any in-flight popup state first to avoid render deadlock
+    if (popupEl.visible) {
+      console.log("[LOG 3] Closing in-flight popup before reopening");
       popupEl.visible = false;
-    });
-    console.log("[prewarmPopup] popup pre-warmed");
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => resolve(null)),
+      );
+    }
+
+    // Set features, location, and visibility directly on the component
+    popupEl.features = [graphic];
+    popupEl.location = location;
+    popupEl.visible = true;
+
+    console.log("[LOG 3] popup opened via component properties");
+    console.log("[LOG 3] popup features count:", popupEl.features?.length);
+    console.log("[LOG 3] popup selectedFeature attrs:", popupEl.selectedFeature?.attributes);
   } catch (err) {
-    console.warn("[prewarmPopup] failed (non-critical):", err);
+    console.warn("[up-geojson-layer] showGraphicPopup failed", err);
+  } finally {
+    this._popupOpening = false;
   }
 }
