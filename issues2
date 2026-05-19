@@ -55,8 +55,17 @@ private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
     }
     // Details: string form (with ${field} placeholders)
     else if (typeof tpl.details === "string") {
+      // Defensive warning: detect consumer passing a pre-built string
+      // without any ${field} placeholders (likely already concatenated).
+      if (!tpl.details.includes("${")) {
+        console.warn(
+          "[up-geojson-layer] infoTemplate.details is a string with no ${field} placeholders. " +
+          "It will be rendered as-is. To show per-feature data, use placeholders like ${name}, ${id}."
+        );
+      }
       htmlContent = resolve(tpl.details);
       console.log("[LOG 1] details (string) resolved to:", htmlContent);
+      console.log("[LOG 1] details (string) resolved length:", htmlContent.length);
     }
     // ArcGIS-style { title, content } object
     else if (typeof tpl.content === "string") {
@@ -102,6 +111,7 @@ private createHtmlPopupTemplate(title: string, htmlContent: string): PopupTempla
 
 
 
+
 private async showGraphicPopup(
   graphic: Graphic,
   mapPoint?: Point,
@@ -112,11 +122,13 @@ private async showGraphicPopup(
     this._isStartingDraw ||
     this.shouldSuppressPopup()
   ) {
+    console.log("[LOG 2] Popup suppressed by guards (editor/drawing/suppress)");
     this.closePopup();
     return;
   }
 
   if (!graphic?.geometry || !this.view?.popup) {
+    console.log("[LOG 2] Missing geometry or view.popup, returning");
     return;
   }
 
@@ -126,6 +138,7 @@ private async showGraphicPopup(
     undefined;
 
   if (!location) {
+    console.log("[LOG 2] No location resolved, returning");
     return;
   }
 
@@ -135,55 +148,36 @@ private async showGraphicPopup(
 
   if (!popupTemplate) {
     console.log("[LOG 2] No template built, closing popup and returning");
-    this.closePopup();   // ← ADD: don't let default popup take over
+    this.closePopup();
     return;
   }
 
   try {
-    this.view.popupEnabled = false;   // ← CHANGE: was `true`. Disable default popup.
+    // Disable default ArcGIS popup so it doesn't double-render
+    this.view.popupEnabled = false;
 
     // Set the template on the graphic
     graphic.popupTemplate = popupTemplate;
     console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
 
-    // Find the <arcgis-popup> element in the arc-map shadow DOM
+    // Verify <arcgis-popup> exists in the arc-map shadow DOM (debug only)
     const arcMap = this.closest("arc-map") as any;
     const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
     console.log("[LOG 3] popupEl found?", !!popupEl);
 
-    if (!popupEl) {
-      console.warn("[up-geojson-layer] <arcgis-popup> not found in arc-map shadow DOM");
-      return;
-    }
-
-    await popupEl.componentOnReady();
-
-    // Open with just THIS ONE graphic, never an array of hit-test results
-    await popupEl.open({
+    // Open popup via the view's openPopup() — correct API in ArcGIS 5.0
+    // Works with both legacy widget and <arcgis-popup> component
+    await this.view.openPopup({
       features: [graphic],
       location,
+      updateLocationEnabled: false,
+      shouldFocus: false,
     });
 
-    console.log("[LOG 3] popup opened. features count:", popupEl.features?.length);
-    console.log("[LOG 3] popup selectedFeature attrs:", popupEl.selectedFeature?.attributes);
+    console.log("[LOG 3] popup opened via view.openPopup()");
+    console.log("[LOG 3] popup features count:", popupEl?.features?.length);
+    console.log("[LOG 3] popup selectedFeature attrs:", popupEl?.selectedFeature?.attributes);
   } catch (err) {
     console.warn("[up-geojson-layer] showGraphicPopup failed", err);
   }
 }
-
-
-
-
-[LOG 0] buildPopupTemplateFromCurrent called for: {id: 2, name: 'Test Polygon 2', OBJECTID: 2}
-[LOG 0] infoTemplate is object. Keys: ['listItem', 'details']
-[LOG 0] typeof tpl.details: function
-[LOG 0] typeof tpl.listItem: string
-[LOG 0] typeof tpl.content: undefined
-[LOG 1] details() callback returned: Name: Test Polygon 2<br>ID: 2
-[LOG 1] details() returned length: ~30
-[LOG 0] Building PopupTemplate with title: Test Polygon 2
-[LOG 2] buildPopupTemplateFromCurrent returned: PopupTemplate {...}
-[LOG 2] popupTemplate set on graphic: PopupTemplate {...}
-[LOG 3] popupEl found? true
-[LOG 3] popup opened. features count: 1
-[LOG 3] popup selectedFeature attrs: {id: 2, name: 'Test Polygon 2', OBJECTID: 2}
