@@ -1,6 +1,9 @@
-if (typeof tpl.details === "function") {
-  try {
-    htmlContent = tpl.details(graphic) ?? "";
-    console.log("[buildPopupTemplate] details() returned:", htmlContent);
-  } catch (err) { ... }
-}
+console.log("[LOG 2] About to open popup. Graphic:", graphic);
+console.log("[LOG 2] Graphic attributes:", graphic?.attributes);
+console.log("[LOG 2] popupTemplate set on graphic:", graphic?.popupTemplate);
+
+
+const popupEl = document.querySelector('arcgis-popup');
+console.log("[LOG 3] popup features count:", popupEl?.features?.length);
+console.log("[LOG 3] popup features:", popupEl?.features);
+console.log("[LOG 3] popup selectedFeature:", popupEl?.selectedFeature);
