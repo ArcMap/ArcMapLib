@@ -1,183 +1,39 @@
-/**
- * Builds a PopupTemplate from this.infoTemplate for the given graphic.
- *
- * Supported infoTemplate shapes (in priority order):
- *   1) { listItem: string, details: (graphic) => string }   // callback form
- *   2) { listItem: string, details: string }                // both strings with ${field}
- *   3) { title?: string, content?: string }                 // ArcGIS-style JSON
- *   4) string                                               // raw HTML / template string
- *
- * Returns null if no template can be built.
- */
-private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
-  console.log("[LOG 0] buildPopupTemplateFromCurrent called for:", graphic?.attributes);
+private handleArcgisMapReady = (event: Event) => {
+  // The event target is the arcgis-map element
+  const arcgisMap = event.target as any;
+  this.map = arcgisMap.map;
+  this.view = arcgisMap.view;
+  this.requestUpdate();
 
-  if (!graphic || !this.infoTemplate) {
-    console.log("[LOG 0] Bailing out: missing graphic or infoTemplate");
-    return null;
-  }
+  // Resolve all pending promises with the map instance
+  this._mapReadyResolvers.forEach((resolver) => resolver(this.map!));
+  this._mapReadyResolvers = [];
+  this._viewReadyResolvers.forEach((resolver) => resolver(this.view!));
+  this._viewReadyResolvers = [];
 
-  const attributes = graphic.attributes ?? {};
-  const resolve = (tpl: string): string =>
-    tpl.replace(/\$\{([^}]+)\}/g, (_match, key) => {
-      const val = attributes[key.trim()];
-      return val !== undefined && val !== null ? String(val) : "";
-    });
-
-  let title = this.name ?? "Details";
-  let htmlContent = "";
-
-  // --- Case 1, 2, 3: object form ---
-  if (typeof this.infoTemplate === "object" && this.infoTemplate !== null) {
-    const tpl = this.infoTemplate as any;
-    console.log("[LOG 0] infoTemplate is object. Keys:", Object.keys(tpl));
-    console.log("[LOG 0] typeof tpl.details:", typeof tpl.details);
-    console.log("[LOG 0] typeof tpl.listItem:", typeof tpl.listItem);
-    console.log("[LOG 0] typeof tpl.content:", typeof tpl.content);
-
-    // Title from listItem (with attribute substitution)
-    if (typeof tpl.listItem === "string") {
-      title = resolve(tpl.listItem);
-    } else if (typeof tpl.title === "string") {
-      title = resolve(tpl.title);
-    }
-
-    // Details: callback form
-    if (typeof tpl.details === "function") {
-      try {
-        htmlContent = tpl.details(graphic) ?? "";
-        console.log("[LOG 1] details() callback returned:", htmlContent);
-        console.log("[LOG 1] details() returned length:", htmlContent.length);
-      } catch (err) {
-        console.warn("[up-geojson-layer] infoTemplate.details() failed", err);
-        return null;
-      }
-    }
-    // Details: string form (with ${field} placeholders)
-    else if (typeof tpl.details === "string") {
-      // Defensive warning: detect consumer passing a pre-built string
-      // without any ${field} placeholders (likely already concatenated).
-      if (!tpl.details.includes("${")) {
-        console.warn(
-          "[up-geojson-layer] infoTemplate.details is a string with no ${field} placeholders. " +
-          "It will be rendered as-is. To show per-feature data, use placeholders like ${name}, ${id}."
-        );
-      }
-      htmlContent = resolve(tpl.details);
-      console.log("[LOG 1] details (string) resolved to:", htmlContent);
-      console.log("[LOG 1] details (string) resolved length:", htmlContent.length);
-    }
-    // ArcGIS-style { title, content } object
-    else if (typeof tpl.content === "string") {
-      htmlContent = resolve(tpl.content);
-      console.log("[LOG 1] content (string) resolved to:", htmlContent);
-    } else {
-      console.log("[LOG 1] No valid details/content found on infoTemplate");
-    }
-  }
-  // --- Case 4: raw string template ---
-  else if (typeof this.infoTemplate === "string") {
-    htmlContent = resolve(this.infoTemplate);
-    console.log("[LOG 1] infoTemplate (string) resolved to:", htmlContent);
-  }
-
-  if (!htmlContent.trim()) {
-    console.log("[LOG 0] No htmlContent produced, returning null");
-    return null;
-  }
-
-  console.log("[LOG 0] Building PopupTemplate with title:", title);
-  return this.createHtmlPopupTemplate(title, htmlContent);
-}
+  // Pre-warm the <arcgis-popup> component to avoid first-click layout glitch.
+  // The new component caches layout on its first open; opening + closing once
+  // during init makes the user's first real click render at correct height.
+  void this.prewarmPopup();
+};
 
 /**
- * Creates a PopupTemplate that renders the given HTML content as-is.
- * Uses a function-based content so the popup sizes to actual content
- * (no field-table dump, no extra whitespace).
+ * Opens and immediately closes the popup once on init.
+ * This avoids the first-click empty-space layout bug in <arcgis-popup>.
  */
-private createHtmlPopupTemplate(title: string, htmlContent: string): PopupTemplate {
-  return new PopupTemplate({
-    title,
-    outFields: ["*"],
-    content: () => {
-      const div = document.createElement("div");
-      div.style.margin = "0";
-      div.style.padding = "0";
-      div.innerHTML = htmlContent;
-      return div;
-    },
-  });
-}
-
-
-
-
-private async showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point,
-): Promise<void> {
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    console.log("[LOG 2] Popup suppressed by guards (editor/drawing/suppress)");
-    this.closePopup();
-    return;
-  }
-
-  if (!graphic?.geometry || !this.view?.popup) {
-    console.log("[LOG 2] Missing geometry or view.popup, returning");
-    return;
-  }
-
-  const location =
-    mapPoint ??
-    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
-    undefined;
-
-  if (!location) {
-    console.log("[LOG 2] No location resolved, returning");
-    return;
-  }
-
-  // Build a PopupTemplate from infoTemplate and set it on the graphic
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  console.log("[LOG 2] buildPopupTemplateFromCurrent returned:", popupTemplate);
-
-  if (!popupTemplate) {
-    console.log("[LOG 2] No template built, closing popup and returning");
-    this.closePopup();
-    return;
-  }
-
+private async prewarmPopup(): Promise<void> {
+  if (!this.view) return;
   try {
-    // Disable default ArcGIS popup so it doesn't double-render
-    this.view.popupEnabled = false;
-
-    // Set the template on the graphic
-    graphic.popupTemplate = popupTemplate;
-    console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
-
-    // Verify <arcgis-popup> exists in the arc-map shadow DOM (debug only)
-    const arcMap = this.closest("arc-map") as any;
-    const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
-    console.log("[LOG 3] popupEl found?", !!popupEl);
-
-    // Open popup via the view's openPopup() — correct API in ArcGIS 5.0
-    // Works with both legacy widget and <arcgis-popup> component
+    await this.view.when();
     await this.view.openPopup({
-      features: [graphic],
-      location,
-      updateLocationEnabled: false,
-      shouldFocus: false,
+      title: " ",
+      content: " ",
+      location: this.view.center,
     });
-
-    console.log("[LOG 3] popup opened via view.openPopup()");
-    console.log("[LOG 3] popup features count:", popupEl?.features?.length);
-    console.log("[LOG 3] popup selectedFeature attrs:", popupEl?.selectedFeature?.attributes);
+    this.view.closePopup();
+    console.log("[prewarmPopup] popup pre-warmed successfully");
   } catch (err) {
-    console.warn("[up-geojson-layer] showGraphicPopup failed", err);
+    // Best-effort; ignore failures
+    console.warn("[prewarmPopup] pre-warm failed (non-critical):", err);
   }
 }
