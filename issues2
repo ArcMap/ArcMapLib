@@ -1,41 +1,76 @@
-### Color Alpha (Opacity) Changes
+/**
+ * Builds a PopupTemplate from this.infoTemplate for the given graphic.
+ *
+ * Supported infoTemplate shapes (in priority order):
+ *   1) { listItem: string, details: (graphic) => string }  // callback
+ *   2) { listItem: string, details: string }               // both strings with ${field}
+ *   3) { title?: string, content?: string }                // ArcGIS-style JSON
+ *   4) string                                              // raw HTML / template string
+ *
+ * Returns null if no template can be built.
+ */
+private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+  if (!graphic || !this.infoTemplate) return null;
 
-The way alpha (transparency) is written in color arrays changed between ArcGIS 3.x and 5.0. This affects how transparent the fill of a Circle, Polygon, or any other symbol looks on the map.
+  const attributes = graphic.attributes ?? {};
+  const resolve = (tpl: string): string =>
+    tpl.replace(/\$\{([^}]+)\}/g, (_match, key) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
 
-**What changed**
+  let title = this.name ?? "Details";
+  let htmlContent = "";
 
-| Old (ArcGIS 3.x)      | New (ArcGIS 5.0)        |
-| --------------------- | ----------------------- |
-| `[r, g, b, 0–255]`    | `[r, g, b, 0.0–1.0]`    |
-| Example: `[0, 0, 0, 120]` | Example: `[0, 0, 0, 0.5]` |
+  // --- Case 1 & 2: object form with listItem + details ---
+  if (typeof this.infoTemplate === "object" && this.infoTemplate !== null) {
+    const tpl = this.infoTemplate as any;
 
-In 3.x, the fourth value in an RGBA color array was a whole number between `0` and `255`. In 5.0, it must be a decimal between `0.0` (fully transparent) and `1.0` (fully opaque), following the standard CSS rule.
+    if (typeof tpl.listItem === "string") {
+      title = resolve(tpl.listItem);
+    }
 
-If an old value like `120` is left in place, ArcGIS 5.0 treats anything greater than `1` as fully opaque. That is why Circles and Polygons started looking very dark after the migration.
+    if (typeof tpl.details === "function") {
+      try {
+        htmlContent = tpl.details(graphic) ?? "";
+      } catch (err) {
+        console.warn("[up-geojson-layer] infoTemplate.details() failed", err);
+        return null;
+      }
+    } else if (typeof tpl.details === "string") {
+      htmlContent = resolve(tpl.details);
+    } else if (typeof tpl.content === "string") {
+      // Case 3: ArcGIS-style { title, content }
+      title = typeof tpl.title === "string" ? resolve(tpl.title) : title;
+      htmlContent = resolve(tpl.content);
+    } else if (typeof tpl.title === "string") {
+      title = resolve(tpl.title);
+    }
+  }
+  // --- Case 4: raw string template ---
+  else if (typeof this.infoTemplate === "string") {
+    htmlContent = resolve(this.infoTemplate);
+  }
 
-**How to fix**
+  if (!htmlContent.trim()) return null;
 
-Divide the old alpha value by 255 to get the new decimal value. Round it to something simple.
+  return this.createHtmlPopupTemplate(title, htmlContent);
+}
 
-| Old value (0–255) | New value (0.0–1.0) |
-| ----------------- | ------------------- |
-| `60`              | `0.25`              |
-| `120`             | `0.5`               |
-| `180`             | `0.7`               |
-| `200`             | `0.8`               |
-
-If `0.5` still looks too dark for your case, lower it further (for example `0.2`) until it matches the look you want.
-
-**Migration Guide**
-
-1. **Search your codebase** for color arrays where the fourth value is greater than `1`. For example, look for patterns like `[0, 0, 0, 120]` or `{ r: 0, g: 0, b: 0, a: 120 }`.
-2. **Replace** the fourth value with its decimal equivalent (old value ÷ 255), or pick a decimal between `0.0` and `1.0` that gives the look you want.
-3. **Run your app** and check that Circles, Polygons, and other filled shapes appear at the expected transparency.
-
-**Useful search patterns**
-
-In VS Code, turn on regex search and use:
-
-`\[\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*([2-9]|\d{2,3})\s*\]`
-
-This finds all 4-number arrays where the fourth value is `2` or higher, which is the most common form of the issue.
+/**
+ * Creates a PopupTemplate that renders the given HTML content as-is
+ * (no field tables, no extra wrappers, no whitespace).
+ */
+private createHtmlPopupTemplate(title: string, htmlContent: string): PopupTemplate {
+  return new PopupTemplate({
+    title,
+    outFields: ["*"],
+    content: () => {
+      const div = document.createElement("div");
+      div.style.margin = "0";
+      div.style.padding = "0";
+      div.innerHTML = htmlContent;
+      return div;
+    },
+  });
+}
