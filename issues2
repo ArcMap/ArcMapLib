@@ -1,9 +1,13 @@
-console.log("[LOG 2] About to open popup. Graphic:", graphic);
-console.log("[LOG 2] Graphic attributes:", graphic?.attributes);
-console.log("[LOG 2] popupTemplate set on graphic:", graphic?.popupTemplate);
-
-
-const popupEl = document.querySelector('arcgis-popup');
-console.log("[LOG 3] popup features count:", popupEl?.features?.length);
-console.log("[LOG 3] popup features:", popupEl?.features);
-console.log("[LOG 3] popup selectedFeature:", popupEl?.selectedFeature);
+// Call the details callback to get HTML content
+let htmlContent = "";
+try {
+  htmlContent = this.infoTemplate.details(graphic) ?? "";
+  console.log("[LOG 1] details() returned:", htmlContent);   // ← ADD THIS LINE
+  console.log("[LOG 1] details() returned length:", htmlContent.length);   // ← AND THIS
+} catch (err) {
+  console.warn(
+    "[up-geojson-layer] infoTemplate.details() failed",
+    err,
+  );
+  return null;
+}
