@@ -1,91 +1,295 @@
-const buildFieldsFromHtml = (htmlTemplate: string): any[] => {
-  const resolvedHtml = replaceTokens(htmlTemplate);
+private _popupOpenInProgress = false;
+private _lastPopupGraphicKey: string | null = null;
+private _lastPopupOpenAt = 0;
 
-  console.log(
-    "[geojson-layer] parsing html",
-    resolvedHtml
-  );
 
-  const wrapper = document.createElement("div");
-  wrapper.innerHTML = resolvedHtml;
 
-  const fieldInfos: any[] = [];
-  const seen = new Set<string>();
 
-  const rows = Array.from(
-    wrapper.querySelectorAll("div,li,p,.info-template-data")
-  );
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) {
+    return null;
+  }
 
-  rows.forEach((row: Element) => {
-    const text = (
-      row.textContent ??
-      ""
-    )
-      .replace(/\s+/g, " ")
-      .trim();
+  try {
+    const hit = await this.view.hitTest(evt);
 
-    if (!text) {
-      return;
+    const validHits = (hit.results ?? [])
+      .map((result: any) => result.graphic as Graphic)
+      .filter((graphic: Graphic | null) => {
+        return (
+          graphic &&
+          graphic.geometry &&
+          graphic.layer &&
+          graphic.layer !== this.labelLayer &&
+          graphic.layer !== this.sketchLayer
+        );
+      });
+
+    if (!validHits.length) {
+      return null;
     }
 
-    let label = "";
-    let value = "";
+    const topGraphic = validHits[0];
 
-    // Support:
-    // Name: Test Polygon
-    if (text.includes(":")) {
-      const parts = text.split(":");
-
-      label = parts[0]?.trim();
-      value = parts
-        .slice(1)
-        .join(":")
-        .trim();
+    // Important:
+    // If user clicked asset layer above geofence,
+    // this geofence layer must not open popup.
+    if (topGraphic.layer !== this.featureLayer) {
+      return null;
     }
 
-    // Support:
-    // label/value format
-    if (!label) {
-      const lbl = row.querySelector(
-        ".info-template-label"
-      );
+    return topGraphic;
+  } catch (error) {
+    console.error("[geojson-layer] hitTest failed", error);
+    return null;
+  }
+}
 
-      const val = row.querySelector(
-        ".info-template-value"
-      );
 
-      label = lbl?.textContent?.trim() ?? "";
-      value = val?.textContent?.trim() ?? "";
+
+private buildPopupTemplateFromCurrent(
+  graphic: Graphic
+): PopupTemplate | null {
+  if (!graphic || !this.infoTemplate) {
+    return null;
+  }
+
+  const attributes = graphic.attributes ?? {};
+
+  Object.keys(attributes).forEach((key) => {
+    if (key.startsWith("popup_field_")) {
+      delete attributes[key];
     }
-
-    if (!label || !value) {
-      return;
-    }
-
-    const duplicateKey = `${label}-${value}`;
-
-    if (seen.has(duplicateKey)) {
-      return;
-    }
-
-    seen.add(duplicateKey);
-
-    const fieldName =
-      `popup_field_${fieldInfos.length}`;
-
-    attributes[fieldName] = value;
-
-    fieldInfos.push({
-      fieldName,
-      label,
-      visible: true,
-    });
   });
 
-  console.log(
-    "[geojson-layer] generated fields",
-    fieldInfos
-  );
+  const replaceTokens = (value: string): string => {
+    return value.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
+      const attributeValue = attributes[key.trim()];
+      return attributeValue === undefined || attributeValue === null
+        ? ""
+        : String(attributeValue);
+    });
+  };
 
-  return fieldInfos;
-};
+  const resolveTitle = (): string => {
+    const rawTitle =
+      this.infoTemplate?.title ??
+      this.infoTemplate?.listTitle ??
+      this.infoTemplate?.listItem ??
+      this.name ??
+      "Details";
+
+    return typeof rawTitle === "string"
+      ? replaceTokens(rawTitle)
+      : String(rawTitle);
+  };
+
+  const buildFieldsFromHtml = (htmlTemplate: string): any[] => {
+    const resolvedHtml = replaceTokens(htmlTemplate);
+
+    console.log("[geojson-layer] parsing html", resolvedHtml);
+
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = resolvedHtml;
+
+    const fieldInfos: any[] = [];
+    const seen = new Set<string>();
+
+    const rows = Array.from(
+      wrapper.querySelectorAll(".info-template-data, div, li, p")
+    );
+
+    rows.forEach((row: Element) => {
+      let label = "";
+      let value = "";
+
+      const labelElement = row.querySelector(".info-template-label");
+      const valueElement = row.querySelector(".info-template-value");
+
+      if (labelElement && valueElement) {
+        label = (labelElement.textContent ?? "").replace(/:$/, "").trim();
+        value = (valueElement.textContent ?? "").trim();
+      } else {
+        const text = (row.textContent ?? "").replace(/\s+/g, " ").trim();
+
+        if (text.includes(":")) {
+          const parts = text.split(":");
+          label = parts.shift()?.replace(/:$/, "").trim() ?? "";
+          value = parts.join(":").trim();
+        }
+      }
+
+      if (!label || !value) {
+        return;
+      }
+
+      const duplicateKey = `${label}-${value}`;
+      if (seen.has(duplicateKey)) {
+        return;
+      }
+
+      seen.add(duplicateKey);
+
+      const fieldName = `popup_field_${fieldInfos.length}`;
+      attributes[fieldName] = value;
+
+      fieldInfos.push({
+        fieldName,
+        label,
+        visible: true,
+      });
+    });
+
+    return fieldInfos;
+  };
+
+  try {
+    let fieldInfos: any[] = [];
+
+    if (Array.isArray(this.infoTemplate?.fieldInfos)) {
+      fieldInfos = this.infoTemplate.fieldInfos
+        .map((field: any) => {
+          const fieldName = field.fieldName ?? field.name ?? field.key;
+          if (!fieldName) return null;
+
+          return {
+            fieldName,
+            label: field.label ?? field.title ?? fieldName,
+            visible: field.visible !== false,
+          };
+        })
+        .filter(Boolean);
+    } else if (typeof this.infoTemplate?.details === "string") {
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate.details);
+    } else if (typeof this.infoTemplate?.details === "function") {
+      const html = this.infoTemplate.details(graphic);
+      if (typeof html === "string") {
+        fieldInfos = buildFieldsFromHtml(html);
+      }
+    } else if (typeof this.infoTemplate?.content === "string") {
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate.content);
+    } else if (typeof this.infoTemplate === "string") {
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate);
+    }
+
+    if (!fieldInfos.length) {
+      console.warn("[geojson-layer] popup skipped: no popup fields resolved", {
+        infoTemplate: this.infoTemplate,
+        attributes,
+      });
+      return null;
+    }
+
+    return new PopupTemplate({
+      title: resolveTitle(),
+      content: [
+        {
+          type: "fields",
+          fieldInfos,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("[geojson-layer] buildPopupTemplateFromCurrent failed", error);
+    return null;
+  }
+}
+
+
+
+private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
+  if (!this.view || !graphic || this._editorOpen || this._inDrawingMode) {
+    return;
+  }
+
+  const objectId =
+    graphic.attributes?.OBJECTID ??
+    graphic.attributes?.objectId ??
+    graphic.attributes?.id ??
+    "";
+
+  const popupKey = `${this.name ?? ""}-${objectId}`;
+  const now = Date.now();
+
+  if (
+    this._popupOpenInProgress ||
+    (this._lastPopupGraphicKey === popupKey && now - this._lastPopupOpenAt < 500)
+  ) {
+    console.log("[geojson-layer] duplicate popup open skipped", popupKey);
+    return;
+  }
+
+  this._popupOpenInProgress = true;
+  this._lastPopupGraphicKey = popupKey;
+  this._lastPopupOpenAt = now;
+
+  try {
+    const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+
+    if (!popupTemplate) {
+      return;
+    }
+
+    graphic.popupTemplate = popupTemplate;
+
+    this.closePopup();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const location =
+      mapPoint ??
+      UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
+      undefined;
+
+    const popupEl = this.ancestorMapElement as any;
+    const popup =
+      typeof popupEl?.getPopupComponent === "function"
+        ? popupEl.getPopupComponent()
+        : null;
+
+    if (popup) {
+      popup.location = location;
+      popup.features = [graphic];
+      popup.open = true;
+    } else if (this.view.popup) {
+      this.view.popup.location = location;
+      this.view.popup.features = [graphic];
+      (this.view.popup as any).open = true;
+    }
+  } finally {
+    setTimeout(() => {
+      this._popupOpenInProgress = false;
+    }, 300);
+  }
+}
+
+
+
+
+const graphic = await this.getHitGraphic(evt);
+
+if (!graphic) {
+  return;
+}
+
+this.emitLayerEvent("layerClick", null, graphic, {
+  event: evt,
+  coordinates: {
+    latitude: evt.mapPoint?.latitude ?? 0,
+    longitude: evt.mapPoint?.longitude ?? 0,
+  },
+  attributes: graphic.attributes ?? {},
+});
+
+if (this.enableUserEdit && this.isUserEditEnabled()) {
+  this.closePopup();
+  await this.activateGraphicsEditor(graphic);
+  return;
+}
+
+await this.showGraphicPopup(graphic, evt.mapPoint);
+
+
+
+
+
