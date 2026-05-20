@@ -1,26 +1,32 @@
-<style>
-  /* Fix arcgis-popup white shadow / empty space below content */
-  arcgis-popup::part(content),
-  arcgis-popup::part(main-container),
-  arcgis-popup::part(container) {
-    min-height: 0 !important;
-    height: auto !important;
-    max-height: none !important;
+if (typeof config.details === "string" && config.listItem !== undefined) {
+  // Resolve title from listItem
+  let title = config.listItem;
+  if (attributes && typeof title === "string") {
+    title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
   }
-
-  /* Target Esri's internal popup styles */
-  .esri-popup,
-  .esri-popup__main-container,
-  .esri-popup__content,
-  .esri-popup__wrapper {
-    min-height: 0 !important;
-    height: auto !important;
-    max-height: none !important;
+  
+  // Get HTML and COMPRESS whitespace (the technical fix!)
+  let htmlContent = config.details;
+  
+  // 👇 ADD THESE 3 LINES — Strip whitespace between tags
+  htmlContent = htmlContent
+    .replace(/>\s+</g, '><')           // Remove whitespace between tags
+    .replace(/\n\s*/g, '')             // Remove newlines and following spaces
+    .trim();                           // Trim leading/trailing whitespace
+  
+  // Replace ${field} placeholders
+  if (attributes) {
+    htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
   }
-
-  /* Override fixed heights */
-  arcgis-popup {
-    --calcite-popup-content-min-height: 0 !important;
-    height: auto !important;
-  }
-</style>
+  
+  return new PopupTemplate({
+    title,
+    content: [{ type: "text", text: htmlContent }]
+  });
+}
