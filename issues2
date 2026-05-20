@@ -1,43 +1,273 @@
-private emitLayerEvent(
-  eventName: string,
-  feature?: Feature | null,
-  graphic?: Graphic | null,
-  extraData?: any
-): void {
-  const safeFeature =
-    feature ??
-    (graphic?.geometry ? this.graphicToGeoJsonFeature(graphic) : null);
+private bindViewEvents(): void {
+  if (!this.view || !this.featureLayer) {
+    return;
+  }
 
-  const attributes = safeFeature?.properties ?? graphic?.attributes ?? {};
+  this.cleanupViewEvents();
+  this.setupPopupCloseWatcher();
 
-  const geometry =
-    safeFeature?.geometry ??
-    (graphic?.geometry ? this.arcGeometryToGeoJson(graphic.geometry) : null);
+  let clickTimer: any = null;
+  let hoveredGraphic: Graphic | null = null;
 
-  const objectId =
-    (attributes as any)?.OBJECTID ??
-    (attributes as any)?.objectId ??
-    (attributes as any)?.id ??
-    null;
+  //----------------------------------------------------------
+  // helper
+  //----------------------------------------------------------
 
-  this.dispatchEvent(
-    new CustomEvent(eventName, {
-      detail: {
-        type: eventName,
-        OBJECTID: objectId,
-        objectId,
-        id: objectId,
-        feature: safeFeature,
-        graphic: graphic ?? null,
-        attributes,
-        geometry,
-        geojson: this.geojson,
-        layerId: this.featureLayer?.id ?? this.name ?? "arc-geojson-layer",
-        layerName: this.name ?? "arc-geojson-layer",
-        ...extraData,
-      },
-      bubbles: true,
-      composed: true,
-    })
+  const getTopGraphic = async (evt: any): Promise<Graphic | null> => {
+    if (!this.view) return null;
+
+    const hit = await this.view.hitTest(evt);
+
+    if (!hit?.results?.length) {
+      return null;
+    }
+
+    const results = hit.results.filter((r: any) => {
+      const g = r.graphic;
+
+      if (!g) return false;
+
+      const layerId =
+        g.layer?.id ?? "";
+
+      // ignore labels/sketch layer
+      if (
+        layerId.includes("-labels") ||
+        layerId.includes("-sketch")
+      ) {
+        return false;
+      }
+
+      // IMPORTANT:
+      // only allow this layer graphics
+      return g.layer === this.featureLayer;
+    });
+
+    return results[0]?.graphic ?? null;
+  };
+
+  //----------------------------------------------------------
+  // SINGLE CLICK
+  //----------------------------------------------------------
+
+  const clickHandle = this.view.on(
+    "click",
+    async (evt: any) => {
+
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+      }
+
+      clickTimer = setTimeout(async () => {
+
+        clickTimer = null;
+
+        const graphic =
+          await getTopGraphic(evt);
+
+        if (!graphic) {
+
+          this.view?.popup?.close();
+
+          return;
+        }
+
+        //---------------------------------------
+        // emit event
+        //---------------------------------------
+
+        this.emitLayerEvent(
+          "layerClick",
+          this.graphicToGeoJsonFeature(
+            graphic
+          ),
+          graphic,
+          {
+            coordinates: {
+              latitude:
+                evt.mapPoint?.latitude ?? 0,
+              longitude:
+                evt.mapPoint?.longitude ?? 0
+            },
+            attributes:
+              graphic.attributes ?? {}
+          }
+        );
+
+        /*
+         IMPORTANT RULE:
+
+         enableUserEdit=true
+             single click => editor
+
+         popup must not open
+        */
+
+        if (this.enableUserEdit) {
+
+          this.view.popup.close();
+
+          this._suppressPopupUntil =
+            Date.now() + 1500;
+
+          await this.activateGraphicEditor(
+            graphic
+          );
+
+          return;
+        }
+
+        /*
+         popup blocked while editing
+        */
+
+        if (
+          this.shouldSuppressPopup()
+        ) {
+          return;
+        }
+
+        /*
+         popup template exists
+        */
+
+        if (
+          this.infoTemplate ||
+          graphic.popupTemplate
+        ) {
+
+          await this.openPopup(
+            graphic
+          );
+        }
+
+      }, 200);
+    }
   );
+
+  //----------------------------------------------------------
+  // DOUBLE CLICK
+  //----------------------------------------------------------
+
+  const dblClickHandle =
+    this.view.on(
+      "double-click",
+      async (evt: any) => {
+
+        evt.stopPropagation();
+
+        if (clickTimer) {
+
+          clearTimeout(clickTimer);
+
+          clickTimer = null;
+        }
+
+        const graphic =
+          await getTopGraphic(evt);
+
+        if (!graphic) return;
+
+        this.emitLayerEvent(
+          "doubleClick",
+          this.graphicToGeoJsonFeature(
+            graphic
+          ),
+          graphic,
+          {
+            coordinates: {
+              latitude:
+                evt.mapPoint?.latitude ?? 0,
+              longitude:
+                evt.mapPoint?.longitude ?? 0
+            },
+            attributes:
+              graphic.attributes ?? {}
+          }
+        );
+
+      }
+    );
+
+    //----------------------------------------------------------
+    // POINTER MOVE
+    //----------------------------------------------------------
+
+    const moveHandle =
+      this.view.on(
+        "pointer-move",
+        async (evt: any) => {
+
+          const hitGraphic =
+            await getTopGraphic(evt);
+
+          /*
+            mouse out
+          */
+
+          if (
+            hoveredGraphic &&
+            hoveredGraphic !== hitGraphic
+          ) {
+
+            this.setMapCursor(
+              "default"
+            );
+
+            this.emitLayerEvent(
+              "layerMouseOut",
+              this.graphicToGeoJsonFeature(
+                hoveredGraphic
+              ),
+              hoveredGraphic
+            );
+
+            hoveredGraphic = null;
+          }
+
+          /*
+            mouse over
+          */
+
+          if (
+            hitGraphic &&
+            hoveredGraphic !== hitGraphic
+          ) {
+
+            hoveredGraphic =
+              hitGraphic;
+
+            this.setMapCursor(
+              "pointer"
+            );
+
+            this.emitLayerEvent(
+              "layerMouseOver",
+              this.graphicToGeoJsonFeature(
+                hitGraphic
+              ),
+              hitGraphic,
+              {
+                coordinates: {
+                  latitude:
+                    evt.mapPoint?.latitude ?? 0,
+
+                  longitude:
+                    evt.mapPoint?.longitude ?? 0
+                }
+              }
+            );
+          }
+        }
+      );
+
+    //----------------------------------------------------------
+    // save handles
+    //----------------------------------------------------------
+
+    this.viewHandles.push(
+      clickHandle,
+      dblClickHandle,
+      moveHandle
+    );
 }
