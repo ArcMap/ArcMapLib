@@ -1,8 +1,7 @@
 private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
   if (
     !this.view ||
-    !graphic ||
-    !graphic.geometry ||
+    !graphic?.geometry ||
     this.enableUserEdit ||
     this._editorOpen ||
     this._inDrawingMode ||
@@ -14,29 +13,27 @@ private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void
   }
 
   const popupTemplate = this.buildPopupTemplateForCurrent(graphic);
-
   if (!popupTemplate) {
     return;
   }
 
   const popupGraphic = graphic.clone();
-  popupGraphic.attributes = {
-    ...(graphic.attributes ?? {}),
-  };
+  popupGraphic.attributes = { ...(graphic.attributes ?? {}) };
   popupGraphic.popupTemplate = popupTemplate;
 
-  const location =
+  const popupPoint =
     mapPoint ??
-    this.getPopupPoint(popupGraphic.geometry as any) ??
-    this.getPopupPoint(graphic.geometry as any);
+    UpGeojsonLayer.getPopupPoint(popupGraphic.geometry) ??
+    UpGeojsonLayer.getPopupPoint(graphic.geometry);
 
-  if (!location) {
-    console.warn("[arc-geojson-layer] popup location not found", graphic);
+  if (!popupPoint) {
     return;
   }
 
-  await this.openPopup(popupGraphic, location);
+  await this.openPopup(popupGraphic, popupPoint);
 }
+
+
 
 
 
@@ -49,10 +46,12 @@ private async openPopup(
   }
 
   try {
+    this.closePopup();
+
     this.view.popupEnabled = true;
 
-    if (this.view.openPopup) {
-      this.view.openPopup({
+    if (typeof (this.view as any).openPopup === "function") {
+      (this.view as any).openPopup({
         location: popupPoint,
         features: [graphicMatch],
       });
@@ -63,11 +62,14 @@ private async openPopup(
       this.view.popup.location = popupPoint;
       this.view.popup.features = [graphicMatch];
       (this.view.popup as any).open = true;
+      (this.view.popup as any).visible = true;
     }
   } catch (error) {
     console.warn("[arc-geojson-layer] openPopup failed", error);
   }
 }
+
+
 
 
 
@@ -77,8 +79,7 @@ private buildPopupTemplateForCurrent(graphic: Graphic): PopupTemplate | null {
   }
 
   const popupData = this.buildPopupContentFromInfoTemplate(graphic);
-
-  if (!popupData || !popupData.content) {
+  if (!popupData?.content) {
     return null;
   }
 
@@ -90,32 +91,53 @@ private buildPopupTemplateForCurrent(graphic: Graphic): PopupTemplate | null {
 
 
 
-private getPopupPoint(geometry: Geometry | any): Point | null {
-  if (!geometry) {
-    return null;
-  }
+private createHtmlPopupTemplate(
+  title: string,
+  htmlContent: string
+): PopupTemplate {
+  const customContent = new CustomContent({
+    outFields: ["*"],
+    creator: () => {
+      const wrapper = document.createElement("div");
 
-  if (geometry.type === "point") {
-    return geometry as Point;
-  }
+      wrapper.className = "arc-geojson-popup-content";
+      wrapper.style.background = "transparent";
+      wrapper.style.margin = "0";
+      wrapper.style.padding = "0";
+      wrapper.style.border = "0";
+      wrapper.style.boxShadow = "none";
+      wrapper.style.minWidth = "240px";
 
-  if (geometry.type === "polyline") {
-    const polyline = geometry as Polyline;
-    const path = polyline.paths?.[0];
+      wrapper.innerHTML = htmlContent ?? "";
 
-    if (path && path.length > 0) {
-      const middle = path[Math.floor(path.length / 2)];
-      return new Point({
-        x: middle[0],
-        y: middle[1],
-        spatialReference: polyline.spatialReference,
-      });
-    }
-  }
+      return wrapper;
+    },
+  });
 
-  if (geometry.type === "polygon" || geometry.type === "extent") {
-    return (geometry as any).centroid ?? (geometry as any).center ?? null;
-  }
+  return new PopupTemplate({
+    title: title || this.name || "Details",
+    outFields: ["*"],
+    content: [customContent],
+  });
+}
 
-  return null;
+
+
+.arc-geojson-popup-content {
+  background: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  min-width: 240px;
+}
+
+.esri-popup,
+.esri-popup__main-container {
+  z-index: 999999 !important;
+}
+
+.esri-popup__content,
+.esri-popup__content-element {
+  background: transparent !important;
 }
