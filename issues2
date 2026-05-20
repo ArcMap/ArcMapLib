@@ -1,63 +1,16 @@
-private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
-  if (
-    !this.view ||
-    !graphic?.geometry ||
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    return;
-  }
-
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-
-  if (!popupTemplate) {
-    console.warn("[geojson-layer] popup skipped: no popupTemplate", {
-      infoTemplate: this.infoTemplate,
-      attributes: graphic.attributes,
-    });
-    return;
-  }
-
+private closePopup(): void {
   try {
-    graphic.popupTemplate = popupTemplate;
+    const popup: any = this.view?.popup;
 
-    const popupPoint =
-      mapPoint ??
-      UpGeosonLayer.getPopupPoint(graphic.geometry) ??
-      undefined;
-
-    this.closePopup();
-
-    await Promise.resolve();
-
-    const popup: any = this.view.popup;
-
-    this.view.popupEnabled = true;
-
-    // ✅ ArcGIS MapView API path
-    if (typeof (this.view as any).openPopup === "function") {
-      await (this.view as any).openPopup({
-        features: [graphic],
-        location: popupPoint,
-      });
-
-      return;
-    }
-
-    // ✅ ArcGIS 5.x popup object fallback
     if (popup) {
-      popup.features = [graphic];
-      popup.location = popupPoint;
-      popup.open = true;
-    }
+      if (typeof popup.close === "function") {
+        popup.close();
+      }
 
-    console.log("[geojson-layer] popup opened", {
-      feature: graphic.attributes,
-      popupTemplate,
-    });
-  } catch (error) {
-    console.warn("[geojson-layer] popup open failed", error);
-  }
+      popup.open = false;
+      popup.features = [];
+    }
+  } catch {}
+
+  this.clearPopupHighlight();
 }
