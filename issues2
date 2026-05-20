@@ -1,126 +1,25 @@
-private async showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point
-): Promise<void> {
-  if (
-    !graphic ||
-    !this.view ||
-    !this.featureLayer ||
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    return;
-  }
-
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  if (!popupTemplate) {
-    console.warn("[geojson-layer] popup skipped: no popupTemplate", {
-      graphic,
-      infoTemplate: this.infoTemplate,
-      attributes: graphic.attributes,
-    });
-    return;
-  }
-
-  const location =
-    mapPoint ??
-    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
-    undefined;
-
-  const popupGraphics: Graphic[] = [];
-
+private clearPopupHighlight(): void {
   try {
-    const screenPoint = this.view.toScreen(location ?? graphic.geometry.extent?.center);
-
-    if (screenPoint) {
-      const hit = await this.view.hitTest(screenPoint, {
-        include: [this.featureLayer],
-      });
-
-      const seenIds = new Set<string>();
-
-      (hit?.results ?? []).forEach((result: any) => {
-        const hitGraphic = result?.graphic as Graphic;
-
-        if (
-          hitGraphic?.geometry &&
-          (hitGraphic.layer === this.featureLayer ||
-            (hitGraphic.layer as any)?.id === this.featureLayer?.id)
-        ) {
-          const key = String(
-            hitGraphic.attributes?.[this.uniqueIdPropertyName] ??
-              hitGraphic.attributes?.OBJECTID ??
-              hitGraphic.attributes?.id ??
-              popupGraphics.length
-          );
-
-          if (!seenIds.has(key)) {
-            seenIds.add(key);
-
-            const template = this.buildPopupTemplateFromCurrent(hitGraphic);
-            if (template) {
-              hitGraphic.popupTemplate = template;
-              popupGraphics.push(hitGraphic);
-            }
-          }
-        }
-      });
-    }
-  } catch (error) {
-    console.warn("[geojson-layer] popup pagination hitTest failed", error);
-  }
-
-  if (!popupGraphics.length) {
-    graphic.popupTemplate = popupTemplate;
-    popupGraphics.push(graphic);
-  }
-
-  try {
-    this.closePopup();
-
-    this.view.popupEnabled = true;
-
-    const popup = this.view.popup as any;
-
-    popup.open({
-      title: popupGraphics[0].popupTemplate?.title ?? this.name ?? "Details",
-      location,
-      features: popupGraphics,
-      featureMenuOpen: popupGraphics.length > 1,
-    });
-
-    console.log("[geojson-layer] popup opened", {
-      count: popupGraphics.length,
-      features: popupGraphics.map((g) => g.attributes),
-    });
-  } catch (error) {
-    console.warn("[geojson-layer] popup open failed", error);
-  }
-}
-
-
-
-private setupPopupCloseWatcher(): void {
-  try {
-    this._popupVisibleWatchHandle?.remove?.();
+    this._popupHighlightHandle?.remove?.();
   } catch {}
 
-  this._popupVisibleWatchHandle = null;
+  this._popupHighlightHandle = null;
 
-  const popup = this.view?.popup as any;
-  if (!popup || typeof popup.watch !== "function") {
-    return;
-  }
+  try {
+    const popup = this.view?.popup as any;
 
-  this._popupVisibleWatchHandle = popup.watch("visible", (visible: boolean) => {
-    if (!visible) {
-      this.clearPopupHighlight();
+    if (popup) {
+      popup.features = [];
+
+      // Do NOT use this in ArcGIS 5.x:
+      // popup.selectedFeature = null;
+
+      if ("highlightEnabled" in popup) {
+        popup.highlightEnabled = false;
+      }
     }
-  });
+  } catch {}
 }
-
 
 
 private closePopup(): void {
@@ -136,30 +35,15 @@ private closePopup(): void {
       }
 
       popup.features = [];
-      popup.selectedFeature = null;
-      popup.highlightEnabled = false;
+
+      // Do NOT use this in ArcGIS 5.x:
+      // popup.selectedFeature = null;
+
+      if ("highlightEnabled" in popup) {
+        popup.highlightEnabled = false;
+      }
     }
   } catch {}
 
   this.clearPopupHighlight();
 }
-
-
-private clearPopupHighlight(): void {
-  try {
-    this._popupHighlightHandle?.remove?.();
-  } catch {}
-
-  this._popupHighlightHandle = null;
-
-  try {
-    const popup = this.view?.popup as any;
-
-    if (popup) {
-      popup.features = [];
-      popup.selectedFeature = null;
-      popup.highlightEnabled = false;
-    }
-  } catch {}
-}
-
