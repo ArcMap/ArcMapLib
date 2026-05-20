@@ -1,98 +1,38 @@
-/**
- * Handle object inputs (full PopupTemplate config)
- * Supports multiple formats:
- * 1. { listItem, details: string } - Project's custom format with ${field} placeholders
- * 2. { listItem, details: function } - Callback-based details
- * 3. { title, content } - Standard ArcGIS PopupTemplate format
- */
-private static createTemplateFromObject(
-  config: any,
-  attributes?: Record<string, any>
-): PopupTemplate {
+<style>
+  /* Fix arcgis-popup white shadow - target the actual culprits */
   
-  // ========================================================================
-  // FORMAT 1: { listItem, details: string } with ${field} placeholders
-  // ========================================================================
-  if (typeof config.details === "string" && config.listItem !== undefined) {
-    // Resolve title from listItem
-    let title = config.listItem;
-    if (attributes && typeof title === "string") {
-      title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
-    }
-    
-    // Get HTML content
-    let htmlContent = config.details;
-    
-    // 👇 TECHNICAL FIX: Compress whitespace to remove extra empty space
-    // This fixes the white shadow/empty box below popup content
-    htmlContent = htmlContent
-      .replace(/>\s+</g, '><')           // Remove whitespace between HTML tags
-      .replace(/\n\s*/g, '')             // Remove newlines and following spaces
-      .trim();                           // Trim leading/trailing whitespace
-    
-    // Replace ${field} placeholders with actual attribute values
-    if (attributes) {
-      htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
-    }
-    
-    return new PopupTemplate({
-      title,
-      content: [{ type: "text", text: htmlContent }]
-    });
+  /* Stop flex containers from expanding */
+  arcgis-feature::part(container),
+  arcgis-feature-content::part(root),
+  arcgis-feature-content::part(container),
+  arcgis-feature-content::part(main) {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
-
-  // ========================================================================
-  // FORMAT 2: { listItem, details: function } - Callback-based details
-  // ========================================================================
-  if (typeof config.details === "function") {
-    let title = config.listItem || "Details";
-    
-    // Resolve ${field} in title using attributes
-    if (attributes && typeof title === "string") {
-      title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
-    }
-    
-    // Call the details callback to get HTML content
-    let htmlContent = "";
-    try {
-      htmlContent = config.details({ attributes }) ?? "";
-    } catch (err) {
-      console.warn("[PopupTemplateResolver] details() callback failed", err);
-      return null as any;
-    }
-    
-    // 👇 TECHNICAL FIX: Compress whitespace in callback HTML too
-    htmlContent = htmlContent
-      .replace(/>\s+</g, '><')
-      .replace(/\n\s*/g, '')
-      .trim();
-    
-    return new PopupTemplate({
-      title,
-      content: [{ type: "text", text: htmlContent }]
-    });
+  
+  /* Force calcite-flow-item to fit content */
+  calcite-flow-item {
+    height: auto !important;
+    min-height: 0 !important;
   }
-
-  // ========================================================================
-  // FORMAT 3: { title, content } - Standard ArcGIS PopupTemplate format
-  // ========================================================================
-  const title = this.normalizeTitle(config.title);
-  const content = this.normalizeContent(config.content);
-
-  return new PopupTemplate({
-    title,
-    content,
-    fieldInfos: config.fieldInfos || [],
-    overwriteActionFilter: config.overwriteActionFilter ?? true,
-    actions: (config.actions || []) as any
-  });
-}
+  
+  calcite-flow-item::part(content-container),
+  calcite-flow-item::part(content) {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  
+  /* Override the parent calcite-flow */
+  calcite-flow {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  
+  /* Target arcgis-popup itself */
+  arcgis-popup {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+</style>
