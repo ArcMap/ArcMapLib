@@ -1,148 +1,91 @@
-private buildPopupTemplateFromCurrent(
-  graphic: Graphic
-): PopupTemplate | null {
-  console.log("[geojson-layer] buildPopupTemplateFromCurrent called", {
-    graphic,
-    infoTemplate: this.infoTemplate,
-    attributes: graphic?.attributes,
-  });
+const buildFieldsFromHtml = (htmlTemplate: string): any[] => {
+  const resolvedHtml = replaceTokens(htmlTemplate);
 
-  if (!graphic || !this.infoTemplate) {
-    return null;
-  }
+  console.log(
+    "[geojson-layer] parsing html",
+    resolvedHtml
+  );
 
-  const attributes = graphic.attributes ?? {};
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = resolvedHtml;
 
-  // Clean old temporary popup fields so they do not keep increasing on every click
-  Object.keys(attributes).forEach((key) => {
-    if (key.startsWith("popup_field_")) {
-      delete attributes[key];
+  const fieldInfos: any[] = [];
+  const seen = new Set<string>();
+
+  const rows = Array.from(
+    wrapper.querySelectorAll("div,li,p,.info-template-data")
+  );
+
+  rows.forEach((row: Element) => {
+    const text = (
+      row.textContent ??
+      ""
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!text) {
+      return;
     }
-  });
 
-  const replaceTokens = (value: string): string => {
-    return value.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
-      const attributeValue = attributes[key.trim()];
-      return attributeValue === undefined || attributeValue === null
-        ? ""
-        : String(attributeValue);
-    });
-  };
+    let label = "";
+    let value = "";
 
-  const resolveTitle = (): string => {
-    const rawTitle =
-      this.infoTemplate?.title ??
-      this.infoTemplate?.listTitle ??
-      this.infoTemplate?.listItem ??
-      this.name ??
-      "Details";
+    // Support:
+    // Name: Test Polygon
+    if (text.includes(":")) {
+      const parts = text.split(":");
 
-    return typeof rawTitle === "string"
-      ? replaceTokens(rawTitle)
-      : String(rawTitle);
-  };
-
-  const getText = (element: Element | null): string => {
-    return (element?.textContent ?? "").replace(/\s+/g, " ").trim();
-  };
-
-  const buildFieldsFromHtml = (htmlTemplate: string): any[] => {
-    const resolvedHtml = replaceTokens(htmlTemplate);
-
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = resolvedHtml;
-
-    const rows = Array.from(
-      wrapper.querySelectorAll(".info-template-data")
-    );
-
-    const fieldInfos: any[] = [];
-    const usedLabels = new Set<string>();
-
-    rows.forEach((row, index) => {
-      const label = getText(row.querySelector(".info-template-label"))
-        .replace(/:$/, "")
+      label = parts[0]?.trim();
+      value = parts
+        .slice(1)
+        .join(":")
         .trim();
-
-      const value = getText(row.querySelector(".info-template-value"));
-
-      if (!label || !value) {
-        return;
-      }
-
-      // Prevent duplicate Name / ID / Name / ID rows
-      const uniqueKey = `${label}::${value}`;
-      if (usedLabels.has(uniqueKey)) {
-        return;
-      }
-      usedLabels.add(uniqueKey);
-
-      const fieldName = `popup_field_${fieldInfos.length}`;
-      attributes[fieldName] = value;
-
-      fieldInfos.push({
-        fieldName,
-        label,
-        visible: true,
-      });
-    });
-
-    return fieldInfos;
-  };
-
-  try {
-    let fieldInfos: any[] = [];
-
-    if (Array.isArray(this.infoTemplate?.fieldInfos)) {
-      fieldInfos = this.infoTemplate.fieldInfos
-        .map((field: any) => {
-          const fieldName = field.fieldName ?? field.name ?? field.key;
-
-          if (!fieldName) {
-            return null;
-          }
-
-          return {
-            fieldName,
-            label: field.label ?? field.title ?? fieldName,
-            visible: field.visible !== false,
-          };
-        })
-        .filter(Boolean);
-    } else if (typeof this.infoTemplate?.details === "string") {
-      fieldInfos = buildFieldsFromHtml(this.infoTemplate.details);
-    } else if (typeof this.infoTemplate?.details === "function") {
-      const html = this.infoTemplate.details(graphic);
-      if (typeof html === "string") {
-        fieldInfos = buildFieldsFromHtml(html);
-      }
-    } else if (typeof this.infoTemplate?.content === "string") {
-      fieldInfos = buildFieldsFromHtml(this.infoTemplate.content);
-    } else if (typeof this.infoTemplate === "string") {
-      fieldInfos = buildFieldsFromHtml(this.infoTemplate);
     }
 
-    if (!fieldInfos.length) {
-      console.warn("[geojson-layer] popup skipped: no popup fields resolved", {
-        infoTemplate: this.infoTemplate,
-        attributes,
-      });
-      return null;
+    // Support:
+    // label/value format
+    if (!label) {
+      const lbl = row.querySelector(
+        ".info-template-label"
+      );
+
+      const val = row.querySelector(
+        ".info-template-value"
+      );
+
+      label = lbl?.textContent?.trim() ?? "";
+      value = val?.textContent?.trim() ?? "";
     }
 
-    console.log("[geojson-layer] popup resolved fieldInfos", fieldInfos);
+    if (!label || !value) {
+      return;
+    }
 
-    return new PopupTemplate({
-      title: resolveTitle(),
-      content: [
-        {
-          type: "fields",
-          fieldInfos,
-        },
-      ],
+    const duplicateKey = `${label}-${value}`;
+
+    if (seen.has(duplicateKey)) {
+      return;
+    }
+
+    seen.add(duplicateKey);
+
+    const fieldName =
+      `popup_field_${fieldInfos.length}`;
+
+    attributes[fieldName] = value;
+
+    fieldInfos.push({
+      fieldName,
+      label,
+      visible: true,
     });
-  } catch (error) {
-    console.error("[geojson-layer] buildPopupTemplateFromCurrent failed", error);
-    return null;
-  }
-}
+  });
+
+  console.log(
+    "[geojson-layer] generated fields",
+    fieldInfos
+  );
+
+  return fieldInfos;
+};
