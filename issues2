@@ -1,49 +1,36 @@
-private clearPopupHighlight(): void {
-  try {
-    this._popupHighlightHandle?.remove?.();
-  } catch {}
-
-  this._popupHighlightHandle = null;
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer) {
+    return null;
+  }
 
   try {
-    const popup = this.view?.popup as any;
+    const hit = await this.view.hitTest(evt);
 
-    if (popup) {
-      popup.features = [];
+    const graphicResults = (hit?.results ?? []).filter((r: any) => {
+      const g = r?.graphic;
+      return g?.geometry && g?.layer;
+    });
 
-      // Do NOT use this in ArcGIS 5.x:
-      // popup.selectedFeature = null;
-
-      if ("highlightEnabled" in popup) {
-        popup.highlightEnabled = false;
-      }
+    if (!graphicResults.length) {
+      return null;
     }
-  } catch {}
-}
 
+    // Top-most graphic clicked on the map.
+    const topGraphic = graphicResults[0].graphic as Graphic;
 
-private closePopup(): void {
-  try {
-    const popup = this.view?.popup as any;
+    // IMPORTANT:
+    // If the top-most clicked graphic is from another GeoJSON layer,
+    // this layer must not open popup.
+    const topLayer: any = topGraphic.layer;
+    const thisLayer: any = this.featureLayer;
 
-    if (popup) {
-      if (typeof popup.close === "function") {
-        popup.close();
-      } else {
-        popup.visible = false;
-        popup.open = false;
-      }
-
-      popup.features = [];
-
-      // Do NOT use this in ArcGIS 5.x:
-      // popup.selectedFeature = null;
-
-      if ("highlightEnabled" in popup) {
-        popup.highlightEnabled = false;
-      }
+    if (topLayer !== thisLayer && topLayer?.id !== thisLayer?.id) {
+      return null;
     }
-  } catch {}
 
-  this.clearPopupHighlight();
+    return topGraphic;
+  } catch (error) {
+    console.warn("[geojson-layer] hitTest failed", error);
+    return null;
+  }
 }
