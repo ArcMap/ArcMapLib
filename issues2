@@ -1,45 +1,93 @@
-private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
-  console.log("[DEBUG] buildPopupTemplateFromCurrent CALLED");  // 👈 ADD THIS
-  console.log("[DEBUG] infoTemplate:", this.infoTemplate);
-  console.log("[DEBUG] graphic.attributes:", graphic?.attributes);
+/**
+ * Handle object inputs (full PopupTemplate config)
+ * Supports multiple formats:
+ * 1. { listItem, details: string } - Project's custom format with ${field} placeholders
+ * 2. { listItem, details: function } - Callback-based details
+ * 3. { title, content } - Standard ArcGIS PopupTemplate format
+ */
+private static createTemplateFromObject(
+  config: any,
+  attributes?: Record<string, any>
+): PopupTemplate {
   
-  if (!graphic) return null;
-  if (!this.infoTemplate) return null;
-
-  return PopupTemplateResolver.resolveTemplate(
-    this.infoTemplate,
-    graphic.attributes
-  );
-}
-
-
-
-if (typeof config.details === "string" && config.listItem !== undefined) {
-  let title = config.listItem;
-  if (attributes && typeof title === "string") {
-    title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-      const val = attributes[key.trim()];
-      return val !== undefined && val !== null ? String(val) : "";
+  // ========================================================================
+  // FORMAT 1: { listItem, details: string } with ${field} placeholders
+  // ========================================================================
+  if (typeof config.details === "string" && config.listItem !== undefined) {
+    // Resolve title from listItem
+    let title = config.listItem;
+    if (attributes && typeof title === "string") {
+      title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+        const val = attributes[key.trim()];
+        return val !== undefined && val !== null ? String(val) : "";
+      });
+    }
+    
+    // Get HTML content and clean it
+    let htmlContent = config.details.trim();
+    
+    // Deduplicate repeated lines (fixes duplicate content bug)
+    const lines = htmlContent
+      .split('\n')
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 0);
+    const uniqueLines = [...new Set(lines)];
+    htmlContent = uniqueLines.join('\n');
+    
+    // Replace ${field} placeholders with actual attribute values
+    if (attributes) {
+      htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+        const val = attributes[key.trim()];
+        return val !== undefined && val !== null ? String(val) : "";
+      });
+    }
+    
+    return new PopupTemplate({
+      title,
+      content: [{ type: "text", text: htmlContent }]
     });
   }
-  
-  let htmlContent = config.details.trim();
-  
-  // 👇 ADD: Deduplicate repeated content blocks
-  // Remove duplicate <div>Name: ...</div><div>ID: ...</div> patterns
-  const lines = htmlContent.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const uniqueLines = [...new Set(lines)];
-  htmlContent = uniqueLines.join('\n');
-  
-  if (attributes) {
-    htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-      const val = attributes[key.trim()];
-      return val !== undefined && val !== null ? String(val) : "";
+
+  // ========================================================================
+  // FORMAT 2: { listItem, details: function } - Callback-based details
+  // ========================================================================
+  if (typeof config.details === "function") {
+    let title = config.listItem || "Details";
+    
+    // Resolve ${field} in title using attributes
+    if (attributes && typeof title === "string") {
+      title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+        const val = attributes[key.trim()];
+        return val !== undefined && val !== null ? String(val) : "";
+      });
+    }
+    
+    // Call the details callback to get HTML content
+    let htmlContent = "";
+    try {
+      htmlContent = config.details({ attributes }) ?? "";
+    } catch (err) {
+      console.warn("[PopupTemplateResolver] details() callback failed", err);
+      return null as any;
+    }
+    
+    return new PopupTemplate({
+      title,
+      content: [{ type: "text", text: htmlContent }]
     });
   }
-  
+
+  // ========================================================================
+  // FORMAT 3: { title, content } - Standard ArcGIS PopupTemplate format
+  // ========================================================================
+  const title = this.normalizeTitle(config.title);
+  const content = this.normalizeContent(config.content);
+
   return new PopupTemplate({
     title,
-    content: [{ type: "text", text: htmlContent }]
+    content,
+    fieldInfos: config.fieldInfos || [],
+    overwriteActionFilter: config.overwriteActionFilter ?? true,
+    actions: (config.actions || []) as any
   });
 }
