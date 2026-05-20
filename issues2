@@ -1,269 +1,44 @@
-/**
- * PopupTemplate Handler for ArcGIS 5.0
- * Handles all input scenarios: string, object, null/undefined
- * Use this in your arc-geojson-layer component
- */
-
-import Popup from "@arcgis/core/widgets/Popup";
-import PopupTemplate from "@arcgis/core/PopupTemplate";
-
-export interface PopupTemplateConfig {
-  title?: string | { expression?: string; value?: string };
-  content?: string | PopupContent[];
-  fieldInfos?: any[];
-  overwriteActionFilter?: boolean;
-  actions?: any[];
-}
-
-interface PopupContent {
-  type: "text" | "fields" | "media" | "attachments" | "expression";
-  text?: string;
-  value?: string;
-  expression?: string;
-  fieldInfos?: any[];
-}
-
-/**
- * Normalizes various input formats into ArcGIS 5.0 PopupTemplate
- * 
- * Input types:
- * 1. String: HTML or ArcGIS expression syntax → wraps in content
- * 2. Object: Already-formed PopupTemplate config → validates & uses as-is
- * 3. Null/Undefined: → creates default template
- */
-export class PopupTemplateResolver {
-  /**
-   * Main entry point: converts any input format to PopupTemplate
-   */
-  static resolveTemplate(
-    infoTemplate: string | PopupTemplateConfig | null | undefined,
-    featureAttributes?: Record<string, any>
-  ): PopupTemplate | null {
-    // Null or undefined → return null (no popup)
-    if (infoTemplate === null || infoTemplate === undefined) {
+private static createTemplateFromObject(
+  config: any,
+  attributes?: Record<string, any>
+): PopupTemplate {
+  
+  // 👇 NEW: Handle callback-based details
+  if (typeof config.details === "function") {
+    let title = config.listItem || "Details";
+    
+    // Resolve ${field} in title using attributes
+    if (attributes && typeof title === "string") {
+      title = title.replace(/\$\{([^}]+)\}/g, (_, key) => {
+        const val = attributes[key.trim()];
+        return val !== undefined && val !== null ? String(val) : "";
+      });
+    }
+    
+    // Call the details callback
+    let htmlContent = "";
+    try {
+      htmlContent = config.details({ attributes }) ?? "";
+    } catch (err) {
+      console.warn("[PopupTemplateResolver] details() callback failed", err);
       return null;
     }
-
-    // String input → parse and wrap
-    if (typeof infoTemplate === "string") {
-      return this.createTemplateFromString(infoTemplate, featureAttributes);
-    }
-
-    // Object input → validate and construct
-    if (typeof infoTemplate === "object") {
-      return this.createTemplateFromObject(infoTemplate);
-    }
-
-    // Fallback: return null
-    return null;
-  }
-
-  /**
-   * Handle string inputs (HTML or field expressions)
-   * Examples:
-   * - HTML: "<h3>{NAME}</h3><p>{DESCRIPTION}</p>"
-   * - Field name: "NAME" or "DESCRIPTION"
-   */
-  private static createTemplateFromString(
-    template: string,
-    attributes?: Record<string, any>
-  ): PopupTemplate {
-    // Detect if it's a simple field reference or HTML
-    const isFieldName = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(template.trim());
-    const isExpression = template.includes("{") && template.includes("}");
-    const isHtml = template.includes("<") && template.includes(">");
-
-    if (isFieldName) {
-      // Simple field reference: "NAME" → display that field
-      return new PopupTemplate({
-        title: `{${template}}`,
-        content: [
-          {
-            type: "fields",
-            fieldInfos: [{ fieldName: template }]
-          }
-        ]
-      });
-    }
-
-    if (isHtml || isExpression) {
-      // HTML or ArcGIS expression: wrap in text content
-      return new PopupTemplate({
-        title: "Feature Details",
-        content: [
-          {
-            type: "text",
-            text: template
-          }
-        ]
-      });
-    }
-
-    // Fallback: treat as plain text
-    return new PopupTemplate({
-      title: "Feature Details",
-      content: [{ type: "text", text: template }]
-    });
-  }
-
-  /**
-   * Handle object inputs (full PopupTemplate config)
-   */
-  private static createTemplateFromObject(
-    config: PopupTemplateConfig
-  ): PopupTemplate {
-    // Validate required fields
-    const title = this.normalizeTitle(config.title);
-    const content = this.normalizeContent(config.content);
-
+    
     return new PopupTemplate({
       title,
-      content,
-      fieldInfos: config.fieldInfos || [],
-      overwriteActionFilter: config.overwriteActionFilter ?? true,
-      actions: config.actions || []
+      content: [{ type: "text", text: htmlContent }]
     });
   }
 
-  /**
-   * Normalize title: can be string or { expression/value } object
-   */
-  private static normalizeTitle(
-    title?: string | { expression?: string; value?: string }
-  ): string {
-    if (!title) return "Feature Details";
-    
-    if (typeof title === "string") {
-      return title;
-    }
+  // 👇 EXISTING: Handle title/content object
+  const title = this.normalizeTitle(config.title);
+  const content = this.normalizeContent(config.content);
 
-    if (typeof title === "object") {
-      return title.expression || title.value || "Feature Details";
-    }
-
-    return "Feature Details";
-  }
-
-  /**
-   * Normalize content: can be string or array of content blocks
-   */
-  private static normalizeContent(
-    content?: string | PopupContent[]
-  ): PopupContent[] {
-    if (!content) {
-      return [{ type: "fields" }]; // Default: show all fields
-    }
-
-    if (typeof content === "string") {
-      // String → wrap in text block
-      return [{ type: "text", text: content }];
-    }
-
-    if (Array.isArray(content)) {
-      // Already an array → validate each block
-      return content.map(block => this.validateContentBlock(block));
-    }
-
-    return [{ type: "fields" }];
-  }
-
-  /**
-   * Validate and clean individual content blocks
-   */
-  private static validateContentBlock(block: any): PopupContent {
-    const validTypes = ["text", "fields", "media", "attachments", "expression"];
-
-    return {
-      type: validTypes.includes(block.type) ? block.type : "text",
-      text: block.text || undefined,
-      value: block.value || undefined,
-      expression: block.expression || undefined,
-      fieldInfos: block.fieldInfos || undefined
-    };
-  }
+  return new PopupTemplate({
+    title,
+    content,
+    fieldInfos: config.fieldInfos || [],
+    overwriteActionFilter: config.overwriteActionFilter ?? true,
+    actions: config.actions || []
+  });
 }
-
-/**
- * Integration into arc-geojson-layer component
- * Usage example:
- */
-export class ArcGeojsonLayerPopupIntegration {
-  /**
-   * Call this when feature is clicked
-   */
-  static setupPopupOnGraphic(
-    graphic: any,
-    infoTemplate: string | PopupTemplateConfig | null | undefined,
-    view: any
-  ) {
-    const popupTemplate = PopupTemplateResolver.resolveTemplate(
-      infoTemplate,
-      graphic.attributes
-    );
-
-    if (popupTemplate) {
-      graphic.popupTemplate = popupTemplate;
-      
-      // Optional: open popup on click
-      if (view) {
-        view.popup.open({
-          features: [graphic],
-          location: graphic.geometry
-        });
-      }
-    }
-  }
-
-  /**
-   * Batch apply template to multiple graphics
-   */
-  static applyTemplateToGraphics(
-    graphics: any[],
-    infoTemplate: string | PopupTemplateConfig | null | undefined
-  ) {
-    const popupTemplate = PopupTemplateResolver.resolveTemplate(infoTemplate);
-
-    if (popupTemplate) {
-      graphics.forEach(graphic => {
-        graphic.popupTemplate = popupTemplate;
-      });
-    }
-  }
-}
-
-/**
- * Common templates for quick reference
- */
-export const COMMON_TEMPLATES = {
-  // Show all fields in a fields list
-  DEFAULT: null,
-
-  // Simple single-field display
-  simpleField: (fieldName: string): PopupTemplateConfig => ({
-    title: `{${fieldName}}`,
-    content: [{ type: "fields", fieldInfos: [{ fieldName }] }]
-  }),
-
-  // Two-field display
-  twoFields: (titleField: string, contentField: string): PopupTemplateConfig => ({
-    title: `{${titleField}}`,
-    content: [{ type: "fields", fieldInfos: [{ fieldName: contentField }] }]
-  }),
-
-  // HTML table from all attributes
-  htmlTable: (): PopupTemplateConfig => ({
-    title: "Feature Details",
-    content: [
-      {
-        type: "text",
-        text: "<table style='width:100%'><tbody>{*}</tbody></table>"
-      }
-    ]
-  }),
-
-  // Expression-based title
-  expressionTitle: (expr: string): PopupTemplateConfig => ({
-    title: { expression: expr },
-    content: [{ type: "fields" }]
-  })
-};
