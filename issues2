@@ -1,47 +1,26 @@
-if (popupEl) {
-  popupEl.location = location;
-  popupEl.features = [graphic];
-  popupEl.open = true;
-  
-  // 👇 ADD THIS: Force popup container to fit content
-  setTimeout(() => {
-    this.resizePopupToContent(popupEl);
-  }, 300);
-}
-
-
 private resizePopupToContent(popupEl: any): void {
   try {
-    // Walk through Shadow DOM and resize containers
+    // Only target SPECIFIC outer containers, not all elements
     const walkAndResize = (el: Element | ShadowRoot | null) => {
       if (!el) return;
       
-      // Get shadow root if it's an element
       const root = (el as any).shadowRoot || el;
       
-      // Find and fix all containers
-      const selectors = [
-        '.container',
-        '.content-container', 
-        '.content-element',
-        '.content-feature',
-        '.main',
-        '.root',
-        'calcite-flow-item',
-        'arcgis-feature',
-        'arcgis-feature-content'
+      // ONLY resize the outermost container, NOT inner content
+      const outerContainers = [
+        'arcgis-feature-content',  // The main content wrapper
+        'calcite-flow-item'         // The flow item wrapper
       ];
       
-      selectors.forEach(selector => {
+      outerContainers.forEach(selector => {
         root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
-          element.style.setProperty('flex', '0 0 auto', 'important');
           element.style.setProperty('height', 'auto', 'important');
           element.style.setProperty('min-height', '0', 'important');
-          element.style.setProperty('max-height', 'none', 'important');
+          // 👇 DO NOT set flex: 0 0 auto - keeps proper layout
         });
       });
       
-      // Recurse into all children's shadow roots
+      // Recurse into shadow DOM
       root.querySelectorAll?.('*').forEach((child: Element) => {
         if ((child as any).shadowRoot) {
           walkAndResize(child);
@@ -54,3 +33,52 @@ private resizePopupToContent(popupEl: any): void {
     console.warn("[up-geojson-layer] resizePopupToContent failed", err);
   }
 }
+
+
+
+
+if (popupEl) {
+  popupEl.location = location;
+  popupEl.features = [graphic];
+  popupEl.open = true;
+  
+  // 👇 ADD: Listen for popup close to clear highlight
+  popupEl.addEventListener('arcgisVisibleChange', (event: any) => {
+    if (!event.target.open) {
+      this.clearFeatureHighlight();
+    }
+  });
+  
+  // Resize fix
+  setTimeout(() => {
+    this.resizePopupToContent(popupEl);
+  }, 300);
+}
+
+
+
+
+private clearFeatureHighlight(): void {
+  try {
+    // Clear the highlighted feature from the view
+    if (this.view) {
+      // Remove all highlights
+      const layerViews = this.view.allLayerViews;
+      layerViews?.forEach((layerView: any) => {
+        if (layerView.highlight) {
+          layerView.highlight = null;
+        }
+      });
+      
+      // Alternative: clear popup features
+      if (this.view.popup) {
+        (this.view.popup as any).features = [];
+      }
+    }
+  } catch (err) {
+    console.warn("[up-geojson-layer] clearFeatureHighlight failed", err);
+  }
+}
+
+
+
