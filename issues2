@@ -1,5 +1,8 @@
 private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
-  if (!this.view || !graphic?.geometry) return;
+  if (!this.view || !graphic?.geometry) {
+    this.setViewCursor("default");
+    return;
+  }
 
   if (
     this._editorOpen ||
@@ -7,42 +10,61 @@ private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void
     this._isStartingDraw ||
     this.shouldSuppressPopup()
   ) {
+    this.setViewCursor("default");
     return;
   }
 
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  if (!popupTemplate) return;
-
-  graphic.popupTemplate = popupTemplate;
-
-  const location =
-    mapPoint ??
-    UpGeosonLayer.getPopupPoint(graphic.geometry) ??
-    undefined;
-
   try {
-    this.closePopup();
-    this.view.popupEnabled = true;
+    const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
 
-    // ArcGIS 5.x safe popup API
-    if (typeof (this.view as any).openPopup === "function") {
-      await (this.view as any).openPopup({
-        features: [graphic],
-        location,
+    if (!popupTemplate) {
+      console.warn("[geojson-layer] popup skipped: popupTemplate missing", {
+        graphic,
+        attributes: graphic.attributes,
+        infoTemplate: this.infoTemplate,
       });
+      this.setViewCursor("default");
       return;
     }
 
+    graphic.popupTemplate = popupTemplate;
+
+    const location =
+      mapPoint ??
+      UpGeosonLayer.getPopupPoint(graphic.geometry) ??
+      undefined;
+
+    this.closePopup();
+
+    this.view.popupEnabled = true;
+
     const popup: any = this.view.popup;
+
     if (popup) {
       popup.features = [graphic];
       popup.location = location;
-      popup.open = true; // ✅ property, not function
+      popup.open = true;
     }
+
+    console.log("[geojson-layer] popup opened", {
+      graphic,
+      location,
+      popupTemplate,
+    });
   } catch (error) {
-    console.warn("[geojson-layer] popup open failed", error);
+    console.error("[geojson-layer] popup open failed", error);
+    this.closePopup();
+  } finally {
+    // Important: never leave map stuck in pointer/loading state
+    window.setTimeout(() => {
+      if (!this._editorOpen && !this.inDrawingMode) {
+        this.setViewCursor("default");
+      }
+    }, 100);
   }
-}
+
+
+
 
 
 
@@ -51,15 +73,29 @@ private closePopup(): void {
     const popup: any = this.view?.popup;
 
     if (popup) {
-      if (typeof popup.close === "function") {
-        popup.close();
-      }
-
       popup.open = false;
       popup.features = [];
       popup.location = null;
     }
-  } catch {}
+  } catch (error) {
+    console.warn("[geojson-layer] closePopup failed", error);
+  }
 
   this.clearPopupHighlight();
+
+  if (!this._editorOpen && !this.inDrawingMode) {
+    this.setViewCursor("default");
+  }
 }
+
+
+
+
+.catch(() => {
+  if (this._lastHoveredGraphic) {
+    this._lastHoveredGraphic = null;
+  }
+
+  this._currentCursor = "default";
+  this.setViewCursor("default");
+});
