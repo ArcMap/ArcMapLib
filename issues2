@@ -1,58 +1,59 @@
-private resizePopupToContent(popupEl: any): void {
-  try {
-    const MAX_POPUP_HEIGHT = 400; // Max height in pixels
-    
-    const walkAndFix = (el: Element | ShadowRoot | null) => {
-      if (!el) return;
-      
-      const root = (el as any).shadowRoot || el;
-      
-      // Step 1: Make ALL outer containers fit content (no min-height)
-      const containersToFit = [
-        'arcgis-feature',
-        'arcgis-feature-content',
-        'calcite-flow-item',
-        '.content-feature',
-        '.content-element',
-        '.content-container'
-      ];
-      
-      containersToFit.forEach(selector => {
-        root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
-          element.style.setProperty('height', 'auto', 'important');
-          element.style.setProperty('min-height', '0', 'important');
-          element.style.setProperty('max-height', `${MAX_POPUP_HEIGHT}px`, 'important');
-          element.style.setProperty('flex', '0 1 auto', 'important');
-        });
-      });
-      
-      // Step 2: Make INNER content containers scrollable when needed
-      const scrollContainers = [
-        '.container',
-        '.main',
-        '.root'
-      ];
-      
-      scrollContainers.forEach(selector => {
-        root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
-          element.style.setProperty('height', 'auto', 'important');
-          element.style.setProperty('min-height', '0', 'important');
-          element.style.setProperty('max-height', `${MAX_POPUP_HEIGHT}px`, 'important');
-          element.style.setProperty('overflow-y', 'auto', 'important');
-          element.style.setProperty('flex', '0 1 auto', 'important');
-        });
-      });
-      
-      // Step 3: Recurse into shadow DOM children
-      root.querySelectorAll?.('*').forEach((child: Element) => {
-        if ((child as any).shadowRoot) {
-          walkAndFix(child);
-        }
-      });
-    };
-    
-    walkAndFix(popupEl);
-  } catch (err) {
-    console.warn("[up-geojson-layer] resizePopupToContent failed", err);
+private buildPopupTemplateFromCurrent(
+  graphic: Graphic
+): PopupTemplate | null {
+  if (!graphic || !this.infoTemplate) {
+    return null;
   }
+
+  const attributes = graphic.attributes ?? {};
+
+  // Only use fields provided by user in infoTemplate
+  const configuredFields =
+    this.infoTemplate?.fieldInfos ??
+    this.infoTemplate?.fields ??
+    this.infoTemplate?.content?.fieldInfos ??
+    [];
+
+  if (!Array.isArray(configuredFields) || configuredFields.length === 0) {
+    return null;
+  }
+
+  const fieldInfos = configuredFields
+    .map((field: any) => {
+      const fieldName =
+        field.fieldName ??
+        field.name ??
+        field.key;
+
+      if (!fieldName || attributes[fieldName] === undefined || attributes[fieldName] === null) {
+        return null;
+      }
+
+      return {
+        fieldName,
+        label: field.label ?? field.title ?? fieldName,
+        visible: field.visible !== false,
+      };
+    })
+    .filter(Boolean);
+
+  if (fieldInfos.length === 0) {
+    return null;
+  }
+
+  const title =
+    this.infoTemplate?.title ??
+    this.infoTemplate?.listTitle ??
+    this.name ??
+    "Details";
+
+  return new PopupTemplate({
+    title,
+    content: [
+      {
+        type: "fields",
+        fieldInfos,
+      },
+    ],
+  });
 }
