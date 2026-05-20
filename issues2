@@ -1,35 +1,26 @@
-/* Fix arcgis-popup white shadow / empty space issue */
-arcgis-popup {
-  --calcite-popup-content-min-height: 0 !important;
-  --arcgis-popup-content-min-height: 0 !important;
-  --calcite-popup-height: auto !important;
-  box-shadow: none !important;
-}
+<style>
+  /* Fix arcgis-popup white shadow / empty space below content */
+  arcgis-popup::part(content),
+  arcgis-popup::part(main-container),
+  arcgis-popup::part(container) {
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+  }
 
-arcgis-popup::part(content),
-arcgis-popup::part(main-container),
-arcgis-popup::part(container) {
-  min-height: 0 !important;
-  height: auto !important;
-  box-shadow: none !important;
-}
+  /* Target Esri's internal popup styles */
+  .esri-popup,
+  .esri-popup__main-container,
+  .esri-popup__content,
+  .esri-popup__wrapper {
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+  }
 
-.esri-popup,
-.esri-popup__main-container,
-.esri-popup__content,
-.esri-popup__wrapper {
-  min-height: 0 !important;
-  height: auto !important;
-  box-shadow: none !important;
-}
-
-.esri-popup__content {
-  max-height: 80vh;
-  overflow-y: auto;
-}
-
-/* Remove the shadow that appears below popup */
-.esri-popup__pointer,
-.esri-popup__pointer-direction {
-  box-shadow: none !important;
-}
+  /* Override fixed heights */
+  arcgis-popup {
+    --calcite-popup-content-min-height: 0 !important;
+    height: auto !important;
+  }
+</style>
