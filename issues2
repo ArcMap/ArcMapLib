@@ -1,22 +1,31 @@
 private resizePopupToContent(popupEl: any): void {
   try {
-    // Only target SPECIFIC outer containers, not all elements
     const walkAndResize = (el: Element | ShadowRoot | null) => {
       if (!el) return;
       
       const root = (el as any).shadowRoot || el;
       
-      // ONLY resize the outermost container, NOT inner content
-      const outerContainers = [
-        'arcgis-feature-content',  // The main content wrapper
-        'calcite-flow-item'         // The flow item wrapper
+      // Fix containers - aggressive flex fix to remove shadow
+      const selectors = [
+        '.container',
+        '.content-container', 
+        '.content-element',
+        '.content-feature',
+        '.main',
+        '.root',
+        'calcite-flow-item',
+        'arcgis-feature',
+        'arcgis-feature-content'
       ];
       
-      outerContainers.forEach(selector => {
+      selectors.forEach(selector => {
         root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
+          element.style.setProperty('flex', '0 0 auto', 'important');
           element.style.setProperty('height', 'auto', 'important');
           element.style.setProperty('min-height', '0', 'important');
-          // 👇 DO NOT set flex: 0 0 auto - keeps proper layout
+          element.style.setProperty('max-height', 'none', 'important');
+          // 👇 ADD: Preserve padding so content isn't stuck to left
+          element.style.setProperty('padding', '12px 16px', 'important');
         });
       });
       
@@ -35,50 +44,36 @@ private resizePopupToContent(popupEl: any): void {
 }
 
 
-
-
-if (popupEl) {
-  popupEl.location = location;
-  popupEl.features = [graphic];
-  popupEl.open = true;
+private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
   
-  // 👇 ADD: Listen for popup close to clear highlight
-  popupEl.addEventListener('arcgisVisibleChange', (event: any) => {
-    if (!event.target.open) {
-      this.clearFeatureHighlight();
-    }
-  });
+  // 👇 ADD THIS AT THE TOP: Clear any previous highlights first
+  this.clearAllHighlights();
   
-  // Resize fix
-  setTimeout(() => {
-    this.resizePopupToContent(popupEl);
-  }, 300);
+  // ... rest of existing showGraphicPopup code
 }
 
 
 
-
-private clearFeatureHighlight(): void {
+private clearAllHighlights(): void {
   try {
-    // Clear the highlighted feature from the view
-    if (this.view) {
-      // Remove all highlights
-      const layerViews = this.view.allLayerViews;
-      layerViews?.forEach((layerView: any) => {
-        if (layerView.highlight) {
-          layerView.highlight = null;
-        }
-      });
-      
-      // Alternative: clear popup features
-      if (this.view.popup) {
-        (this.view.popup as any).features = [];
+    if (!this.view) return;
+    
+    // Clear all layer view highlights
+    this.view.allLayerViews?.forEach((layerView: any) => {
+      if (layerView.highlight && typeof layerView.highlight === 'function') {
+        // Some layer views have highlight as a method
       }
+      // Remove highlight property
+      if (layerView._highlightIds) {
+        layerView._highlightIds.clear?.();
+      }
+    });
+    
+    // Clear popup features (clears blue selection)
+    if (this.view.popup) {
+      (this.view.popup as any).features = [];
     }
   } catch (err) {
-    console.warn("[up-geojson-layer] clearFeatureHighlight failed", err);
+    console.warn("[up-geojson-layer] clearAllHighlights failed", err);
   }
 }
-
-
-
