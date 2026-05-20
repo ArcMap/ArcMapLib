@@ -1,96 +1,39 @@
-/* Legacy ArcGIS Popup — force auto-height instead of fixed/min height */
-.esri-popup__main-container {
-  min-height: 0 !important;
-  height: auto !important;
-  max-height: 80vh !important;
-}
+// ============================================================================
+// REPLACEMENT: Click handler in bindViewEvents
+// CHANGE: Use existing getClearID() to get this layer's ID.
+// ============================================================================
 
-.esri-popup__content {
-  min-height: 0 !important;
-  height: auto !important;
-  flex: 0 0 auto !important;
-  overflow: visible !important;
-}
+const clickHandler = async (evt: any) => {
+  // CHANGE: Early guard — skip if already opening or in editor mode
+  if (this._popupOpening || this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
+    return;
+  }
 
-.esri-popup__feature-menu-viewport {
-  min-height: 0 !important;
-  height: auto !important;
-}
+  const graphic = await this.getHitGraphic(evt);
+  if (!graphic) {
+    return;
+  }
 
-.esri-features__content-feature,
-.esri-feature,
-.esri-feature__main-container,
-.esri-feature__content,
-.esri-feature-content {
-  min-height: 0 !important;
-  height: auto !important;
-  flex: 0 0 auto !important;
-  overflow: visible !important;
-}
+  // CHANGE: CRITICAL — only handle clicks on THIS layer's graphics.
+  // Get this instance's layer ID via getClearID() and compare.
+  const thisLayerId = this.getClearID();
+  const graphicLayerId = graphic.layer?.id ?? (graphic as any).layerId;
+  
+  if (thisLayerId && graphicLayerId !== thisLayerId) {
+    console.debug(
+      `[arc-geojson-layer] graphic belongs to layer ${graphicLayerId}, ` +
+      `but this instance handles ${thisLayerId} — skipping`,
+    );
+    return;
+  }
 
-.esri-popup.esri-widget {
-  min-height: 0 !important;
-  height: auto !important;
-}
-
-
-private async showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point,
-): Promise<void> {
-  if (this._popupOpening) return;
-
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
+  if (this.shouldSuppressPopup()) {
     this.closePopup();
     return;
   }
 
-  if (!graphic?.geometry || !this.view?.popup) return;
+  // Safe to open popup — this graphic definitely belongs to this layer
+  await this.showGraphicPopup(graphic, evt.mapPoint);
+};
 
-  const location =
-    mapPoint ?? UpGeojsonLayer.getPopupPoint(graphic.geometry) ?? undefined;
-  if (!location) return;
-
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  if (!popupTemplate) { this.closePopup(); return; }
-
-  this._popupOpening = true;
-  try {
-    graphic.popupTemplate = popupTemplate;
-
-    const popup = this.view.popup as any;
-
-    if (popup.visible) {
-      popup.visible = false;
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-    }
-
-    popup.location = location;
-    popup.features = [graphic];
-    popup.visible = true;
-    popup.open = true;
-  } catch (err) {
-    console.warn("[arc-geojson-layer] showGraphicPopup failed", err);
-  } finally {
-    this._popupOpening = false;
-  }
-}
-
-
-private closePopup(): void {
-  try {
-    const popup = this.view?.popup as any;
-    if (popup) {
-      popup.visible = false;
-      popup.open = false;
-      popup.features = [];
-      popup.selectedFeature = null;
-    }
-  } catch {}
-  this.clearPopupHighlight();
-}
+this.view.on("click", clickHandler);
