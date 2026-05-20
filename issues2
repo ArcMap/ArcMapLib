@@ -13,6 +13,13 @@ private buildPopupTemplateFromCurrent(
 
   const attributes = graphic.attributes ?? {};
 
+  // Clean old temporary popup fields so they do not keep increasing on every click
+  Object.keys(attributes).forEach((key) => {
+    if (key.startsWith("popup_field_")) {
+      delete attributes[key];
+    }
+  });
+
   const replaceTokens = (value: string): string => {
     return value.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
       const attributeValue = attributes[key.trim()];
@@ -35,65 +42,43 @@ private buildPopupTemplateFromCurrent(
       : String(rawTitle);
   };
 
-  const stripHtml = (value: string): string => {
-    const div = document.createElement("div");
-    div.innerHTML = value;
-    return (div.textContent || div.innerText || "").trim();
+  const getText = (element: Element | null): string => {
+    return (element?.textContent ?? "").replace(/\s+/g, " ").trim();
   };
 
-  const buildFieldsFromDetailsHtml = (detailsHtml: string): any[] => {
-    const resolvedHtml = replaceTokens(detailsHtml);
+  const buildFieldsFromHtml = (htmlTemplate: string): any[] => {
+    const resolvedHtml = replaceTokens(htmlTemplate);
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = resolvedHtml;
 
-    const fieldInfos: any[] = [];
-    const usedNames = new Set<string>();
-
-    const rows = wrapper.querySelectorAll(
-      ".info-template-data, div, li, p, span"
+    const rows = Array.from(
+      wrapper.querySelectorAll(".info-template-data")
     );
 
-    rows.forEach((row: Element, index: number) => {
-      const labelElement =
-        row.querySelector(".info-template-label") ??
-        row.querySelector("label");
+    const fieldInfos: any[] = [];
+    const usedLabels = new Set<string>();
 
-      const valueElement =
-        row.querySelector(".info-template-value") ??
-        row.querySelector("value");
+    rows.forEach((row, index) => {
+      const label = getText(row.querySelector(".info-template-label"))
+        .replace(/:$/, "")
+        .trim();
 
-      let label = labelElement
-        ? stripHtml(labelElement.innerHTML)
-        : "";
-
-      let value = valueElement
-        ? stripHtml(valueElement.innerHTML)
-        : "";
+      const value = getText(row.querySelector(".info-template-value"));
 
       if (!label || !value) {
-        const text = stripHtml(row.innerHTML);
-
-        if (text.includes(":")) {
-          const parts = text.split(":");
-          label = parts.shift()?.trim() ?? "";
-          value = parts.join(":").trim();
-        }
-      }
-
-      if (!label || value === undefined || value === null || value === "") {
         return;
       }
 
-      let fieldName = `popup_field_${index}`;
-
-      while (usedNames.has(fieldName)) {
-        fieldName = `popup_field_${index}_${usedNames.size}`;
+      // Prevent duplicate Name / ID / Name / ID rows
+      const uniqueKey = `${label}::${value}`;
+      if (usedLabels.has(uniqueKey)) {
+        return;
       }
+      usedLabels.add(uniqueKey);
 
-      usedNames.add(fieldName);
-
-      graphic.attributes[fieldName] = value;
+      const fieldName = `popup_field_${fieldInfos.length}`;
+      attributes[fieldName] = value;
 
       fieldInfos.push({
         fieldName,
@@ -109,8 +94,6 @@ private buildPopupTemplateFromCurrent(
     let fieldInfos: any[] = [];
 
     if (Array.isArray(this.infoTemplate?.fieldInfos)) {
-      console.log("[geojson-layer] popup using user fieldInfos");
-
       fieldInfos = this.infoTemplate.fieldInfos
         .map((field: any) => {
           const fieldName = field.fieldName ?? field.name ?? field.key;
@@ -127,25 +110,16 @@ private buildPopupTemplateFromCurrent(
         })
         .filter(Boolean);
     } else if (typeof this.infoTemplate?.details === "string") {
-      console.log("[geojson-layer] popup converting details string to fields table");
-
-      fieldInfos = buildFieldsFromDetailsHtml(this.infoTemplate.details);
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate.details);
     } else if (typeof this.infoTemplate?.details === "function") {
-      console.log("[geojson-layer] popup converting details function result to fields table");
-
       const html = this.infoTemplate.details(graphic);
-
       if (typeof html === "string") {
-        fieldInfos = buildFieldsFromDetailsHtml(html);
+        fieldInfos = buildFieldsFromHtml(html);
       }
     } else if (typeof this.infoTemplate?.content === "string") {
-      console.log("[geojson-layer] popup converting content string to fields table");
-
-      fieldInfos = buildFieldsFromDetailsHtml(this.infoTemplate.content);
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate.content);
     } else if (typeof this.infoTemplate === "string") {
-      console.log("[geojson-layer] popup converting plain string to fields table");
-
-      fieldInfos = buildFieldsFromDetailsHtml(this.infoTemplate);
+      fieldInfos = buildFieldsFromHtml(this.infoTemplate);
     }
 
     if (!fieldInfos.length) {
@@ -155,6 +129,8 @@ private buildPopupTemplateFromCurrent(
       });
       return null;
     }
+
+    console.log("[geojson-layer] popup resolved fieldInfos", fieldInfos);
 
     return new PopupTemplate({
       title: resolveTitle(),
