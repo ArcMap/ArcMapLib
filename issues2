@@ -1,102 +1,34 @@
-private createHtmlPopupTemplate(
-  title: string,
-  htmlContent: string
-): PopupTemplate {
+I am developing a LitElement ArcGIS GeoJSON layer library and integrating it into an Angular app. Do not rename existing methods, fields, or public API names.
 
-  return new PopupTemplate({
-    title: title ?? "",
-    outFields: ["*"],
+Important names to preserve:
+- eventHandles
+- getHitGraphic(...)
+- bindViewEvents(...)
+- activateGraphicsEditor(...)
+- handleEditorDoubleClick(...)
+- setMapCursor(...)
+- emitLayerEvent(eventName, feature, graphic, extraData)
+- showGraphicPopup(...)
+- openPopup(...)
+- closePopup(...)
+- enableInfoPopupWindow(...)
 
-    content: () => {
-      const container = document.createElement("div");
+Problem:
+When integrated into Angular, clicking a geofence polygon/circle does not show the info template popup. The Angular infoTemplate builder function is being called and HTML is printed in console, but popup is not visible. Cursor also stays default instead of pointer on geofence hover. Popup must appear on single click only. Popup must not appear when editor mode is on. If multiple GeoJSON layers overlap, the top layer should show its popup, not the background layer.
 
-      container.className = "arc-popup-wrapper";
+Task:
+1. Inspect the current geojson-layer.ts implementation.
+2. Fix hitTest logic so getHitGraphic(...) reliably detects polygon/circle fill, not only outline.
+3. Ignore labelLayer and sketchLayer in hitTest.
+4. Prevent background layer popup when another layer is above it.
+5. Fix bindViewEvents(...) without removing existing behavior.
+6. Keep single click popup behavior when enableUserEdit is false.
+7. Keep single click editor behavior when enableUserEdit is true.
+8. Ensure popup is suppressed during editor/drawing mode.
+9. Fix popup rendering fully inside the library, without Angular code changes.
+10. Do not use UPI/up-map naming in new code.
+11. Do not rename existing variables/methods unless absolutely required.
+12. Give complete updated function bodies only, not small snippets.
 
-      container.style.width = "100%";
-      container.style.height = "auto";
-      container.style.background = "white";
-      container.style.padding = "0";
-      container.style.margin = "0";
-      container.style.overflow = "auto";
-
-      // IMPORTANT
-      // Angular sends raw HTML
-      container.innerHTML = htmlContent || "";
-
-      console.log(
-        "[arc-geojson-layer] popup content attached"
-      );
-
-      return container;
-    }
-  });
-}
-
-
-
-private async showGraphicPopup(
-    graphic: Graphic,
-    mapPoint?: Point
-): Promise<void> {
-
-    if (
-        !this.view ||
-        !graphic ||
-        !graphic.geometry ||
-        this.enableUserEdit ||
-        this._editorOpen ||
-        this._inDrawingMode ||
-        this.shouldSuppressPopup()
-    ) {
-        return;
-    }
-
-    try {
-
-        const popupTemplate =
-            this.buildPopupTemplateForCurrent(graphic);
-
-        if (!popupTemplate) {
-            return;
-        }
-
-        // IMPORTANT:
-        // DON'T clone graphic
-        // ArcGIS loses popup associations
-
-        graphic.popupTemplate = popupTemplate;
-
-        const popupLocation =
-            mapPoint ??
-            UpGeojsonLayer.getPopupPoint(
-                graphic.geometry
-            );
-
-        if (!popupLocation) {
-            return;
-        }
-
-        await this.view.openPopup({
-            location: popupLocation,
-            features: [graphic]
-        });
-
-        console.log(
-            "[arc-geojson-layer] popup shown"
-        );
-
-    } catch (e) {
-
-        console.error(
-            "[arc-geojson-layer] popup failed",
-            e
-        );
-    }
-}
-
-
-if (graphic) {
-    this.setMapCursor("pointer");
-} else {
-    this.setMapCursor("default");
-}
+Before editing, explain which functions need changes and why.
+Then provide full copy-paste replacements for only those functions.
