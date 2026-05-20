@@ -1,79 +1,58 @@
 private resizePopupToContent(popupEl: any): void {
   try {
-    const walkAndResize = (el: Element | ShadowRoot | null) => {
+    const MAX_POPUP_HEIGHT = 400; // Max height in pixels
+    
+    const walkAndFix = (el: Element | ShadowRoot | null) => {
       if (!el) return;
       
       const root = (el as any).shadowRoot || el;
       
-      // Fix containers - aggressive flex fix to remove shadow
-      const selectors = [
-        '.container',
-        '.content-container', 
-        '.content-element',
-        '.content-feature',
-        '.main',
-        '.root',
-        'calcite-flow-item',
+      // Step 1: Make ALL outer containers fit content (no min-height)
+      const containersToFit = [
         'arcgis-feature',
-        'arcgis-feature-content'
+        'arcgis-feature-content',
+        'calcite-flow-item',
+        '.content-feature',
+        '.content-element',
+        '.content-container'
       ];
       
-      selectors.forEach(selector => {
+      containersToFit.forEach(selector => {
         root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
-          element.style.setProperty('flex', '0 0 auto', 'important');
           element.style.setProperty('height', 'auto', 'important');
           element.style.setProperty('min-height', '0', 'important');
-          element.style.setProperty('max-height', 'none', 'important');
-          // 👇 ADD: Preserve padding so content isn't stuck to left
-          element.style.setProperty('padding', '12px 16px', 'important');
+          element.style.setProperty('max-height', `${MAX_POPUP_HEIGHT}px`, 'important');
+          element.style.setProperty('flex', '0 1 auto', 'important');
         });
       });
       
-      // Recurse into shadow DOM
+      // Step 2: Make INNER content containers scrollable when needed
+      const scrollContainers = [
+        '.container',
+        '.main',
+        '.root'
+      ];
+      
+      scrollContainers.forEach(selector => {
+        root.querySelectorAll?.(selector).forEach((element: HTMLElement) => {
+          element.style.setProperty('height', 'auto', 'important');
+          element.style.setProperty('min-height', '0', 'important');
+          element.style.setProperty('max-height', `${MAX_POPUP_HEIGHT}px`, 'important');
+          element.style.setProperty('overflow-y', 'auto', 'important');
+          element.style.setProperty('flex', '0 1 auto', 'important');
+        });
+      });
+      
+      // Step 3: Recurse into shadow DOM children
       root.querySelectorAll?.('*').forEach((child: Element) => {
         if ((child as any).shadowRoot) {
-          walkAndResize(child);
+          walkAndFix(child);
         }
       });
     };
     
-    walkAndResize(popupEl);
+    walkAndFix(popupEl);
   } catch (err) {
     console.warn("[up-geojson-layer] resizePopupToContent failed", err);
-  }
-}
-
-
-private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
-  
-  // 👇 ADD THIS AT THE TOP: Clear any previous highlights first
-  this.clearAllHighlights();
-  
-  // ... rest of existing showGraphicPopup code
-}
-
-
-
-private clearAllHighlights(): void {
-  try {
-    if (!this.view) return;
-    
-    // Clear all layer view highlights
-    this.view.allLayerViews?.forEach((layerView: any) => {
-      if (layerView.highlight && typeof layerView.highlight === 'function') {
-        // Some layer views have highlight as a method
-      }
-      // Remove highlight property
-      if (layerView._highlightIds) {
-        layerView._highlightIds.clear?.();
-      }
-    });
-    
-    // Clear popup features (clears blue selection)
-    if (this.view.popup) {
-      (this.view.popup as any).features = [];
-    }
-  } catch (err) {
-    console.warn("[up-geojson-layer] clearAllHighlights failed", err);
   }
 }
