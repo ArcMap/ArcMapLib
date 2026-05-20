@@ -1,144 +1,96 @@
-private fixPopupHeight(popupEl: any): void {
-  if (!popupEl) return;
+/* Legacy ArcGIS Popup — force auto-height instead of fixed/min height */
+.esri-popup__main-container {
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: 80vh !important;
+}
 
-  if (this._popupHeightObserver) {
-    this._popupHeightObserver.disconnect();
-    this._popupHeightObserver = null;
+.esri-popup__content {
+  min-height: 0 !important;
+  height: auto !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+}
+
+.esri-popup__feature-menu-viewport {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+.esri-features__content-feature,
+.esri-feature,
+.esri-feature__main-container,
+.esri-feature__content,
+.esri-feature-content {
+  min-height: 0 !important;
+  height: auto !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+}
+
+.esri-popup.esri-widget {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+
+private async showGraphicPopup(
+  graphic: Graphic,
+  mapPoint?: Point,
+): Promise<void> {
+  if (this._popupOpening) return;
+
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    this.closePopup();
+    return;
   }
 
-  // CHANGE: Wait for component to actually render before walking.
-  // The shadowRoot can exist but be empty until first render completes.
-  const waitForRender = async (): Promise<boolean> => {
-    // Wait for componentOnReady if available
-    if (typeof popupEl.componentOnReady === "function") {
-      try { await popupEl.componentOnReady(); } catch {}
+  if (!graphic?.geometry || !this.view?.popup) return;
+
+  const location =
+    mapPoint ?? UpGeojsonLayer.getPopupPoint(graphic.geometry) ?? undefined;
+  if (!location) return;
+
+  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+  if (!popupTemplate) { this.closePopup(); return; }
+
+  this._popupOpening = true;
+  try {
+    graphic.popupTemplate = popupTemplate;
+
+    const popup = this.view.popup as any;
+
+    if (popup.visible) {
+      popup.visible = false;
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
     }
 
-    // Poll for shadow DOM to actually have children
-    for (let i = 0; i < 30; i++) {
-      const root = popupEl.shadowRoot;
-      if (root && root.children.length > 0) {
-        // Also check that calcite components inside have rendered
-        const calciteEl = root.querySelector("calcite-shell-panel, calcite-panel");
-        if (calciteEl) return true;
-      }
-      await new Promise((r) => setTimeout(r, 50));
+    popup.location = location;
+    popup.features = [graphic];
+    popup.visible = true;
+    popup.open = true;
+  } catch (err) {
+    console.warn("[arc-geojson-layer] showGraphicPopup failed", err);
+  } finally {
+    this._popupOpening = false;
+  }
+}
+
+
+private closePopup(): void {
+  try {
+    const popup = this.view?.popup as any;
+    if (popup) {
+      popup.visible = false;
+      popup.open = false;
+      popup.features = [];
+      popup.selectedFeature = null;
     }
-    return false;
-  };
-
-  const applyFix = () => {
-    const root = popupEl.shadowRoot;
-    if (!root) return;
-
-    const queue: (Element | ShadowRoot)[] = [root];
-    let safety = 0;
-
-    while (queue.length > 0 && safety < 500) {
-      safety++;
-      const node = queue.shift()!;
-      let children: NodeListOf<Element>;
-      try {
-        children = (node as ParentNode).querySelectorAll(":scope > *");
-      } catch {
-        continue;
-      }
-
-      children.forEach((el) => {
-        try {
-          const htmlEl = el as HTMLElement;
-          const tag = el.tagName.toLowerCase();
-
-          if (htmlEl.classList?.contains("arc-geojson-popup-wrapper")) return;
-          if (htmlEl.classList?.contains("arc-geojson-popup-content")) return;
-
-          if (
-            tag === "calcite-icon" ||
-            tag === "calcite-action" ||
-            tag === "calcite-button" ||
-            tag === "slot"
-          ) {
-            queue.push(el);
-            return;
-          }
-
-          htmlEl.style.setProperty("block-size", "auto", "important");
-          htmlEl.style.setProperty("height", "auto", "important");
-          htmlEl.style.setProperty("min-block-size", "0", "important");
-          htmlEl.style.setProperty("min-height", "0", "important");
-          htmlEl.style.setProperty("max-block-size", "none", "important");
-          htmlEl.style.setProperty("max-height", "none", "important");
-          htmlEl.style.setProperty("flex", "0 0 auto", "important");
-          htmlEl.style.setProperty("overflow", "visible", "important");
-
-          queue.push(el);
-          const sr = (el as any).shadowRoot;
-          if (sr) queue.push(sr);
-        } catch { /* skip */ }
-      });
-    }
-  };
-
-  const dumpTree = () => {
-    const root = popupEl.shadowRoot;
-    if (!root) { console.log("[popup-dump] no shadowRoot"); return; }
-    console.log("=== POPUP SHADOW TREE ===");
-    const popupRect = popupEl.getBoundingClientRect();
-    console.log(`<arcgis-popup> h=${Math.round(popupRect.height)}`);
-    const walk = (node: Element | ShadowRoot, depth: number) => {
-      const children = (node as ParentNode).querySelectorAll(":scope > *");
-      children.forEach((el) => {
-        const tag = el.tagName.toLowerCase();
-        const cls = el.getAttribute("class") || "";
-        const rect = (el as HTMLElement).getBoundingClientRect();
-        const cs = getComputedStyle(el as HTMLElement);
-        console.log(
-          `${"  ".repeat(depth)}${tag}.${cls} ` +
-          `h=${Math.round(rect.height)} bs=${cs.blockSize} ` +
-          `minH=${cs.minHeight} flex=${cs.flex}`,
-        );
-        walk(el, depth + 1);
-        const sr = (el as any).shadowRoot;
-        if (sr) {
-          console.log(`${"  ".repeat(depth + 1)}#shadow-root`);
-          walk(sr, depth + 2);
-        }
-      });
-    };
-    walk(root, 1);
-    console.log("=== END ===");
-  };
-
-  // CHANGE: Wait for render, THEN walk and dump
-  void (async () => {
-    const ready = await waitForRender();
-    if (!ready) {
-      console.warn("[arc-geojson-layer] popup never rendered children");
-      return;
-    }
-    applyFix();
-    requestAnimationFrame(() => {
-      applyFix();
-      setTimeout(applyFix, 50);
-      setTimeout(applyFix, 200);
-      setTimeout(() => {
-        applyFix();
-        dumpTree(); // NOW dump — after render is confirmed
-      }, 500);
-    });
-
-    try {
-      if (popupEl.shadowRoot) {
-        this._popupHeightObserver = new MutationObserver(() => {
-          try { applyFix(); } catch {}
-        });
-        this._popupHeightObserver.observe(popupEl.shadowRoot, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ["style", "class"],
-        });
-      }
-    } catch {}
-  })();
+  } catch {}
+  this.clearPopupHighlight();
 }
