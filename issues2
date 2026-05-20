@@ -1,3 +1,51 @@
+private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
+  if (!this.view || !graphic?.geometry) return;
+
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    return;
+  }
+
+  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+  if (!popupTemplate) return;
+
+  graphic.popupTemplate = popupTemplate;
+
+  const location =
+    mapPoint ??
+    UpGeosonLayer.getPopupPoint(graphic.geometry) ??
+    undefined;
+
+  try {
+    this.closePopup();
+    this.view.popupEnabled = true;
+
+    // ArcGIS 5.x safe popup API
+    if (typeof (this.view as any).openPopup === "function") {
+      await (this.view as any).openPopup({
+        features: [graphic],
+        location,
+      });
+      return;
+    }
+
+    const popup: any = this.view.popup;
+    if (popup) {
+      popup.features = [graphic];
+      popup.location = location;
+      popup.open = true; // ✅ property, not function
+    }
+  } catch (error) {
+    console.warn("[geojson-layer] popup open failed", error);
+  }
+}
+
+
+
 private closePopup(): void {
   try {
     const popup: any = this.view?.popup;
@@ -9,6 +57,7 @@ private closePopup(): void {
 
       popup.open = false;
       popup.features = [];
+      popup.location = null;
     }
   } catch {}
 
