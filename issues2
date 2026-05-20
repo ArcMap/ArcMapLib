@@ -7,267 +7,232 @@ private bindViewEvents(): void {
   this.setupPopupCloseWatcher();
 
   let clickTimer: any = null;
-  let hoveredGraphic: Graphic | null = null;
 
-  //----------------------------------------------------------
-  // helper
-  //----------------------------------------------------------
-
-  const getTopGraphic = async (evt: any): Promise<Graphic | null> => {
-    if (!this.view) return null;
-
-    const hit = await this.view.hitTest(evt);
-
-    if (!hit?.results?.length) {
-      return null;
+  const clickHandle = this.view.on("click", async (evt: any) => {
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      return;
     }
 
-    const results = hit.results.filter((r: any) => {
-      const g = r.graphic;
+    clickTimer = setTimeout(async () => {
+      clickTimer = null;
 
-      if (!g) return false;
-
-      const layerId =
-        g.layer?.id ?? "";
-
-      // ignore labels/sketch layer
-      if (
-        layerId.includes("-labels") ||
-        layerId.includes("-sketch")
-      ) {
-        return false;
+      const graphic = await this.getHitGraphic(evt);
+      if (!graphic) {
+        return;
       }
 
-      // IMPORTANT:
-      // only allow this layer graphics
-      return g.layer === this.featureLayer;
-    });
-
-    return results[0]?.graphic ?? null;
-  };
-
-  //----------------------------------------------------------
-  // SINGLE CLICK
-  //----------------------------------------------------------
-
-  const clickHandle = this.view.on(
-    "click",
-    async (evt: any) => {
-
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-      }
-
-      clickTimer = setTimeout(async () => {
-
-        clickTimer = null;
-
-        const graphic =
-          await getTopGraphic(evt);
-
-        if (!graphic) {
-
-          this.view?.popup?.close();
-
-          return;
-        }
-
-        //---------------------------------------
-        // emit event
-        //---------------------------------------
-
-        this.emitLayerEvent(
-          "layerClick",
-          this.graphicToGeoJsonFeature(
-            graphic
-          ),
-          graphic,
-          {
-            coordinates: {
-              latitude:
-                evt.mapPoint?.latitude ?? 0,
-              longitude:
-                evt.mapPoint?.longitude ?? 0
-            },
-            attributes:
-              graphic.attributes ?? {}
-          }
-        );
-
-        /*
-         IMPORTANT RULE:
-
-         enableUserEdit=true
-             single click => editor
-
-         popup must not open
-        */
-
-        if (this.enableUserEdit) {
-
-          this.view.popup.close();
-
-          this._suppressPopupUntil =
-            Date.now() + 1500;
-
-          await this.activateGraphicEditor(
-            graphic
-          );
-
-          return;
-        }
-
-        /*
-         popup blocked while editing
-        */
-
-        if (
-          this.shouldSuppressPopup()
-        ) {
-          return;
-        }
-
-        /*
-         popup template exists
-        */
-
-        if (
-          this.infoTemplate ||
-          graphic.popupTemplate
-        ) {
-
-          await this.openPopup(
-            graphic
-          );
-        }
-
-      }, 200);
-    }
-  );
-
-  //----------------------------------------------------------
-  // DOUBLE CLICK
-  //----------------------------------------------------------
-
-  const dblClickHandle =
-    this.view.on(
-      "double-click",
-      async (evt: any) => {
-
-        evt.stopPropagation();
-
-        if (clickTimer) {
-
-          clearTimeout(clickTimer);
-
-          clickTimer = null;
-        }
-
-        const graphic =
-          await getTopGraphic(evt);
-
-        if (!graphic) return;
-
-        this.emitLayerEvent(
-          "doubleClick",
-          this.graphicToGeoJsonFeature(
-            graphic
-          ),
-          graphic,
-          {
-            coordinates: {
-              latitude:
-                evt.mapPoint?.latitude ?? 0,
-              longitude:
-                evt.mapPoint?.longitude ?? 0
-            },
-            attributes:
-              graphic.attributes ?? {}
-          }
-        );
-
-      }
-    );
-
-    //----------------------------------------------------------
-    // POINTER MOVE
-    //----------------------------------------------------------
-
-    const moveHandle =
-      this.view.on(
-        "pointer-move",
-        async (evt: any) => {
-
-          const hitGraphic =
-            await getTopGraphic(evt);
-
-          /*
-            mouse out
-          */
-
-          if (
-            hoveredGraphic &&
-            hoveredGraphic !== hitGraphic
-          ) {
-
-            this.setMapCursor(
-              "default"
-            );
-
-            this.emitLayerEvent(
-              "layerMouseOut",
-              this.graphicToGeoJsonFeature(
-                hoveredGraphic
-              ),
-              hoveredGraphic
-            );
-
-            hoveredGraphic = null;
-          }
-
-          /*
-            mouse over
-          */
-
-          if (
-            hitGraphic &&
-            hoveredGraphic !== hitGraphic
-          ) {
-
-            hoveredGraphic =
-              hitGraphic;
-
-            this.setMapCursor(
-              "pointer"
-            );
-
-            this.emitLayerEvent(
-              "layerMouseOver",
-              this.graphicToGeoJsonFeature(
-                hitGraphic
-              ),
-              hitGraphic,
-              {
-                coordinates: {
-                  latitude:
-                    evt.mapPoint?.latitude ?? 0,
-
-                  longitude:
-                    evt.mapPoint?.longitude ?? 0
-                }
-              }
-            );
-          }
+      this.emitLayerEvent(
+        "layerClick",
+        this.graphicToGeoJsonFeature(graphic),
+        graphic,
+        {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: graphic.attributes ?? {},
         }
       );
 
-    //----------------------------------------------------------
-    // save handles
-    //----------------------------------------------------------
+      if (this.enableUserEdit) {
+        this._suppressPopupUntil = Date.now() + 1500;
+        this.enableInfoPopupWindow(false);
+        this.closePopup();
 
-    this.viewHandles.push(
-      clickHandle,
-      dblClickHandle,
-      moveHandle
+        await this.activateGraphicsEditor(graphic);
+        return;
+      }
+
+      if (this.infoTemplate && !this.shouldSuppressPopup()) {
+        await this.showGraphicPopup(graphic, evt.mapPoint);
+      }
+    }, 180);
+  });
+
+  const doubleClickHandle = this.view.on("double-click", async (evt: any) => {
+    evt.stopPropagation();
+    evt.preventDefault();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+    this.closePopup();
+
+    const graphic = await this.getHitGraphic(evt);
+    if (!graphic) {
+      return;
+    }
+
+    this.emitLayerEvent(
+      "doubleClick",
+      this.graphicToGeoJsonFeature(graphic),
+      graphic,
+      {
+        coordinates: {
+          latitude: evt.mapPoint?.latitude ?? 0,
+          longitude: evt.mapPoint?.longitude ?? 0,
+        },
+        attributes: graphic.attributes ?? {},
+      }
     );
+
+    if (this.enableUserEdit) {
+      await this.activateGraphicsEditor(graphic);
+    }
+  });
+
+  const nativeDoubleClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
+    this.closePopup();
+
+    const rect = this.view.container.getBoundingClientRect();
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const mapPoint = this.view.toMap(screenPoint);
+
+    await this.handleEditorDoubleClick(
+      {
+        x: screenPoint.x,
+        y: screenPoint.y,
+        mapPoint,
+      },
+      "native-double-click"
+    );
+  };
+
+  this.view.container.addEventListener("dblclick", nativeDoubleClick, true);
+
+  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+    if (this._editorOpen || this._inDrawingMode) {
+      if (this._lastHoveredGraphic) {
+        this.emitLayerEvent(
+          "layerMouseOut",
+          this.graphicToGeoJsonFeature(this._lastHoveredGraphic),
+          this._lastHoveredGraphic,
+          {
+            coordinates: {
+              latitude: evt.mapPoint?.latitude ?? 0,
+              longitude: evt.mapPoint?.longitude ?? 0,
+            },
+            attributes: this._lastHoveredGraphic.attributes ?? {},
+          }
+        );
+
+        this._lastHoveredGraphic = null;
+      }
+
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this.setMapCursor("default");
+      }
+
+      return;
+    }
+
+    try {
+      const graphic = await this.getHitGraphic(evt);
+
+      if (graphic) {
+        if (this._lastHoveredGraphic !== graphic) {
+          if (this._lastHoveredGraphic) {
+            this.emitLayerEvent(
+              "layerMouseOut",
+              this.graphicToGeoJsonFeature(this._lastHoveredGraphic),
+              this._lastHoveredGraphic,
+              {
+                coordinates: {
+                  latitude: evt.mapPoint?.latitude ?? 0,
+                  longitude: evt.mapPoint?.longitude ?? 0,
+                },
+                attributes: this._lastHoveredGraphic.attributes ?? {},
+              }
+            );
+          }
+
+          this._lastHoveredGraphic = graphic;
+
+          this.emitLayerEvent(
+            "layerMouseOver",
+            this.graphicToGeoJsonFeature(graphic),
+            graphic,
+            {
+              coordinates: {
+                latitude: evt.mapPoint?.latitude ?? 0,
+                longitude: evt.mapPoint?.longitude ?? 0,
+              },
+              attributes: graphic.attributes ?? {},
+            }
+          );
+        }
+
+        if (this.infoTemplate && this._currentCursor !== "pointer") {
+          this._currentCursor = "pointer";
+          this.setMapCursor("pointer");
+        }
+      } else {
+        if (this._lastHoveredGraphic) {
+          this.emitLayerEvent(
+            "layerMouseOut",
+            this.graphicToGeoJsonFeature(this._lastHoveredGraphic),
+            this._lastHoveredGraphic,
+            {
+              coordinates: {
+                latitude: evt.mapPoint?.latitude ?? 0,
+                longitude: evt.mapPoint?.longitude ?? 0,
+              },
+              attributes: this._lastHoveredGraphic.attributes ?? {},
+            }
+          );
+
+          this._lastHoveredGraphic = null;
+        }
+
+        if (this._currentCursor !== "default") {
+          this._currentCursor = "default";
+          this.setMapCursor("default");
+        }
+      }
+    } catch {
+      this._lastHoveredGraphic = null;
+
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this.setMapCursor("default");
+      }
+    }
+  });
+
+  this.eventHandles.push(
+    clickHandle,
+    doubleClickHandle,
+    pointerMoveHandle,
+    {
+      remove: () => {
+        this.view?.container?.removeEventListener(
+          "dblclick",
+          nativeDoubleClick,
+          true
+        );
+      },
+    }
+  );
 }
