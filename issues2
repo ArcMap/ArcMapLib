@@ -1,44 +1,28 @@
-private static createTemplateFromObject(
-  config: any,
+private static normalizeContent(
+  content?: string | PopupContent[],
   attributes?: Record<string, any>
-): PopupTemplate {
-  
-  // 👇 NEW: Handle callback-based details
-  if (typeof config.details === "function") {
-    let title = config.listItem || "Details";
-    
-    // Resolve ${field} in title using attributes
-    if (attributes && typeof title === "string") {
-      title = title.replace(/\$\{([^}]+)\}/g, (_, key) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
+): PopupContent[] {
+  if (!content) {
+    // Default: show ALL attributes as fields
+    if (attributes) {
+      const fieldInfos = Object.keys(attributes).map(key => ({
+        fieldName: key,
+        label: key
+      }));
+      return [{ type: "fields", fieldInfos }];
     }
-    
-    // Call the details callback
-    let htmlContent = "";
-    try {
-      htmlContent = config.details({ attributes }) ?? "";
-    } catch (err) {
-      console.warn("[PopupTemplateResolver] details() callback failed", err);
-      return null;
-    }
-    
-    return new PopupTemplate({
-      title,
-      content: [{ type: "text", text: htmlContent }]
-    });
+    return [{ type: "text", text: "<p>No details available</p>" }];
   }
 
-  // 👇 EXISTING: Handle title/content object
-  const title = this.normalizeTitle(config.title);
-  const content = this.normalizeContent(config.content);
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
 
-  return new PopupTemplate({
-    title,
-    content,
-    fieldInfos: config.fieldInfos || [],
-    overwriteActionFilter: config.overwriteActionFilter ?? true,
-    actions: config.actions || []
-  });
+  if (Array.isArray(content)) {
+    return content.map(block => this.validateContentBlock(block));
+  }
+
+  return [{ type: "text", text: "<p>No details available</p>" }];
 }
+
+
