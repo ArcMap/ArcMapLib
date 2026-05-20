@@ -7,124 +7,76 @@ private buildPopupTemplateFromCurrent(
     attributes: graphic?.attributes,
   });
 
-  if (!graphic) {
-    console.warn("[geojson-layer] popup skipped: graphic is missing");
-    return null;
-  }
-
-  if (!this.infoTemplate) {
-    console.warn("[geojson-layer] popup skipped: infoTemplate is missing");
+  if (!graphic || !this.infoTemplate) {
+    console.warn("[geojson-layer] popup skipped: missing graphic or infoTemplate");
     return null;
   }
 
   const attributes = graphic.attributes ?? {};
 
-  const replaceTokens = (template: string): string => {
-    return template.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
-      const value = attributes[key.trim()];
-      return value === undefined || value === null ? "" : String(value);
+  const replaceTokens = (value: string): string => {
+    return value.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
+      const attributeValue = attributes[key.trim()];
+      return attributeValue === undefined || attributeValue === null
+        ? ""
+        : String(attributeValue);
     });
   };
 
   const resolveTitle = (): string => {
-    const templateTitle =
+    const rawTitle =
       this.infoTemplate?.title ??
       this.infoTemplate?.listTitle ??
+      this.infoTemplate?.listItem ??
       this.name ??
       "Details";
 
-    return typeof templateTitle === "string"
-      ? replaceTokens(templateTitle)
-      : String(templateTitle);
+    return typeof rawTitle === "string"
+      ? replaceTokens(rawTitle)
+      : String(rawTitle);
   };
 
   try {
-    /**
-     * CASE 1:
-     * Angular/user passes:
-     * {
-     *   title/listTitle: "...",
-     *   details: (graphic) => "<div>...</div>"
-     * }
-     */
-    if (
-      typeof this.infoTemplate === "object" &&
-      typeof this.infoTemplate.details === "function"
-    ) {
-      console.log("[geojson-layer] popup using user details(graphic) callback");
+    let content: any = null;
 
-      const userContent = this.infoTemplate.details(graphic);
-
-      if (!userContent) {
-        console.warn("[geojson-layer] popup skipped: details(graphic) returned empty content");
-        return null;
-      }
-
-      return new PopupTemplate({
-        title: resolveTitle(),
-        content: userContent,
-      });
+    // Angular current format:
+    // { listItem: 'Details', details: '<ul>...</ul>' }
+    if (typeof this.infoTemplate?.details === "string") {
+      console.log("[geojson-layer] popup using infoTemplate.details string");
+      content = replaceTokens(this.infoTemplate.details);
     }
 
-    /**
-     * CASE 2:
-     * Angular/user passes:
-     * {
-     *   title: "Polygon Layer",
-     *   content: "<div>${name}</div>"
-     * }
-     */
-    if (
-      typeof this.infoTemplate === "object" &&
-      typeof this.infoTemplate.content === "string"
-    ) {
-      console.log("[geojson-layer] popup using user string content");
-
-      const userContent = replaceTokens(this.infoTemplate.content);
-
-      if (!userContent.trim()) {
-        console.warn("[geojson-layer] popup skipped: string content is empty");
-        return null;
-      }
-
-      return new PopupTemplate({
-        title: resolveTitle(),
-        content: userContent,
-      });
+    // Function format:
+    // { details: (graphic) => '<ul>...</ul>' }
+    else if (typeof this.infoTemplate?.details === "function") {
+      console.log("[geojson-layer] popup using infoTemplate.details function");
+      content = this.infoTemplate.details(graphic);
     }
 
-    /**
-     * CASE 3:
-     * Angular/user passes ArcGIS field format:
-     * {
-     *   title: "Polygon Layer",
-     *   fieldInfos: [
-     *     { fieldName: "id", label: "id" },
-     *     { fieldName: "name", label: "name" }
-     *   ]
-     * }
-     */
-    const userFieldInfos =
-      this.infoTemplate?.fieldInfos ??
-      this.infoTemplate?.fields ??
-      this.infoTemplate?.content?.fieldInfos;
+    // Content format:
+    // { content: '<div>...</div>' }
+    else if (typeof this.infoTemplate?.content === "string") {
+      console.log("[geojson-layer] popup using infoTemplate.content string");
+      content = replaceTokens(this.infoTemplate.content);
+    }
 
-    if (Array.isArray(userFieldInfos) && userFieldInfos.length > 0) {
-      console.log("[geojson-layer] popup using user fieldInfos", userFieldInfos);
+    // Plain string format:
+    // infoTemplate = '<div>${name}</div>'
+    else if (typeof this.infoTemplate === "string") {
+      console.log("[geojson-layer] popup using plain string infoTemplate");
+      content = replaceTokens(this.infoTemplate);
+    }
 
-      const fieldInfos = userFieldInfos
+    // Field/table format:
+    // { fieldInfos: [{ fieldName: 'id', label: 'id' }] }
+    else if (Array.isArray(this.infoTemplate?.fieldInfos)) {
+      console.log("[geojson-layer] popup using fieldInfos");
+
+      const fieldInfos = this.infoTemplate.fieldInfos
         .map((field: any) => {
           const fieldName = field.fieldName ?? field.name ?? field.key;
 
           if (!fieldName) {
-            return null;
-          }
-
-          if (attributes[fieldName] === undefined || attributes[fieldName] === null) {
-            console.warn("[geojson-layer] popup field skipped because attribute is missing", {
-              fieldName,
-              attributes,
-            });
             return null;
           }
 
@@ -136,8 +88,7 @@ private buildPopupTemplateFromCurrent(
         })
         .filter(Boolean);
 
-      if (fieldInfos.length === 0) {
-        console.warn("[geojson-layer] popup skipped: no valid fieldInfos after filtering");
+      if (!fieldInfos.length) {
         return null;
       }
 
@@ -152,29 +103,15 @@ private buildPopupTemplateFromCurrent(
       });
     }
 
-    /**
-     * CASE 4:
-     * Angular/user passes plain string:
-     * "<div>${name}</div>"
-     */
-    if (typeof this.infoTemplate === "string") {
-      console.log("[geojson-layer] popup using plain string infoTemplate");
-
-      const userContent = replaceTokens(this.infoTemplate);
-
-      if (!userContent.trim()) {
-        console.warn("[geojson-layer] popup skipped: plain string content is empty");
-        return null;
-      }
-
-      return new PopupTemplate({
-        title: this.name ?? "Details",
-        content: userContent,
-      });
+    if (!content) {
+      console.warn("[geojson-layer] popup skipped: unsupported infoTemplate format", this.infoTemplate);
+      return null;
     }
 
-    console.warn("[geojson-layer] popup skipped: unsupported infoTemplate format", this.infoTemplate);
-    return null;
+    return new PopupTemplate({
+      title: resolveTitle(),
+      content,
+    });
   } catch (error) {
     console.error("[geojson-layer] buildPopupTemplateFromCurrent failed", error);
     return null;
