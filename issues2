@@ -1,67 +1,45 @@
-private static createTemplateFromObject(
-  config: any,
-  attributes?: Record<string, any>
-): PopupTemplate {
+private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+  console.log("[DEBUG] buildPopupTemplateFromCurrent CALLED");  // 👈 ADD THIS
+  console.log("[DEBUG] infoTemplate:", this.infoTemplate);
+  console.log("[DEBUG] graphic.attributes:", graphic?.attributes);
   
-  // 👇 NEW: Handle { listItem, details: string } format (your project's format)
-  if (typeof config.details === "string" && config.listItem !== undefined) {
-    // Resolve title from listItem
-    let title = config.listItem;
-    if (attributes && typeof title === "string") {
-      title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
-    }
-    
-    // Resolve ${field} placeholders in details HTML
-    let htmlContent = config.details;
-    if (attributes) {
-      htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
-        const val = attributes[key.trim()];
-        return val !== undefined && val !== null ? String(val) : "";
-      });
-    }
-    
-    return new PopupTemplate({
-      title,
-      content: [{ type: "text", text: htmlContent }]
-    });
-  }
+  if (!graphic) return null;
+  if (!this.infoTemplate) return null;
 
-  // 👇 EXISTING: Handle callback-based details
-  if (typeof config.details === "function") {
-    // ... your existing code
-  }
-
-  // 👇 EXISTING: Handle title/content object
-  const title = this.normalizeTitle(config.title);
-  const content = this.normalizeContent(config.content);
-
-  return new PopupTemplate({
-    title,
-    content,
-    // ...
-  });
+  return PopupTemplateResolver.resolveTemplate(
+    this.infoTemplate,
+    graphic.attributes
+  );
 }
 
 
-static resolveTemplate(
-  infoTemplate: string | PopupTemplateConfig | null | undefined,
-  featureAttributes?: Record<string, any>
-): PopupTemplate | null {
-  if (infoTemplate === null || infoTemplate === undefined) {
-    return null;
-  }
 
-  if (typeof infoTemplate === "string") {
-    return this.createTemplateFromString(infoTemplate, featureAttributes);
+if (typeof config.details === "string" && config.listItem !== undefined) {
+  let title = config.listItem;
+  if (attributes && typeof title === "string") {
+    title = title.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
   }
-
-  if (typeof infoTemplate === "object") {
-    // 👇 PASS attributes to createTemplateFromObject
-    return this.createTemplateFromObject(infoTemplate, featureAttributes);
+  
+  let htmlContent = config.details.trim();
+  
+  // 👇 ADD: Deduplicate repeated content blocks
+  // Remove duplicate <div>Name: ...</div><div>ID: ...</div> patterns
+  const lines = htmlContent.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const uniqueLines = [...new Set(lines)];
+  htmlContent = uniqueLines.join('\n');
+  
+  if (attributes) {
+    htmlContent = htmlContent.replace(/\$\{([^}]+)\}/g, (_: string, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
   }
-
-  return null;
+  
+  return new PopupTemplate({
+    title,
+    content: [{ type: "text", text: htmlContent }]
+  });
 }
