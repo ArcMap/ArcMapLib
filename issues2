@@ -1,83 +1,10 @@
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer) {
-    return null;
-  }
-
-  try {
-    const hit = await this.view.hitTest(evt);
-    const results = hit?.results ?? [];
-
-    const graphicHits = results
-      .map((r: any) => r?.graphic)
-      .filter((g: Graphic | undefined) => !!g?.geometry) as Graphic[];
-
-    if (!graphicHits.length) {
-      return null;
-    }
-
-    // IMPORTANT:
-    // Only the top-most graphic should handle the click.
-    // If another layer is visually on top, this layer must ignore the click.
-    const topGraphic = graphicHits[0];
-    const topLayer =
-      (topGraphic as any).origin?.layer ??
-      (topGraphic as any).layer ??
-      null;
-
-    const topLayerId =
-      topLayer?.id ??
-      (topGraphic as any).origin?.layerId ??
-      null;
-
-    const currentLayerId = this.featureLayer.id;
-
-    if (
-      topLayer &&
-      topLayer !== this.featureLayer &&
-      topLayerId !== currentLayerId
-    ) {
-      return null;
-    }
-
-    const sourceGraphic = this.featureLayer.graphics.find((g: Graphic) => {
-      const gId =
-        g.attributes?.[this.uniqueIdPropertyName] ??
-        g.attributes?.OBJECTID ??
-        g.attributes?.objectId ??
-        g.attributes?.id;
-
-      const hitId =
-        topGraphic.attributes?.[this.uniqueIdPropertyName] ??
-        topGraphic.attributes?.OBJECTID ??
-        topGraphic.attributes?.objectId ??
-        topGraphic.attributes?.id;
-
-      return String(gId) === String(hitId);
-    });
-
-    return (sourceGraphic as Graphic) ?? topGraphic;
-  } catch (error) {
-    console.warn("[arc-geojson-layer] hitTest failed", error);
-    return null;
-  }
-}
-
-
-
-
-
-
 private bindViewEvents(): void {
   if (!this.view || !this.featureLayer) {
     return;
   }
 
   this.cleanupViewEvents();
-
-  // Disable ArcGIS auto-popup. We control popup manually.
-  try {
-    this.view.popupEnabled = false;
-  } catch {}
+  this.setupPopupCloseWatcher();
 
   let clickTimer: any = null;
 
@@ -107,15 +34,25 @@ private bindViewEvents(): void {
         },
       });
 
-      // Editor mode has priority.
-      // Popup must NOT open when editor is enabled/open.
+      /**
+       * IMPORTANT RULE:
+       * - If editor is enabled, single click should open editor.
+       * - Popup must not appear while editor mode is enabled.
+       */
       if (this.enableUserEdit) {
+        this._suppressPopupUntil = Date.now() + 1500;
+        this.enableInfoPopupWindow(false);
         this.closePopup();
         await this.activateGraphicsEditor(graphic);
         return;
       }
 
-      await this.showGraphicPopup(graphic, evt.mapPoint);
+      /**
+       * Popup opens only on single click when editor is OFF.
+       */
+      if (this.infoTemplate && !this.shouldSuppressPopup()) {
+        await this.showGraphicPopup(graphic, evt.mapPoint);
+      }
     }, 180);
   });
 
@@ -128,6 +65,8 @@ private bindViewEvents(): void {
       clickTimer = null;
     }
 
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
     this.closePopup();
 
     const graphic = await this.getHitGraphic(evt);
@@ -152,193 +91,157 @@ private bindViewEvents(): void {
     }
   });
 
-  this.eventHandles.push(clickHandle, doubleClickHandle);
-}
+  const nativeDoubleClick = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
 
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
 
-
-
-private async showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: Point
-): Promise<void> {
-  if (
-    !this.view ||
-    !graphic?.geometry ||
-    this.enableUserEdit ||
-    this._editorOpen ||
-    this._inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
+    this._suppressPopupUntil = Date.now() + 1500;
+    this.enableInfoPopupWindow(false);
     this.closePopup();
-    return;
-  }
 
-  const popupTemplate = this.buildPopupTemplateForCurrent(graphic);
-  if (!popupTemplate) {
-    return;
-  }
+    const rect = this.view.container.getBoundingClientRect();
+    const screenPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
 
-  const popupPoint =
-    mapPoint ??
-    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
-    undefined;
+    const mapPoint = this.view.toMap(screenPoint);
 
-  if (!popupPoint) {
-    return;
-  }
+    await this.handleEditorDoubleClick(
+      {
+        x: screenPoint.x,
+        y: screenPoint.y,
+        mapPoint,
+      },
+      "native-double-click"
+    );
+  };
 
-  // Do not permanently attach template to graphic.
-  // This avoids stale popup content and reduces lag.
-  const popupGraphic = graphic.clone();
-  popupGraphic.popupTemplate = popupTemplate;
+  this.view.container.addEventListener("dblclick", nativeDoubleClick, true);
 
-  await this.openPopup(popupGraphic, popupPoint);
-}
-
-
-
-
-private async openPopup(
-  graphicMatch: Graphic,
-  popupPoint?: Point | null
-): Promise<void> {
-  if (!this.view || !graphicMatch || this.shouldSuppressPopup()) {
-    return;
-  }
-
-  try {
-    const appEl = this.ancestorMapElement as any;
-    const popupEl =
-      typeof appEl?.getPopupComponent === "function"
-        ? appEl.getPopupComponent()
-        : null;
-
-    const location =
-      popupPoint ??
-      UpGeojsonLayer.getPopupPoint(graphicMatch.geometry) ??
-      undefined;
-
-    if (!location) {
+  const pointerMoveHandle = this.view.on("pointer-move", async (evt: any) => {
+    if (this._editorOpen || this._inDrawingMode) {
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this.setMapCursor("default");
+      }
       return;
     }
 
-    this.view.popupEnabled = true;
-
-    if (popupEl && typeof popupEl.open === "boolean") {
-      popupEl.location = location;
-      popupEl.features = [graphicMatch];
-      popupEl.open = true;
-    } else if (this.view.openPopup) {
-      this.view.openPopup({
-        location,
-        features: [graphicMatch],
-      });
-    } else if (this.view.popup) {
-      this.view.popup.location = location;
-      this.view.popup.features = [graphicMatch];
-      (this.view.popup as any).open = true;
+    if (!this.featureLayer) {
+      return;
     }
-  } catch (error) {
-    console.warn("[arc-geojson-layer] openPopup failed", error);
-  }
-}
 
+    try {
+      const hit = await this.view.hitTest(evt, {
+        include: [this.featureLayer],
+      });
 
-private buildPopupTemplateForCurrent(graphic: Graphic): PopupTemplate | null {
-  if (!graphic || !this.infoTemplate) {
-    return null;
-  }
+      const hitGraphic =
+        hit?.results
+          ?.map((r: any) => r.graphic)
+          ?.find((graphic: Graphic) => {
+            const layer =
+              (graphic as any).origin?.layer ??
+              (graphic as any).layer ??
+              null;
 
-  const popupData = this.buildPopupContentFromInfoTemplate(graphic);
-  if (!popupData) {
-    return null;
-  }
+            return (
+              graphic?.geometry &&
+              (layer === this.featureLayer ||
+                (layer as any)?.id === this.featureLayer?.id)
+            );
+          }) ?? null;
 
-  return this.createHtmlPopupTemplate(
-    popupData.title ?? this.name ?? "Details",
-    popupData.content ?? ""
+      if (hitGraphic) {
+        if (this._lastHoveredGraphic !== hitGraphic) {
+          if (this._lastHoveredGraphic) {
+            this.emitLayerEvent("layerMouseOut", {
+              graphic: this._lastHoveredGraphic,
+              feature: this.graphicToGeoJsonFeature(this._lastHoveredGraphic),
+              event: {
+                coordinates: {
+                  latitude: evt.mapPoint?.latitude ?? 0,
+                  longitude: evt.mapPoint?.longitude ?? 0,
+                },
+                attributes: this._lastHoveredGraphic.attributes ?? {},
+              },
+            });
+          }
+
+          this._lastHoveredGraphic = hitGraphic;
+
+          this.emitLayerEvent("layerMouseOver", {
+            graphic: hitGraphic,
+            feature: this.graphicToGeoJsonFeature(hitGraphic),
+            event: {
+              coordinates: {
+                latitude: evt.mapPoint?.latitude ?? 0,
+                longitude: evt.mapPoint?.longitude ?? 0,
+              },
+              attributes: hitGraphic.attributes ?? {},
+            },
+          });
+        }
+
+        if (this.infoTemplate) {
+          if (this._currentCursor !== "pointer") {
+            this._currentCursor = "pointer";
+            this.setMapCursor("pointer");
+          }
+        }
+      } else {
+        if (this._lastHoveredGraphic) {
+          this.emitLayerEvent("layerMouseOut", {
+            graphic: this._lastHoveredGraphic,
+            feature: this.graphicToGeoJsonFeature(this._lastHoveredGraphic),
+            event: {
+              coordinates: {
+                latitude: evt.mapPoint?.latitude ?? 0,
+                longitude: evt.mapPoint?.longitude ?? 0,
+              },
+              attributes: this._lastHoveredGraphic.attributes ?? {},
+            },
+          });
+
+          this._lastHoveredGraphic = null;
+        }
+
+        if (this._currentCursor !== "default") {
+          this._currentCursor = "default";
+          this.setMapCursor("default");
+        }
+      }
+    } catch {
+      if (this._lastHoveredGraphic) {
+        this._lastHoveredGraphic = null;
+      }
+
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this.setMapCursor("default");
+      }
+    }
+  });
+
+  this.eventHandles.push(
+    clickHandle,
+    doubleClickHandle,
+    pointerMoveHandle,
+    {
+      remove: () => {
+        this.view?.container?.removeEventListener(
+          "dblclick",
+          nativeDoubleClick,
+          true
+        );
+      },
+    }
   );
-}
-
-
-
-private createHtmlPopupTemplate(
-  title: string,
-  htmlContent: string
-): PopupTemplate {
-  const safeTitle = title || this.name || "Details";
-  const safeContent = htmlContent || "";
-
-  const customContent = new CustomContent({
-    outFields: ["*"],
-    creator: () => {
-      const wrapper = document.createElement("div");
-
-      // Fix white-background-under-template issue.
-      wrapper.className = "arc-geojson-popup-content";
-      wrapper.style.background = "transparent";
-      wrapper.style.margin = "0";
-      wrapper.style.padding = "0";
-      wrapper.style.boxShadow = "none";
-      wrapper.style.border = "0";
-
-      wrapper.innerHTML = safeContent;
-      return wrapper;
-    },
-  });
-
-  return new PopupTemplate({
-    title: safeTitle,
-    outFields: ["*"],
-    content: [customContent],
-  });
-}
-
-
-private enableInfoPopupWindow(enable: boolean): void {
-  if (!this.view) {
-    return;
-  }
-
-  if (enable && (this.enableUserEdit || this._editorOpen || this._inDrawingMode)) {
-    return;
-  }
-
-  try {
-    this.view.popupEnabled = enable;
-  } catch {}
-
-  if (!enable) {
-    this.closePopup();
-
-    if (this.featureLayer) {
-      this.featureLayer.graphics.forEach((graphic: Graphic) => {
-        graphic.popupTemplate = null as any;
-      });
-    }
-  }
-}
-
-
-.arc-geojson-popup-content,
-.arc-geojson-popup-content * {
-  box-sizing: border-box;
-}
-
-.arc-geojson-popup-content {
-  background: transparent !important;
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
-.esri-popup__main-container,
-.esri-popup__content,
-.esri-popup__content-element {
-  background: transparent;
-}
-
-.esri-popup__content {
-  margin: 0;
 }
