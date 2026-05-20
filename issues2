@@ -1,14 +1,18 @@
-const popupEl =
-  typeof mapEl?.getPopupComponent === "function"
-    ? mapEl.getPopupComponent()
-    : null;
+private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+  // 👇 ADD THIS DEBUG LOG
+  console.log("[DEBUG] infoTemplate:", this.infoTemplate);
+  console.log("[DEBUG] graphic.attributes:", graphic?.attributes);
+  
+  if (!graphic) {
+    return null;
+  }
+  
+  if (!this.infoTemplate) {
+    return null;
+  }
 
-// 👇 ADD THESE DEBUG LOGS
-console.log("[DEBUG] mapEl:", mapEl);
-console.log("[DEBUG] popupEl:", popupEl);
-console.log("[DEBUG] popupTemplate:", popupTemplate);
-console.log("[DEBUG] location:", location);
-
-if (popupEl) {
-  // ... existing code
+  return PopupTemplateResolver.resolveTemplate(
+    this.infoTemplate,
+    graphic.attributes
+  );
 }
