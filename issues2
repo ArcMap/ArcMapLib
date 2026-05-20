@@ -1,25 +1,44 @@
+// ============================================================================
+// PASTE ALL OF THE BELOW INTO geojson-layer.ts
+// Replace existing functions of the same name. Add the _popupOpening field
+// in the private class fields section near line 59-69.
+// ============================================================================
+
+
+// CHANGE: Add this field in the private class fields section near line 59-69
+// (alongside blockGeoJsonUpdate, _isUpdatingGeoJson, _isClearingGeoJSONLayer, etc.)
+private _popupOpening = false;
+
+
+/**
+ * Shows the popup for the given graphic.
+ * CHANGE: Re-entrant guard prevents render deadlock on rapid clicks.
+ * CHANGE: Close-before-open with rAF tick — fixes "previous popup not closing" issue.
+ * CHANGE: Removed view.popupEnabled toggle (was causing freezes).
+ * CHANGE: Switched to <arcgis-popup> component property assignment (SDK 5.0 way).
+ * CHANGE: arc-map ancestor (was up-map).
+ */
 private async showGraphicPopup(
   graphic: Graphic,
   mapPoint?: Point,
 ): Promise<void> {
+  // CHANGE: Re-entrant guard — drop click if popup is mid-open
   if (this._popupOpening) {
-    console.log("[showGraphicPopup] already opening, skipping re-entrant call");
     return;
   }
 
+  // CHANGE: Skip popup entirely if editor mode is on (per requirement)
   if (
     this._editorOpen ||
     this.inDrawingMode ||
     this._isStartingDraw ||
     this.shouldSuppressPopup()
   ) {
-    console.log("[LOG 2] Popup suppressed by guards");
     this.closePopup();
     return;
   }
 
   if (!graphic?.geometry) {
-    console.log("[LOG 2] Missing geometry, returning");
     return;
   }
 
@@ -29,55 +48,343 @@ private async showGraphicPopup(
     undefined;
 
   if (!location) {
-    console.log("[LOG 2] No location resolved, returning");
     return;
   }
 
   const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  console.log("[LOG 2] buildPopupTemplateFromCurrent returned:", popupTemplate);
-
   if (!popupTemplate) {
-    console.log("[LOG 2] No template built, closing popup and returning");
     this.closePopup();
     return;
   }
 
   this._popupOpening = true;
   try {
+    // Assign template to graphic so popup can render its content
     graphic.popupTemplate = popupTemplate;
-    console.log("[LOG 2] popupTemplate set on graphic:", graphic.popupTemplate);
 
-    const arcMap = this.closest("arc-map") as any;
-    const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
-    console.log("[LOG 3] popupEl found?", !!popupEl);
+    // CHANGE: Resolve <arcgis-popup> via arc-map ancestor element
+    const arcMap = this.ancestorMapElement as any;
+    const popupEl =
+      typeof arcMap?.getPopupComponent === "function"
+        ? arcMap.getPopupComponent()
+        : arcMap?.shadowRoot?.querySelector("arcgis-popup");
 
     if (!popupEl) {
-      console.warn("[up-geojson-layer] <arcgis-popup> not found in arc-map shadow DOM");
+      // Fallback: legacy view.popup (still works in 5.0 with backward-compat layer)
+      if (this.view?.popup) {
+        // CHANGE: Close any in-flight popup state first
+        if ((this.view.popup as any).visible) {
+          (this.view.popup as any).visible = false;
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => resolve(null)),
+          );
+        }
+        this.view.popup.location = location;
+        this.view.popup.features = [graphic];
+        (this.view.popup as any).open = true;
+      }
       return;
     }
 
-    await popupEl.componentOnReady();
+    // Wait for component to be ready before mutating its properties
+    if (typeof popupEl.componentOnReady === "function") {
+      await popupEl.componentOnReady();
+    }
 
-    // Close any in-flight popup state first to avoid render deadlock
-    if (popupEl.visible) {
-      console.log("[LOG 3] Closing in-flight popup before reopening");
+    // CHANGE: Close-before-open dance — prevents stale popup content flicker
+    // and the "previous popup not closing" issue
+    if (popupEl.open || popupEl.visible) {
+      popupEl.open = false;
       popupEl.visible = false;
+      // Wait one rAF tick so SDK can tear down old content
       await new Promise((resolve) =>
         requestAnimationFrame(() => resolve(null)),
       );
     }
 
-    // Set features, location, and visibility directly on the component
-    popupEl.features = [graphic];
+    // CHANGE: Set properties in this order to avoid render race
     popupEl.location = location;
-    popupEl.visible = true;
-
-    console.log("[LOG 3] popup opened via component properties");
-    console.log("[LOG 3] popup features count:", popupEl.features?.length);
-    console.log("[LOG 3] popup selectedFeature attrs:", popupEl.selectedFeature?.attributes);
+    popupEl.features = [graphic];
+    popupEl.open = true;
   } catch (err) {
-    console.warn("[up-geojson-layer] showGraphicPopup failed", err);
+    console.warn("[arc-geojson-layer] showGraphicPopup failed", err);
   } finally {
     this._popupOpening = false;
   }
 }
+
+
+/**
+ * Builds a PopupTemplate for the given graphic.
+ * CHANGE: Uses `content` as a function returning HTMLElement (per ArcGIS 5.0 best practice).
+ * CHANGE: Removed CustomContent wrapper — was causing white shadow + extra DOM nesting.
+ * CHANGE: returnGeometry: false — skips unnecessary geometry re-query per popup.
+ */
+private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+  if (!graphic) {
+    return null;
+  }
+  if (!this.infoTemplate) {
+    return null;
+  }
+
+  // Resolve title + content once at template-build time
+  const built = this.buildPopupContentFromInfoTemplate(graphic);
+  if (!built) {
+    return null;
+  }
+
+  const { title, content: htmlContent } = built;
+
+  // CHANGE: Function-based content returns a sized DOM node directly.
+  // This is the fastest path per ArcGIS 5.0 docs and avoids CustomContent's
+  // wrapper that caused the white shadow.
+  return new PopupTemplate({
+    title,
+    outFields: ["*"],
+    returnGeometry: false,
+    content: () => {
+      const div = document.createElement("div");
+      div.className = "arc-geojson-popup-content";
+      // CHANGE: Inline styles kill the empty whitespace and white shadow
+      div.style.margin = "0";
+      div.style.padding = "0";
+      div.style.minHeight = "auto";
+      div.innerHTML = htmlContent;
+      return div;
+    },
+  });
+}
+
+
+/**
+ * Builds popup title + HTML content from infoTemplate.
+ * Returns { title, content } or null if no template/content available.
+ * CHANGE: Single shared placeholder resolver — avoids re-creating regex per call.
+ * CHANGE: Returns HTML string directly (no DOM creation here — faster).
+ */
+private buildPopupContentFromInfoTemplate(
+  graphic: Graphic,
+): { title: string; content: string } | null {
+  if (!graphic || !this.infoTemplate) {
+    return null;
+  }
+
+  const attributes = graphic.attributes ?? {};
+
+  // CHANGE: Single shared placeholder resolver
+  const resolve = (template: string): string =>
+    template.replace(/\$\{([^}]+)\}/g, (_, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
+
+  // Callback-based: { listItem: '${name}', details: (graphic) => htmlString }
+  if (
+    typeof this.infoTemplate === "object" &&
+    typeof this.infoTemplate.details === "function"
+  ) {
+    let title = this.name ?? "Details";
+    if (typeof this.infoTemplate.listItem === "string") {
+      title = resolve(this.infoTemplate.listItem);
+    }
+
+    let htmlContent = "";
+    try {
+      htmlContent = this.infoTemplate.details(graphic) ?? "";
+    } catch (err) {
+      console.warn("[arc-geojson-layer] infoTemplate.details() failed", err);
+      return null;
+    }
+
+    if (!htmlContent) {
+      return null;
+    }
+
+    return { title, content: htmlContent };
+  }
+
+  // Object with string details template: { listItem, details: '<html>${field}</html>' }
+  if (
+    typeof this.infoTemplate === "object" &&
+    typeof this.infoTemplate.details === "string"
+  ) {
+    let title = this.name ?? "Details";
+    if (typeof this.infoTemplate.listItem === "string") {
+      title = resolve(this.infoTemplate.listItem);
+    }
+    const htmlContent = resolve(this.infoTemplate.details);
+    return { title, content: htmlContent };
+  }
+
+  // Object with content property (ArcGIS PopupTemplate-like JSON)
+  if (
+    typeof this.infoTemplate === "object" &&
+    this.infoTemplate.content !== undefined
+  ) {
+    let content = this.infoTemplate.content;
+    if (typeof content === "string") {
+      content = resolve(content);
+    }
+    const rawTitle = String(
+      this.infoTemplate.title ?? this.name ?? "Details",
+    );
+    const title = resolve(rawTitle);
+    return {
+      title,
+      content: typeof content === "string" ? content : "",
+    };
+  }
+
+  // Object with title-only field
+  if (
+    typeof this.infoTemplate === "object" &&
+    this.infoTemplate.title !== undefined
+  ) {
+    const title = resolve(String(this.infoTemplate.title));
+    return { title, content: "" };
+  }
+
+  // Raw string infoTemplate
+  if (typeof this.infoTemplate === "string") {
+    const htmlContent = resolve(this.infoTemplate);
+    return { title: this.name ?? "Details", content: htmlContent };
+  }
+
+  return null;
+}
+
+
+/**
+ * Closes the popup AND clears any lingering highlight on the graphic.
+ * CHANGE: Targets arc-map (was up-map) and uses both open & visible for full close.
+ */
+private closePopup(): void {
+  try {
+    const arcMap = this.ancestorMapElement as any;
+    const popupEl =
+      typeof arcMap?.getPopupComponent === "function"
+        ? arcMap.getPopupComponent()
+        : arcMap?.shadowRoot?.querySelector("arcgis-popup");
+
+    if (popupEl) {
+      popupEl.open = false;
+      popupEl.visible = false;
+      popupEl.features = [];
+      popupEl.selectedFeature = null;
+    }
+
+    // Also clear view.popup state (covers legacy popup path)
+    const popup = this.view?.popup;
+    if (popup) {
+      (popup as any).open = false;
+      popup.features = [];
+      (popup as any).selectedFeature = null;
+      (popup as any).highlightEnabled = false;
+    }
+  } catch {
+    // Best-effort cleanup
+  }
+
+  this.clearPopupHighlight();
+}
+
+
+/**
+ * Auto-opens the popup for the first graphic after data loads.
+ * Called by updateGeoJson when infoTemplate is set.
+ * CHANGE: Skip if editor open or drawing mode active.
+ * CHANGE: Uses showGraphicPopup directly (single source of truth).
+ * CHANGE: Component-based fallback when view.popup not available.
+ */
+private async autoOpenFirstPopup(): Promise<void> {
+  if (!this.featureLayer || !this.infoTemplate) {
+    return;
+  }
+
+  // CHANGE: Honor editor/drawing mode guards
+  if (this._editorOpen || this.inDrawingMode || this._isStartingDraw) {
+    return;
+  }
+
+  const firstGraphic = this.featureLayer.graphics?.getItemAt(0);
+  if (!firstGraphic?.geometry) {
+    return;
+  }
+
+  // Wait for the ancestor arc-map to be fully initialized (view + popup ready)
+  try {
+    const mapEl = this.ancestorMapElement as any;
+    if (mapEl && typeof mapEl.componentOnReady === "function") {
+      await mapEl.componentOnReady();
+    }
+  } catch {
+    // Ignore — proceed with what we have
+  }
+
+  // Additional small delay to let the popup component render
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  if (!this.isConnected || this._editorOpen || this.inDrawingMode) {
+    return;
+  }
+
+  // CHANGE: Check for either legacy popup or component popup
+  const arcMap = this.ancestorMapElement as any;
+  const popupEl = arcMap?.shadowRoot?.querySelector("arcgis-popup");
+  if (!this.view?.popup && !popupEl) {
+    return;
+  }
+
+  await this.showGraphicPopup(firstGraphic);
+}
+
+
+// ============================================================================
+// SMALL EDIT INSIDE updateGeoJson (NOT a full replacement)
+// Find the end of updateGeoJson where it currently does:
+//
+//     this.refreshLabels();
+//     // FIX: Re-apply active type filter after reload
+//     this.filterGraphicsByActiveType(this._activeVisibleType);
+//
+// Add the block below immediately after those two lines (before the catch/finally).
+// ============================================================================
+
+// CHANGE: Auto-open popup on first graphic AFTER data loads / zoom.
+// Per requirement: info template should appear automatically when data is loaded.
+// Skips if editor mode is on so we never interrupt editing.
+if (this.infoTemplate && !this._editorOpen && !this.inDrawingMode) {
+  // Defer to next tick so layer is fully rendered before opening popup
+  setTimeout(() => {
+    void this.autoOpenFirstPopup();
+  }, 100);
+}
+
+
+// ============================================================================
+// SMALL EDIT INSIDE bindViewEvents click handler
+// Find the "Show popup first (before editor activation)" block and ensure it
+// matches the version below. This is in your existing bindViewEvents around
+// line 1553. The key change is calling showGraphicPopup with await.
+// ============================================================================
+
+// CHANGE: Single-click handler now guarantees:
+// 1. Popup ONLY shows when not in editor/drawing mode
+// 2. Previous popup is closed by showGraphicPopup's internal close-before-open
+// 3. Editor activation is skipped when infoTemplate exists (popup priority)
+if (
+  !this._editorOpen &&
+  !this.inDrawingMode &&
+  !this._isStartingDraw &&
+  !this.shouldSuppressPopup()
+) {
+  await this.showGraphicPopup(graphic, evt.mapPoint);
+}
+
+
+// ============================================================================
+// DELETE the entire createHtmlPopupTemplate method (around line 2358-2378).
+// It used CustomContent which caused the white shadow.
+// The new buildPopupTemplateFromCurrent replaces its functionality directly.
+// ============================================================================
