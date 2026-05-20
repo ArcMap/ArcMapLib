@@ -1,98 +1,249 @@
 // ============================================================================
-// REPLACEMENT: buildPopupTemplateFromCurrent
-// CHANGE: Wraps content with explicit auto-height styles.
-// CHANGE: After render, walks up the DOM to force the arcgis-popup
-//         .content-wrapper to shrink to content (kills the white space).
+// REPLACEMENT: showGraphicPopup
+// CHANGE: After popup opens, runs a shadow-DOM walker that drills through
+//         arcgis-popup → calcite-shell → calcite-panel → content-wrapper
+//         and forces them all to auto-size. This is the ONLY reliable way
+//         per ArcGIS/Calcite docs since 4.28 (shadow DOM was locked).
+// CHANGE: Uses MutationObserver to re-apply fix when popup content changes.
 // ============================================================================
 
-private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
-  if (!graphic) {
-    return null;
-  }
-  if (!this.infoTemplate) {
-    return null;
-  }
-
-  const built = this.buildPopupContentFromInfoTemplate(graphic);
-  if (!built) {
-    return null;
+private async showGraphicPopup(
+  graphic: Graphic,
+  mapPoint?: Point,
+): Promise<void> {
+  if (this._popupOpening) {
+    return;
   }
 
-  const { title, content: htmlContent } = built;
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    this.closePopup();
+    return;
+  }
 
-  return new PopupTemplate({
-    title,
-    outFields: ["*"],
-    returnGeometry: false,
-    content: () => {
-      // CHANGE: Wrapper div with explicit auto-height styles.
-      // The key trick: display:block + height:auto + min-height:0 forces
-      // the arcgis-popup content-wrapper (which has block-size:100%) to
-      // shrink to actual content height.
-      const wrapper = document.createElement("div");
-      wrapper.className = "arc-geojson-popup-wrapper";
-      wrapper.setAttribute(
-        "style",
-        [
-          "display: block",
-          "margin: 0",
-          "padding: 0",
-          "height: auto",
-          "min-height: 0",
-          "max-height: none",
-          "box-sizing: border-box",
-          "overflow: visible",
-          "background: transparent",
-          "box-shadow: none",
-        ].join("; "),
+  if (!graphic?.geometry) {
+    return;
+  }
+
+  const location =
+    mapPoint ??
+    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
+    undefined;
+
+  if (!location) {
+    return;
+  }
+
+  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+  if (!popupTemplate) {
+    this.closePopup();
+    return;
+  }
+
+  this._popupOpening = true;
+  try {
+    graphic.popupTemplate = popupTemplate;
+
+    const arcMap = this.ancestorMapElement as any;
+    const popupEl =
+      typeof arcMap?.getPopupComponent === "function"
+        ? arcMap.getPopupComponent()
+        : arcMap?.shadowRoot?.querySelector("arcgis-popup");
+
+    if (!popupEl) {
+      if (this.view?.popup) {
+        if ((this.view.popup as any).visible) {
+          (this.view.popup as any).visible = false;
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => resolve(null)),
+          );
+        }
+        this.view.popup.location = location;
+        this.view.popup.features = [graphic];
+        (this.view.popup as any).open = true;
+      }
+      return;
+    }
+
+    if (typeof popupEl.componentOnReady === "function") {
+      await popupEl.componentOnReady();
+    }
+
+    if (popupEl.open || popupEl.visible) {
+      popupEl.open = false;
+      popupEl.visible = false;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => resolve(null)),
       );
+    }
 
-      // Inner content div with the actual HTML
-      const inner = document.createElement("div");
-      inner.className = "arc-geojson-popup-content";
-      inner.setAttribute(
-        "style",
-        [
-          "display: block",
-          "margin: 0",
-          "padding: 0",
-          "height: auto",
-          "min-height: 0",
-          "background: transparent",
-        ].join("; "),
-      );
-      inner.innerHTML = htmlContent;
+    popupEl.location = location;
+    popupEl.features = [graphic];
+    popupEl.open = true;
 
-      wrapper.appendChild(inner);
+    // CHANGE: After popup opens, fix the white space by walking the
+    // nested shadow DOM tree. Per Esri Community guidance, this is
+    // the ONLY way to override popup styles since 4.28 shadow DOM lock.
+    this.fixPopupHeight(popupEl);
+  } catch (err) {
+    console.warn("[arc-geojson-layer] showGraphicPopup failed", err);
+  } finally {
+    this._popupOpening = false;
+  }
+}
 
-      // CHANGE: After arcgis-popup slots our content, walk up the DOM
-      // and force every ancestor up to .content-wrapper to auto-size.
-      // This is the only way to defeat the block-size:100% rule from
-      // outside the shadow DOM.
-      requestAnimationFrame(() => {
-        let el: HTMLElement | null = wrapper;
-        for (let i = 0; i < 10 && el; i++) {
-          el = el.parentElement;
-          if (!el) break;
 
-          // Stop after we've fixed the content-wrapper
-          if (el.classList?.contains("content-wrapper")) {
-            el.style.blockSize = "auto";
-            el.style.height = "auto";
-            el.style.minHeight = "0";
-            el.style.maxHeight = "none";
-            el.style.flex = "0 0 auto";
-            break;
+// ============================================================================
+// NEW METHOD: fixPopupHeight
+// CHANGE: Permanent fix for the white space issue.
+// Walks arcgis-popup → calcite-shell-panel → calcite-panel → content-wrapper
+// shadow roots and forces auto-sizing on each.
+// Uses MutationObserver to re-run when popup content changes (e.g. feature switch).
+// ============================================================================
+
+private _popupHeightObserver: MutationObserver | null = null;
+
+private fixPopupHeight(popupEl: any): void {
+  if (!popupEl) return;
+
+  // Disconnect any prior observer
+  if (this._popupHeightObserver) {
+    this._popupHeightObserver.disconnect();
+    this._popupHeightObserver = null;
+  }
+
+  const applyFix = () => {
+    try {
+      // Drill through nested shadow roots:
+      // arcgis-popup → its shadowRoot → calcite-shell-panel → its shadowRoot
+      // → calcite-panel → its shadowRoot → div.content-wrapper
+      const popupRoot = popupEl.shadowRoot;
+      if (!popupRoot) return;
+
+      // Find ALL shell-panel / panel elements at any depth
+      const queue: (Element | ShadowRoot)[] = [popupRoot];
+      const visited = new WeakSet<Element>();
+
+      while (queue.length > 0) {
+        const node = queue.shift()!;
+        const children =
+          node instanceof ShadowRoot
+            ? node.querySelectorAll("*")
+            : node.querySelectorAll("*");
+
+        children.forEach((el: Element) => {
+          if (visited.has(el)) return;
+          visited.add(el);
+
+          const htmlEl = el as HTMLElement;
+          const tag = el.tagName.toLowerCase();
+          const cls = el.className?.toString() || "";
+
+          // Target every element that could be causing the stretch:
+          // - .content-wrapper (the main culprit per our DevTools inspection)
+          // - .container, .panel, .content (calcite-panel internals)
+          // - any element with block-size:100% in computed style
+          if (
+            cls.includes("content-wrapper") ||
+            cls.includes("content") ||
+            cls.includes("container") ||
+            cls.includes("panel") ||
+            tag === "calcite-panel" ||
+            tag === "calcite-shell" ||
+            tag === "calcite-shell-panel"
+          ) {
+            htmlEl.style.setProperty("block-size", "auto", "important");
+            htmlEl.style.setProperty("height", "auto", "important");
+            htmlEl.style.setProperty("min-height", "0", "important");
+            htmlEl.style.setProperty("max-height", "none", "important");
+            htmlEl.style.setProperty("flex", "0 0 auto", "important");
           }
 
-          // Also relax any flex children along the way
-          el.style.flex = "0 0 auto";
-          el.style.height = "auto";
-          el.style.minHeight = "0";
-        }
-      });
+          // Also push child shadow roots into queue
+          if ((el as any).shadowRoot) {
+            queue.push((el as any).shadowRoot);
+          }
+        });
+      }
 
-      return wrapper;
-    },
+      // Also force the popup host itself to auto-size
+      if (popupEl.style) {
+        popupEl.style.setProperty("block-size", "auto", "important");
+        popupEl.style.setProperty("height", "auto", "important");
+        popupEl.style.setProperty("min-height", "0", "important");
+      }
+    } catch (err) {
+      // Best-effort — shadow DOM access can fail in edge cases
+      console.debug("[arc-geojson-layer] fixPopupHeight skipped", err);
+    }
+  };
+
+  // Apply immediately, then again on next frame, then again after a small delay
+  // (popup content renders in stages — we hit it at each stage)
+  applyFix();
+  requestAnimationFrame(() => {
+    applyFix();
+    setTimeout(applyFix, 50);
+    setTimeout(applyFix, 150);
+    setTimeout(applyFix, 400);
   });
+
+  // Set up observer to re-apply when popup content mutates
+  // (handles feature pagination, content updates, etc.)
+  if (popupEl.shadowRoot) {
+    this._popupHeightObserver = new MutationObserver(() => {
+      applyFix();
+    });
+    this._popupHeightObserver.observe(popupEl.shadowRoot, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"],
+    });
+  }
+}
+
+
+// ============================================================================
+// REPLACEMENT: closePopup
+// CHANGE: Also disconnects the height observer when closing.
+// ============================================================================
+
+private closePopup(): void {
+  // CHANGE: Clean up height observer on close
+  if (this._popupHeightObserver) {
+    this._popupHeightObserver.disconnect();
+    this._popupHeightObserver = null;
+  }
+
+  try {
+    const arcMap = this.ancestorMapElement as any;
+    const popupEl =
+      typeof arcMap?.getPopupComponent === "function"
+        ? arcMap.getPopupComponent()
+        : arcMap?.shadowRoot?.querySelector("arcgis-popup");
+
+    if (popupEl) {
+      popupEl.open = false;
+      popupEl.visible = false;
+      popupEl.features = [];
+      popupEl.selectedFeature = null;
+    }
+
+    const popup = this.view?.popup;
+    if (popup) {
+      (popup as any).open = false;
+      popup.features = [];
+      (popup as any).selectedFeature = null;
+      (popup as any).highlightEnabled = false;
+    }
+  } catch {
+    // Best-effort cleanup
+  }
+
+  this.clearPopupHighlight();
 }
