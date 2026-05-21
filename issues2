@@ -13,7 +13,7 @@ private updateLabelJson(
   const labelClasses = JsonUtils.getLabelJson(newLabelJsonArg);
 
   if (!labelClasses || labelClasses.length === 0) {
-    console.warn("[up-esri-feature-layer] No valid label classes generated");
+    console.warn("-feature-layer] No valid label classes generated");
     this.featureLayer.labelingInfo = [];
     return;
   }
