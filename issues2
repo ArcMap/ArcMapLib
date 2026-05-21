@@ -1,303 +1,5 @@
-private static readonly _warnedMigrationMessages: Set<string> = new Set();
-
-private static warnArcGisMigration(
-  methodName: string,
-  category: string,
-  oldValue: any,
-  newValue: any
-): void {
-  if (oldValue === undefined || oldValue === null || newValue === undefined || newValue === null) {
-    return;
-  }
-
-  if (String(oldValue).toLowerCase() === String(newValue).toLowerCase()) {
-    return;
-  }
-
-  const warningKey = `${methodName}:${category}:${oldValue}:${newValue}`;
-
-  if (JsonUtils._warnedMigrationMessages.has(warningKey)) {
-    return;
-  }
-
-  JsonUtils._warnedMigrationMessages.add(warningKey);
-
-  console.warn(
-    `[ArcGIS Migration Warning] ${methodName}: Detected old ArcGIS 3.x ${category} "${oldValue}". ` +
-      `It has been converted to ArcGIS Maps SDK 5.x value "${newValue}". ` +
-      `Please update your JSON to use "${newValue}" going forward.`
-  );
-}
-
-
-private static readonly ARCGIS_3X_SYMBOL_TYPES: Set<string> = new Set([
-  "esrisms",
-  "sms",
-  "simplemarkersymbol",
-  "simple-marker-symbol",
-  "esrisimplemarkersymbol",
-
-  "esripms",
-  "pms",
-  "picturemarkersymbol",
-  "picture-marker-symbol",
-
-  "esrisls",
-  "sls",
-  "simplelinesymbol",
-  "simple-line-symbol",
-  "esrisimplelinesymbol",
-
-  "esricls",
-  "cls",
-  "cartographiclinesymbol",
-
-  "esrisfs",
-  "sfs",
-  "simplefillsymbol",
-  "simple-fill-symbol",
-  "esrisimplefillsymbol",
-
-  "esripfs",
-  "pfs",
-  "picturefillsymbol",
-  "picture-fill-symbol",
-
-  "esrits",
-  "ts",
-  "textsymbol",
-  "text-symbol",
-  "esritextsymbol"
-]);
-
-
-private static readonly ARCGIS_3X_MARKER_STYLES: Set<string> = new Set([
-  "esrismscircle",
-  "esrismssquare",
-  "esrismsdiamond",
-  "esrismscross",
-  "esrismsx",
-  "esrismsstylecircle",
-  "esrismsstylesquare",
-  "esrismsstylediamond",
-  "esrismsstylecross",
-  "esrismsstylex"
-]);
-
-
-private static readonly ARCGIS_3X_LINE_STYLES: Set<string> = new Set([
-  "esrislssolid",
-  "esrislsdash",
-  "esrislsdot",
-  "esrislsdashdot",
-  "esrislsdashdotdot",
-  "esrislsshortdash",
-  "esrislsshortdot",
-  "esrislsshortdashdot",
-  "esrislsshortdashdotdot",
-  "esrislslongdash",
-  "esrislslongdashdot",
-  "esrislsnull"
-]);
-
-
-private static readonly ARCGIS_3X_FILL_STYLES: Set<string> = new Set([
-  "esrisfssolid",
-  "esrisfsnull",
-  "esrisfshorizontal",
-  "esrisfsvertical",
-  "esrisfsforwarddiagonal",
-  "esrisfsbackwarddiagonal",
-  "esrisfscross",
-  "esrisfsdiagonalcross"
-]);
-
-
-
-static toCanonicalArcGisRendererType(rendererType: string): string {
-  if (!rendererType) {
-    return "simple";
-  }
-
-  const normalizedType = String(rendererType).trim();
-  const lookupType = normalizedType.toLowerCase();
-
-  let newRendererType = normalizedType;
-
-  switch (lookupType) {
-    case "simple":
-    case "simplerenderer":
-    case "esri.renderers.simplerenderer":
-    case "esrisimplerenderer":
-      newRendererType = "simple";
-      break;
-
-    case "uniquevalue":
-    case "unique-value":
-    case "uniquevaluerenderer":
-    case "unique-renderer":
-    case "uniquerenderer":
-    case "esri.renderers.uniquevaluerenderer":
-    case "esriuniquevaluerenderer":
-      newRendererType = "unique-value";
-      break;
-
-    case "classbreaks":
-    case "class-breaks":
-    case "classbreaksrenderer":
-    case "class-renderer":
-    case "classrenderer":
-    case "esri.renderers.classbreaksrenderer":
-    case "esriclassbreaksrenderer":
-      newRendererType = "class-breaks";
-      break;
-
-    default:
-      console.warn(
-        `[ArcGIS Migration Warning] toCanonicalArcGisRendererType: Unrecognized renderer type "${rendererType}". ` +
-          `Expected one of: simple, unique-value, class-breaks.`
-      );
-      return normalizedType;
-  }
-
-  JsonUtils.warnArcGisMigration(
-    "toCanonicalArcGisRendererType",
-    "renderer type",
-    rendererType,
-    newRendererType
-  );
-
-  return newRendererType;
-}
-
-
-static normalizeMarkerStyle(style: any): any {
-  const value = String(style ?? "circle").toLowerCase();
-
+private static getCanonicalSymbolType(rawType: string): string {
   const map: Record<string, string> = {
-    esrismscircle: "circle",
-    esrismssquare: "square",
-    esrismsdiamond: "diamond",
-    esrismscross: "cross",
-    esrismsx: "x",
-    esrismsstylecircle: "circle",
-    esrismsstylesquare: "square",
-    esrismsstylediamond: "diamond",
-    esrismsstylecross: "cross",
-    esrismsstylex: "x",
-
-    circle: "circle",
-    square: "square",
-    diamond: "diamond",
-    cross: "cross",
-    x: "x",
-    triangle: "triangle",
-    path: "path"
-  };
-
-  const newStyle = map[value] ?? "circle";
-
-  if (JsonUtils.ARCGIS_3X_MARKER_STYLES.has(value)) {
-    JsonUtils.warnArcGisMigration("normalizeMarkerStyle", "marker style", style, newStyle);
-  }
-
-  return newStyle;
-}
-
-
-
-static normalizeLineStyle(style: any): any {
-  const value = String(style ?? "solid").toLowerCase();
-
-  const map: Record<string, string> = {
-    esrislssolid: "solid",
-    esrislsdash: "dash",
-    esrislsdot: "dot",
-    esrislsdashdot: "dash-dot",
-    esrislsdashdotdot: "dash-dot-dot",
-    esrislsshortdash: "short-dash",
-    esrislsshortdot: "short-dot",
-    esrislsshortdashdot: "short-dash-dot",
-    esrislsshortdashdotdot: "short-dash-dot-dot",
-    esrislslongdash: "long-dash",
-    esrislslongdashdot: "long-dash-dot",
-    esrislsnull: "none",
-
-    solid: "solid",
-    dash: "dash",
-    dot: "dot",
-    "dash-dot": "dash-dot",
-    "dash-dot-dot": "dash-dot-dot",
-    "short-dash": "short-dash",
-    "short-dot": "short-dot",
-    "short-dash-dot": "short-dash-dot",
-    "short-dash-dot-dot": "short-dash-dot-dot",
-    "long-dash": "long-dash",
-    "long-dash-dot": "long-dash-dot",
-    none: "none",
-    null: "none"
-  };
-
-  const newStyle = map[value] ?? "solid";
-
-  if (JsonUtils.ARCGIS_3X_LINE_STYLES.has(value)) {
-    JsonUtils.warnArcGisMigration("normalizeLineStyle", "line style", style, newStyle);
-  }
-
-  return newStyle;
-}
-
-
-static normalizeFillStyle(style: any): any {
-  const value = String(style ?? "solid").toLowerCase();
-
-  const map: Record<string, string> = {
-    esrisfssolid: "solid",
-    esrisfsnull: "none",
-    esrisfshorizontal: "horizontal",
-    esrisfsvertical: "vertical",
-    esrisfsforwarddiagonal: "forward-diagonal",
-    esrisfsbackwarddiagonal: "backward-diagonal",
-    esrisfscross: "cross",
-    esrisfsdiagonalcross: "diagonal-cross",
-
-    solid: "solid",
-    none: "none",
-    null: "none",
-    horizontal: "horizontal",
-    vertical: "vertical",
-    "forward-diagonal": "forward-diagonal",
-    "backward-diagonal": "backward-diagonal",
-    cross: "cross",
-    "diagonal-cross": "diagonal-cross"
-  };
-
-  const newStyle = map[value] ?? "solid";
-
-  if (JsonUtils.ARCGIS_3X_FILL_STYLES.has(value)) {
-    JsonUtils.warnArcGisMigration("normalizeFillStyle", "fill style", style, newStyle);
-  }
-
-  return newStyle;
-}
-
-
-static normalizePlainSymbol(symbolJson: any): any {
-  if (!symbolJson) {
-    return symbolJson;
-  }
-
-  const parsed = JsonUtils.getJsonFor(symbolJson);
-
-  if (parsed.error) {
-    console.warn("[ArcGeoJSON][json-util] Could not parse symbol json", parsed.error);
-    return symbolJson;
-  }
-
-  const symbol = { ...(parsed.parsedJson as any) };
-  const rawType = String(symbol.type || "").toLowerCase();
-
-  const typeMap: Record<string, string> = {
     esrisms: "simple-marker",
     sms: "simple-marker",
     simplemarkersymbol: "simple-marker",
@@ -334,30 +36,150 @@ static normalizePlainSymbol(symbolJson: any): any {
     ts: "text",
     textsymbol: "text",
     "text-symbol": "text",
-    esritextsymbol: "text"
+    esritextsymbol: "text",
+
+    "simple-marker": "simple-marker",
+    "picture-marker": "picture-marker",
+    "simple-line": "simple-line",
+    "simple-fill": "simple-fill",
+    "picture-fill": "picture-fill",
+    text: "text",
+    "label-3d": "label-3d"
   };
 
-  if (typeMap[rawType]) {
-    JsonUtils.warnArcGisMigration(
-      "normalizePlainSymbol",
-      "symbol type",
-      symbol.type,
-      typeMap[rawType]
-    );
-
-    symbol.type = typeMap[rawType];
-  }
-
-  if (Array.isArray(symbol.color)) {
-    symbol.color = JsonUtils.normalizeColor(symbol.color);
-  }
-
-  if (symbol.outline) {
-    symbol.outline = JsonUtils.normalizeOutline(symbol.outline);
-  }
-
-  return symbol;
+  return map[rawType] ?? rawType;
 }
 
 
+static normalizePlainSymbol(symbolJson: any): any {
+  if (!symbolJson) {
+    return symbolJson;
+  }
 
+  const parsed = JsonUtils.getJsonFor(symbolJson);
+
+  if (parsed.error) {
+    console.warn(
+      "[ArcGeoJSON][json-util] Could not parse symbol json",
+      parsed.error
+    );
+    return symbolJson;
+  }
+
+  return JsonUtils.toCanonicalArcGisSymbol(parsed.parsedJson);
+}
+
+static toCanonicalArcGisSymbol(symbolInput: any, geometryType?: string): any {
+  if (!symbolInput) {
+    return JsonUtils.getDefaultSymbolJson(geometryType);
+  }
+
+  const symbol =
+    typeof symbolInput.toJSON === "function"
+      ? symbolInput.toJSON()
+      : JSON.parse(JSON.stringify(symbolInput));
+
+  const rawType = String(
+    symbol.type ??
+      symbol.symbolType ??
+      symbol.esriType ??
+      symbol.declaredClass ??
+      ""
+  ).toLowerCase();
+
+  const canonicalType = JsonUtils.getCanonicalSymbolType(rawType);
+
+  if (JsonUtils.ARCGIS_3X_SYMBOL_TYPES.has(rawType)) {
+    JsonUtils.warnArcGisMigration(
+      "toCanonicalArcGisSymbol",
+      "symbol type",
+      rawType,
+      canonicalType
+    );
+  }
+
+  switch (canonicalType) {
+    case "simple-marker":
+      return {
+        type: "simple-marker",
+        style: JsonUtils.normalizeMarkerStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        size: symbol.size ?? symbol.width ?? 18,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        outline: JsonUtils.normalizeOutline(symbol.outline)
+      };
+
+    case "picture-marker":
+      return {
+        type: "picture-marker",
+        url: symbol.url ?? symbol.imageData ?? "",
+        width: symbol.width ?? symbol.size ?? 24,
+        height: symbol.height ?? symbol.size ?? 24,
+        angle: symbol.angle ?? 0,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0
+      };
+
+    case "simple-line":
+      return {
+        type: "simple-line",
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
+        width: symbol.width ?? 2,
+        style: JsonUtils.normalizeLineStyle(symbol.style)
+      };
+
+    case "simple-fill":
+      return {
+        type: "simple-fill",
+        style: JsonUtils.normalizeFillStyle(symbol.style),
+        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 0.18]),
+        outline: JsonUtils.normalizeOutline(symbol.outline)
+      };
+
+    case "picture-fill":
+      return {
+        ...symbol,
+        type: "picture-fill",
+        url: symbol.url ?? symbol.imageData ?? "",
+        outline: JsonUtils.normalizeOutline(symbol.outline)
+      };
+
+    case "text":
+      return {
+        type: "text",
+        text: symbol.text ?? symbol.label ?? symbol.value ?? "",
+        color: JsonUtils.normalizeColor(symbol.color, [255, 255, 255, 255]),
+        haloColor:
+          symbol.haloColor && symbol.haloColor !== "N/A"
+            ? symbol.haloColor
+            : [255, 255, 255, 255],
+        haloSize:
+          symbol.haloSize !== undefined && symbol.haloSize !== "N/A"
+            ? symbol.haloSize
+            : 1,
+        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+        font: {
+          family: symbol.font?.family ?? "sans-serif",
+          size: symbol.font?.size ?? symbol.size ?? 12,
+          weight: symbol.font?.weight ?? "normal",
+          style: symbol.font?.style ?? "normal"
+        }
+      };
+
+    case "label-3d":
+      return symbol;
+
+    default:
+      console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", {
+        rawType,
+        canonicalType,
+        symbol,
+        geometryType
+      });
+
+      return JsonUtils.getDefaultSymbolJson(geometryType);
+  }
+}
