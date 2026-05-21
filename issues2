@@ -1,5 +1,34 @@
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer || !evt) {
+    return null;
+  }
+
+  try {
+    const hit = await this.view.hitTest(evt, {
+      include: [this.featureLayer],
+    });
+
+    const result = (hit.results ?? []).find((r: any) => {
+      const graphic = r?.graphic as Graphic | undefined;
+
+      return (
+        !!graphic &&
+        !!graphic.geometry &&
+        (graphic.layer === this.featureLayer ||
+          (graphic.layer as any)?.id === this.featureLayer?.id)
+      );
+    });
+
+    return (result?.graphic as Graphic) ?? null;
+  } catch (error) {
+    console.warn("[geojson-layer] getHitGraphic failed", error);
+    return null;
+  }
+}
+
+
 private async getHitGraphics(evt: any): Promise<Graphic[]> {
-  if (!this.view || !this.featureLayer) {
+  if (!this.view || !this.featureLayer || !evt) {
     return [];
   }
 
@@ -9,110 +38,34 @@ private async getHitGraphics(evt: any): Promise<Graphic[]> {
     });
 
     const graphics = (hit.results ?? [])
-      .map((r: any) => r.graphic as Graphic)
+      .map((r: any) => r?.graphic as Graphic)
       .filter((graphic: Graphic | null | undefined) => {
-        return !!graphic && !!graphic.geometry;
+        return (
+          !!graphic &&
+          !!graphic.geometry &&
+          (graphic.layer === this.featureLayer ||
+            (graphic.layer as any)?.id === this.featureLayer?.id)
+        );
       });
 
-    const unique = new Map<string, Graphic>();
+    const uniqueGraphics = new Map<string, Graphic>();
 
     graphics.forEach((graphic: Graphic, index: number) => {
-      const attrs = graphic.attributes ?? {};
-      const key =
-        attrs[this.uniqueIdPropertyName] ??
-        attrs.OBJECTID ??
-        attrs.objectId ??
-        attrs.id ??
+      const attributes = graphic.attributes ?? {};
+
+      const objectId =
+        attributes[this.uniqueIdPropertyName] ??
+        attributes.OBJECTID ??
+        attributes.objectId ??
+        attributes.id ??
         `${graphic.geometry?.type}-${index}`;
 
-      unique.set(String(key), graphic);
+      uniqueGraphics.set(String(objectId), graphic);
     });
 
-    return Array.from(unique.values());
+    return Array.from(uniqueGraphics.values());
   } catch (error) {
-    console.warn("[geojson-layer] hitTest failed", error);
+    console.warn("[geojson-layer] getHitGraphics failed", error);
     return [];
-  }
-}
-
-
-
-
-
-const graphics = await this.getHitGraphics(evt);
-const graphic = graphics[0];
-
-if (!graphic) {
-  return;
-}
-
-
-
-
-
-
-this.showGraphicPopup(graphic, evt.mapPoint, graphics);
-
-
-
-private async showGraphicPopup(
-  graphic: Graphic,
-  location?: Point,
-  graphics: Graphic[] = []
-): Promise<void> {
-  if (!this.view || !graphic) {
-    return;
-  }
-
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    this.closePopup();
-    return;
-  }
-
-  const popupLocation =
-    location ??
-    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
-    undefined;
-
-  if (!popupLocation) {
-    return;
-  }
-
-  const popupGraphics = graphics.length > 0 ? graphics : [graphic];
-
-  popupGraphics.forEach((item) => {
-    const template = this.buildPopupTemplateFromCurrent(item);
-    if (template) {
-      item.popupTemplate = template;
-    }
-  });
-
-  try {
-    const popup: any = this.view.popup;
-
-    this._popupGraphic = graphic;
-    this._popupOpen = true;
-    this._showPopup = true;
-
-    this.view.popupEnabled = true;
-
-    popup.features = [];
-    popup.content = null;
-    popup.title = "";
-    popup.location = popupLocation;
-
-    await Promise.resolve();
-
-    popup.features = popupGraphics;
-    popup.location = popupLocation;
-    popup.open = true;
-    popup.visible = true;
-  } catch (error) {
-    console.warn("[geojson-layer] popup open failed", error);
   }
 }
