@@ -1,33 +1,22 @@
-case "esrits":
-case "ts":
-case "textsymbol":
-case "text-symbol":
-case "text":
-  return {
-    type: "text",
-    text: symbol.text ?? symbol.label ?? symbol.value ?? "",
-    color: JsonUtils.normalizeColor(symbol.color, [255, 255, 255, 255]),
-    haloColor: symbol.haloColor ?? "black",
-    haloSize: symbol.haloSize ?? 1,
-    xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-    yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-    font: {
-      family: symbol.font?.family ?? "sans-serif",
-      size: symbol.font?.size ?? symbol.size ?? 12,
-      weight: symbol.font?.weight ?? "normal",
-    },
-  };
+private updateLabelJson(
+  newLabelJsonArg: string | object | object[] | undefined
+): void {
+  if (!this.featureLayer) {
+    return;
+  }
 
+  if (!newLabelJsonArg) {
+    this.featureLayer.labelingInfo = [];
+    return;
+  }
 
+  const labelClasses = JsonUtils.getLabelJson(newLabelJsonArg);
 
+  if (!labelClasses || labelClasses.length === 0) {
+    console.warn("[up-esri-feature-layer] No valid label classes generated");
+    this.featureLayer.labelingInfo = [];
+    return;
+  }
 
-
-"sms",
-"sls",
-"sfs",
-"pms",
-"ts",
-"esrits",
-"textsymbol",
-"text-symbol",
-"text",
+  this.featureLayer.labelingInfo = labelClasses;
+}
