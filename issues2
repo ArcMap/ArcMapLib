@@ -1,91 +1,96 @@
-private async showGraphicPopup(graphic: Graphic, mapPoint?: Point): Promise<void> {
-  if (!this.view || !graphic?.geometry) {
-    this.setViewCursor("default");
-    return;
-  }
+private closePopup(): void {
+  try {
+    const popup: any = this.view?.popup;
 
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
+    if (popup) {
+      popup.features = [];
+      popup.content = null;
+      popup.title = "";
+      popup.location = null;
+      popup.open = false;
+      popup.visible = false;
+    }
+
+    this.clearPopupHighlight();
+
+    this._popupGraphic = null;
+    this._popupOpen = false;
+    this._suppressPopupUntil = Date.now() + 150;
+
     this.setViewCursor("default");
-    return;
+  } catch (error) {
+    console.warn("[geojson-layer] closePopup failed", error);
+    this.setViewCursor("default");
   }
+}
+
+
+private clearPopupHighlight(): void {
+  try {
+    this._popupHighlightHandle?.remove?.();
+  } catch {}
+
+  this._popupHighlightHandle = null;
 
   try {
-    const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+    const popup: any = this.view?.popup;
 
-    if (!popupTemplate) {
-      console.warn("[geojson-layer] popup skipped: no popupTemplate", {
-        graphic,
-        attributes: graphic.attributes,
-        infoTemplate: this.infoTemplate,
-      });
-      this.setViewCursor("default");
-      return;
+    if (popup) {
+      popup.features = [];
+      popup.content = null;
+      popup.title = "";
+      popup.location = null;
+      popup.open = false;
+      popup.visible = false;
     }
+  } catch {}
+}
 
-    graphic.popupTemplate = popupTemplate;
 
-    const location =
-      mapPoint ??
-      UpGeosonLayer.getPopupPoint(graphic.geometry) ??
-      undefined;
+private setupPopupCloseWatcher(): void {
+  try {
+    this._popupVisibleWatchHandle?.remove?.();
+  } catch {}
 
-    if (!location) {
-      console.warn("[geojson-layer] popup skipped: no location", graphic);
-      this.setViewCursor("default");
-      return;
-    }
+  this._popupVisibleWatchHandle = null;
 
-    this.closePopup();
+  const popup: any = this.view?.popup;
 
-    const popup: any = this.view.popup;
-
-    this.view.popupEnabled = true;
-
-    // Do NOT assign selectedFeature. It is read-only in ArcGIS 5.
-    popup.features = [];
-    popup.content = null;
-    popup.title = "";
-    popup.location = location;
-
-    await Promise.resolve();
-
-    popup.features = [graphic];
-    popup.location = location;
-    popup.open = true;
-    popup.visible = true;
-
-    // Force render again after ArcGIS finishes internal async popup lifecycle.
-    requestAnimationFrame(() => {
-      try {
-        popup.features = [graphic];
-        popup.location = location;
-        popup.open = true;
-        popup.visible = true;
-
-        console.log("[geojson-layer] popup forced open", {
-          open: popup.open,
-          visible: popup.visible,
-          location: popup.location,
-          features: popup.features,
-          popupTemplate: graphic.popupTemplate,
-        });
-      } catch (error) {
-        console.error("[geojson-layer] popup force render failed", error);
-      }
-    });
-  } catch (error) {
-    console.error("[geojson-layer] popup open failed", error);
-    this.closePopup();
-  } finally {
-    window.setTimeout(() => {
-      if (!this._editorOpen && !this.inDrawingMode) {
-        this.setViewCursor("default");
-      }
-    }, 100);
+  if (!popup || typeof popup.watch !== "function") {
+    return;
   }
+
+  this._popupVisibleWatchHandle = popup.watch("visible", (visible: boolean) => {
+    if (!visible) {
+      this._popupGraphic = null;
+      this._popupOpen = false;
+      this.clearPopupHighlight();
+      this.setViewCursor("default");
+
+      // Small delay prevents stuck pointer after ArcGIS popup close animation.
+      window.setTimeout(() => {
+        if (!this._editorOpen && !this.inDrawingMode) {
+          this.setViewCursor("default");
+        }
+      }, 100);
+    }
+  });
+}
+
+
+
+
+this._popupGraphic = graphic;
+this._popupOpen = true;
+this.setViewCursor("pointer");
+
+
+
+
+finally {
+  window.setTimeout(() => {
+    if (!this._editorOpen && !this.inDrawingMode) {
+      this.setViewCursor("default");
+    }
+  }, 100);
 }
