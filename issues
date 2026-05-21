@@ -1,12 +1,11 @@
-const placement =
-    featureLayer.geometryType === "polyline"
-      ? "center-along"
-      : individualLabelJson.labelPlacement ?? "above-right";
+const requestedPlacement = individualLabelJson.labelPlacement;
 
-return new LabelClass({
-    labelExpressionInfo:{
-        expression:safeExpression
-    },
-    labelPlacement: placement,
-    symbol: labelSymbol
-});
+const placement =
+  geometryType === "polyline" ||
+  geometryType === "esrigeometrypolyline"
+    ? requestedPlacement === "above-along" ||
+      requestedPlacement === "below-along" ||
+      requestedPlacement === "center-along"
+      ? requestedPlacement
+      : "center-along"
+    : requestedPlacement ?? "above-right";
