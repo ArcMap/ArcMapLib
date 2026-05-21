@@ -1,71 +1,71 @@
-private async getHitGraphic(evt: any): Promise<Graphic | null> {
-  if (!this.view || !this.featureLayer || !evt) {
-    return null;
+const clickHandle = this.view.on("click", async (evt: any) => {
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    return;
   }
 
-  try {
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer],
-    });
+  clickTimer = setTimeout(async () => {
+    clickTimer = null;
 
-    const result = (hit.results ?? []).find((r: any) => {
-      const graphic = r?.graphic as Graphic | undefined;
+    const graphic = await this.getHitGraphic(evt);
+    if (!graphic) {
+      return;
+    }
 
-      return (
-        !!graphic &&
-        !!graphic.geometry &&
-        (graphic.layer === this.featureLayer ||
-          (graphic.layer as any)?.id === this.featureLayer?.id)
-      );
-    });
-
-    return (result?.graphic as Graphic) ?? null;
-  } catch (error) {
-    console.warn("[geojson-layer] getHitGraphic failed", error);
-    return null;
-  }
-}
-
-
-private async getHitGraphics(evt: any): Promise<Graphic[]> {
-  if (!this.view || !this.featureLayer || !evt) {
-    return [];
-  }
-
-  try {
-    const hit = await this.view.hitTest(evt, {
-      include: [this.featureLayer],
-    });
-
-    const graphics = (hit.results ?? [])
+    // ✅ IMPORTANT FIX:
+    // Check actual top-most clicked graphic across ALL layers.
+    // If top-most graphic is not from this layer, do not open this layer popup.
+    const allHit = await this.view.hitTest(evt);
+    const topGraphic = (allHit.results ?? [])
       .map((r: any) => r?.graphic as Graphic)
-      .filter((graphic: Graphic | null | undefined) => {
-        return (
-          !!graphic &&
-          !!graphic.geometry &&
-          (graphic.layer === this.featureLayer ||
-            (graphic.layer as any)?.id === this.featureLayer?.id)
-        );
-      });
+      .find((g: Graphic | null | undefined) => !!g?.geometry);
 
-    const uniqueGraphics = new Map<string, Graphic>();
+    if (
+      topGraphic &&
+      topGraphic.layer !== this.featureLayer &&
+      (topGraphic.layer as any)?.id !== this.featureLayer?.id
+    ) {
+      return;
+    }
 
-    graphics.forEach((graphic: Graphic, index: number) => {
-      const attributes = graphic.attributes ?? {};
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(graphic),
+      graphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: graphic.attributes ?? {},
+        },
+      }
+    );
 
-      const objectId =
-        attributes[this.uniqueIdPropertyName] ??
-        attributes.OBJECTID ??
-        attributes.objectId ??
-        attributes.id ??
-        `${graphic.geometry?.type}-${index}`;
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this._isStartingDraw &&
+      !this.shouldSuppressPopup()
+    ) {
+      this.showGraphicPopup(graphic, evt.mapPoint);
+    }
 
-      uniqueGraphics.set(String(objectId), graphic);
-    });
+    if (
+      this.enableUserEdit &&
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this.infoTemplate
+    ) {
+      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+        this.removeFromGeoJSON(graphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
 
-    return Array.from(uniqueGraphics.values());
-  } catch (error) {
-    console.warn("[geojson-layer] getHitGraphics failed", error);
-    return [];
-  }
-}
+      this.activateGraphicsEditor(graphic);
+    }
+  }, 250);
+});
