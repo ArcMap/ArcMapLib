@@ -1,12 +1,21 @@
+const geometryType = String(
+  featureLayer.geometryType ?? ""
+).toLowerCase();
+
 const placement =
-  featureLayer.geometryType === "polyline"
+  geometryType.includes("polyline")
     ? "center-along"
     : individualLabelJson.labelPlacement ?? "above-right";
-
+console.log(
+   "geometry:",
+   featureLayer.geometryType,
+   "placement:",
+   placement
+);
 return new LabelClass({
-  labelExpressionInfo: {
-    expression: safeExpression,
-  },
-  labelPlacement: placement,
-  symbol: labelSymbol,
+    labelExpressionInfo: {
+        expression: safeExpression
+    },
+    labelPlacement: placement,
+    symbol: labelSymbol
 });
