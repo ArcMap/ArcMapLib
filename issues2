@@ -1,154 +1,124 @@
-static getLabelJson(
-  userLabel: string | object | object[] | undefined,
-  userColor: string | number[] | undefined,
-  userSize: number | undefined
-): any[] {
-  const labelJson = JsonUtils.getJsonFor(userLabel as any);
-
-  const labelColor = JsonUtils.resolveLabelColor(userColor);
-  const labelSize = JsonUtils.resolveLabelSize(userSize);
-
-  const normalizeLabelJson = (singleLabelJson: any): any => {
-    const normalizedLabelJson = singleLabelJson || {};
-    const symbol = JsonUtils.normalizeLabelSymbol(
-      normalizedLabelJson.symbol,
-      labelColor,
-      labelSize
-    );
-
-    return {
-      ...normalizedLabelJson,
-
-      labelExpressionInfo:
-        normalizedLabelJson.labelExpressionInfo ||
-        normalizedLabelJson.labelExpression ||
-        {
-          expression: "$feature.LABEL"
-        },
-
-      symbol
-    };
-  };
-
-  if (!labelJson.error && labelJson.parsedJson) {
-    const parsed = labelJson.parsedJson;
-    const parsedArray = Array.isArray(parsed) ? parsed : [parsed];
-
-    return parsedArray.map((singleLabelJson: any) =>
-      normalizeLabelJson(singleLabelJson)
-    );
-  }
-
-  return [
-    normalizeLabelJson({
-      labelExpressionInfo: {
-        expression: "$feature.LABEL"
-      }
-    })
-  ];
-}
-
-
-
-private static normalizeLabelSymbol(
-  symbolInput: any,
-  labelColor: string | number[],
-  labelSize: number
-): any {
-  if (!symbolInput) {
-    return {
-      type: "text",
-      color: labelColor,
-      haloColor: [255, 255, 255, 255],
-      haloSize: 1,
-      xoffset: 3,
-      yoffset: 3,
-      font: {
-        size: labelSize,
-        family: "Arial",
-        weight: "bold",
-        style: "normal"
-      }
-    };
-  }
-
-  if (typeof symbolInput.toJSON === "function") {
-    symbolInput = symbolInput.toJSON();
-  }
-
-  const symbolType =
-    symbolInput.type ||
-    symbolInput.symbolType ||
-    symbolInput.esriType ||
-    symbolInput.declaredClass;
-
-  if (
-    symbolType === "label-3d" ||
-    symbolType === "esri.symbols.LabelSymbol3D"
-  ) {
-    return symbolInput;
-  }
-
-  const font = symbolInput.font || {};
-
-  return {
-    ...symbolInput,
-    type: "text",
-
-    color: symbolInput.color || labelColor,
-
-    haloColor:
-      symbolInput.haloColor &&
-      symbolInput.haloColor !== "N/A" &&
-      symbolInput.haloColor !== "none"
-        ? symbolInput.haloColor
-        : [255, 255, 255, 255],
-
-    haloSize:
-      symbolInput.haloSize !== undefined &&
-      symbolInput.haloSize !== null &&
-      symbolInput.haloSize !== "N/A"
-        ? symbolInput.haloSize
-        : 1,
-
-    xoffset: symbolInput.xoffset ?? symbolInput.xOffset ?? 3,
-    yoffset: symbolInput.yoffset ?? symbolInput.yOffset ?? 3,
-
-    font: {
-      ...font,
-      size: font.size || labelSize,
-      family: font.family || "Arial",
-      weight: font.weight || "bold",
-      style: font.style || "normal"
-    }
-  };
-}
-
-
-static updateLabelJson(
-  newLabelJsonArg: string | object | object[] | undefined,
-  featureLayer: FeatureLayer | GeoJSONLayer
+static updateRenderer(
+  newRenderer: any,
+  featureLayer: FeatureLayer | GeoJSONLayer,
+  rendererTypeToModule: any,
+  symbolJson: any
 ) {
-  if (!newLabelJsonArg || !featureLayer) {
-    return;
-  }
+  if (newRenderer) {
+    const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
 
-  const jsonParseResult = JsonUtils.getJsonFor(newLabelJsonArg);
+    if (rendererParseResult.error) {
+      console.warn(
+        "Could not parse new value for renderer, staying on the previous value",
+        rendererParseResult.error
+      );
+      return;
+    }
 
-  if (jsonParseResult.error) {
-    console.warn(
-      "Could not parse new value for label json, staying on previous value",
-      jsonParseResult.error
+    const parsedRendererConfig = rendererParseResult.parsedJson;
+
+    parsedRendererConfig.type = JsonUtils.toCanonicalArcGisRendererType(
+      parsedRendererConfig.type
     );
-    return;
+
+    if (parsedRendererConfig.defaultSymbol) {
+      parsedRendererConfig.defaultSymbol = JsonUtils.toCanonicalArcGisSymbol(
+        parsedRendererConfig.defaultSymbol,
+        featureLayer.geometryType
+      );
+    }
+
+    if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
+      parsedRendererConfig.uniqueValueInfos =
+        parsedRendererConfig.uniqueValueInfos.map((uniqueValueInfo: any) => {
+          return {
+            ...uniqueValueInfo,
+            symbol: JsonUtils.toCanonicalArcGisSymbol(
+              uniqueValueInfo.symbol,
+              featureLayer.geometryType
+            )
+          };
+        });
+    }
+
+    if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
+      parsedRendererConfig.classBreakInfos =
+        parsedRendererConfig.classBreakInfos.map((classBreakInfo: any) => {
+          return {
+            ...classBreakInfo,
+            symbol: JsonUtils.toCanonicalArcGisSymbol(
+              classBreakInfo.symbol,
+              featureLayer.geometryType
+            )
+          };
+        });
+    }
+
+    const rendererModuleName = rendererTypeToModule[parsedRendererConfig.type];
+
+    if (rendererModuleName === undefined) {
+      console.error(
+        "Unrecognized renderer type",
+        parsedRendererConfig.type,
+        "Must be one of",
+        Object.keys(rendererTypeToModule)
+      );
+      return;
+    }
+
+    let rendererInstance;
+
+    if (parsedRendererConfig.type === "simple") {
+      rendererInstance = new SimpleRenderer(parsedRendererConfig);
+    } else if (parsedRendererConfig.type === "unique-value") {
+      rendererInstance = new UniqueValueRenderer(parsedRendererConfig);
+    } else if (parsedRendererConfig.type === "class-breaks") {
+      rendererInstance = new ClassBreaksRenderer(parsedRendererConfig);
+    } else {
+      console.error("Unrecognized renderer type", parsedRendererConfig.type);
+      return;
+    }
+
+    featureLayer.renderer = rendererInstance;
+  } else {
+    const renderer = new SimpleRenderer(symbolJson);
+    featureLayer.renderer = renderer;
+  }
+}
+
+
+
+static toCanonicalArcGisRendererType(rendererType: string): string {
+  if (!rendererType) {
+    return "simple";
   }
 
-  const parsedJson = jsonParseResult.parsedJson;
-  const parsedArray = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
+  const normalizedType = String(rendererType).trim();
 
-  const labelClasses: LabelClass[] = parsedArray.map((individualLabelJson: any) => {
-    return new LabelClass(individualLabelJson);
-  });
+  switch (normalizedType) {
+    case "simple":
+    case "SimpleRenderer":
+    case "esri.renderers.SimpleRenderer":
+      return "simple";
 
-  featureLayer.labelingInfo = labelClasses;
+    case "uniqueValue":
+    case "unique-value":
+    case "UniqueValueRenderer":
+    case "esri.renderers.UniqueValueRenderer":
+      return "unique-value";
+
+    case "classBreaks":
+    case "class-breaks":
+    case "ClassBreaksRenderer":
+    case "esri.renderers.ClassBreaksRenderer":
+      return "class-breaks";
+
+    default:
+      console.warn(
+        "Unrecognized renderer type",
+        rendererType,
+        "Must be one of simple, unique-value, class-breaks"
+      );
+      return normalizedType;
+  }
 }
