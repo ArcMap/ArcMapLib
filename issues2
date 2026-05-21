@@ -1,22 +1,154 @@
-private updateLabelJson(
-  newLabelJsonArg: string | object | object[] | undefined
-): void {
-  if (!this.featureLayer) {
+static getLabelJson(
+  userLabel: string | object | object[] | undefined,
+  userColor: string | number[] | undefined,
+  userSize: number | undefined
+): any[] {
+  const labelJson = JsonUtils.getJsonFor(userLabel as any);
+
+  const labelColor = JsonUtils.resolveLabelColor(userColor);
+  const labelSize = JsonUtils.resolveLabelSize(userSize);
+
+  const normalizeLabelJson = (singleLabelJson: any): any => {
+    const normalizedLabelJson = singleLabelJson || {};
+    const symbol = JsonUtils.normalizeLabelSymbol(
+      normalizedLabelJson.symbol,
+      labelColor,
+      labelSize
+    );
+
+    return {
+      ...normalizedLabelJson,
+
+      labelExpressionInfo:
+        normalizedLabelJson.labelExpressionInfo ||
+        normalizedLabelJson.labelExpression ||
+        {
+          expression: "$feature.LABEL"
+        },
+
+      symbol
+    };
+  };
+
+  if (!labelJson.error && labelJson.parsedJson) {
+    const parsed = labelJson.parsedJson;
+    const parsedArray = Array.isArray(parsed) ? parsed : [parsed];
+
+    return parsedArray.map((singleLabelJson: any) =>
+      normalizeLabelJson(singleLabelJson)
+    );
+  }
+
+  return [
+    normalizeLabelJson({
+      labelExpressionInfo: {
+        expression: "$feature.LABEL"
+      }
+    })
+  ];
+}
+
+
+
+private static normalizeLabelSymbol(
+  symbolInput: any,
+  labelColor: string | number[],
+  labelSize: number
+): any {
+  if (!symbolInput) {
+    return {
+      type: "text",
+      color: labelColor,
+      haloColor: [255, 255, 255, 255],
+      haloSize: 1,
+      xoffset: 3,
+      yoffset: 3,
+      font: {
+        size: labelSize,
+        family: "Arial",
+        weight: "bold",
+        style: "normal"
+      }
+    };
+  }
+
+  if (typeof symbolInput.toJSON === "function") {
+    symbolInput = symbolInput.toJSON();
+  }
+
+  const symbolType =
+    symbolInput.type ||
+    symbolInput.symbolType ||
+    symbolInput.esriType ||
+    symbolInput.declaredClass;
+
+  if (
+    symbolType === "label-3d" ||
+    symbolType === "esri.symbols.LabelSymbol3D"
+  ) {
+    return symbolInput;
+  }
+
+  const font = symbolInput.font || {};
+
+  return {
+    ...symbolInput,
+    type: "text",
+
+    color: symbolInput.color || labelColor,
+
+    haloColor:
+      symbolInput.haloColor &&
+      symbolInput.haloColor !== "N/A" &&
+      symbolInput.haloColor !== "none"
+        ? symbolInput.haloColor
+        : [255, 255, 255, 255],
+
+    haloSize:
+      symbolInput.haloSize !== undefined &&
+      symbolInput.haloSize !== null &&
+      symbolInput.haloSize !== "N/A"
+        ? symbolInput.haloSize
+        : 1,
+
+    xoffset: symbolInput.xoffset ?? symbolInput.xOffset ?? 3,
+    yoffset: symbolInput.yoffset ?? symbolInput.yOffset ?? 3,
+
+    font: {
+      ...font,
+      size: font.size || labelSize,
+      family: font.family || "Arial",
+      weight: font.weight || "bold",
+      style: font.style || "normal"
+    }
+  };
+}
+
+
+static updateLabelJson(
+  newLabelJsonArg: string | object | object[] | undefined,
+  featureLayer: FeatureLayer | GeoJSONLayer
+) {
+  if (!newLabelJsonArg || !featureLayer) {
     return;
   }
 
-  if (!newLabelJsonArg) {
-    this.featureLayer.labelingInfo = [];
+  const jsonParseResult = JsonUtils.getJsonFor(newLabelJsonArg);
+
+  if (jsonParseResult.error) {
+    console.warn(
+      "Could not parse new value for label json, staying on previous value",
+      jsonParseResult.error
+    );
     return;
   }
 
-  const labelClasses = JsonUtils.getLabelJson(newLabelJsonArg);
+  const parsedJson = jsonParseResult.parsedJson;
+  const parsedArray = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
 
-  if (!labelClasses || labelClasses.length === 0) {
-    console.warn("-feature-layer] No valid label classes generated");
-    this.featureLayer.labelingInfo = [];
-    return;
-  }
+  const labelClasses: LabelClass[] = parsedArray.map((individualLabelJson: any) => {
+    return new LabelClass(individualLabelJson);
+  });
 
-  this.featureLayer.labelingInfo = labelClasses;
+  featureLayer.labelingInfo = labelClasses;
 }
