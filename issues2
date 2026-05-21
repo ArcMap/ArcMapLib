@@ -1,6 +1,64 @@
+private async getHitGraphics(evt: any): Promise<Graphic[]> {
+  if (!this.view || !this.featureLayer) {
+    return [];
+  }
+
+  try {
+    const hit = await this.view.hitTest(evt, {
+      include: [this.featureLayer],
+    });
+
+    const graphics = (hit.results ?? [])
+      .map((r: any) => r.graphic as Graphic)
+      .filter((graphic: Graphic | null | undefined) => {
+        return !!graphic && !!graphic.geometry;
+      });
+
+    const unique = new Map<string, Graphic>();
+
+    graphics.forEach((graphic: Graphic, index: number) => {
+      const attrs = graphic.attributes ?? {};
+      const key =
+        attrs[this.uniqueIdPropertyName] ??
+        attrs.OBJECTID ??
+        attrs.objectId ??
+        attrs.id ??
+        `${graphic.geometry?.type}-${index}`;
+
+      unique.set(String(key), graphic);
+    });
+
+    return Array.from(unique.values());
+  } catch (error) {
+    console.warn("[geojson-layer] hitTest failed", error);
+    return [];
+  }
+}
+
+
+
+
+
+const graphics = await this.getHitGraphics(evt);
+const graphic = graphics[0];
+
+if (!graphic) {
+  return;
+}
+
+
+
+
+
+
+this.showGraphicPopup(graphic, evt.mapPoint, graphics);
+
+
+
 private async showGraphicPopup(
   graphic: Graphic,
-  location?: Point
+  location?: Point,
+  graphics: Graphic[] = []
 ): Promise<void> {
   if (!this.view || !graphic) {
     return;
@@ -16,43 +74,33 @@ private async showGraphicPopup(
     return;
   }
 
-  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
-  if (!popupTemplate) {
-    console.warn("[geojson-layer] popup skipped: no popup template", {
-      infoTemplate: this.infoTemplate,
-      attributes: graphic.attributes ?? {},
-    });
-    return;
-  }
-
   const popupLocation =
     location ??
     UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
     undefined;
 
   if (!popupLocation) {
-    console.warn("[geojson-layer] popup skipped: no popup location", {
-      geometry: graphic.geometry,
-    });
     return;
   }
 
+  const popupGraphics = graphics.length > 0 ? graphics : [graphic];
+
+  popupGraphics.forEach((item) => {
+    const template = this.buildPopupTemplateFromCurrent(item);
+    if (template) {
+      item.popupTemplate = template;
+    }
+  });
+
   try {
+    const popup: any = this.view.popup;
+
     this._popupGraphic = graphic;
     this._popupOpen = true;
     this._showPopup = true;
 
-    graphic.popupTemplate = popupTemplate;
-
-    const popup: any = this.view.popup;
     this.view.popupEnabled = true;
 
-    /*
-     * ArcGIS 5.x:
-     * - Do NOT assign popup.selectedFeature because it is read-only.
-     * - Use features/location/open/visible.
-     * - Clear old popup state first so stale polygon/geofence popup does not remain.
-     */
     popup.features = [];
     popup.content = null;
     popup.title = "";
@@ -60,26 +108,11 @@ private async showGraphicPopup(
 
     await Promise.resolve();
 
-    popup.features = [graphic];
+    popup.features = popupGraphics;
     popup.location = popupLocation;
     popup.open = true;
     popup.visible = true;
-
-    requestAnimationFrame(() => {
-      try {
-        popup.features = [graphic];
-        popup.location = popupLocation;
-        popup.open = true;
-        popup.visible = true;
-      } catch (error) {
-        console.warn("[geojson-layer] popup force-open failed", error);
-      }
-    });
   } catch (error) {
-    this._popupGraphic = null;
-    this._popupOpen = false;
-    this._showPopup = false;
-
     console.warn("[geojson-layer] popup open failed", error);
   }
 }
