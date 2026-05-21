@@ -1,22 +1,48 @@
-private static warnArcGis3xMigration(
-  methodName: string,
-  propertyName: string,
-  oldValue: any,
-  newValue: any,
-  context?: string
-): void {
-  if (oldValue === undefined || oldValue === null) {
-    return;
+static toCanonicalArcGisRendererType(rendererType: string): string {
+  if (!rendererType) {
+    return "simple";
   }
 
-  if (oldValue === newValue) {
-    return;
+  const normalizedType = String(rendererType).trim();
+
+  let newRendererType = normalizedType;
+
+  switch (normalizedType) {
+    case "simple":
+    case "SimpleRenderer":
+    case "esri.renderers.SimpleRenderer":
+      newRendererType = "simple";
+      break;
+
+    case "uniqueValue":
+    case "unique-value":
+    case "UniqueValueRenderer":
+    case "esri.renderers.UniqueValueRenderer":
+      newRendererType = "unique-value";
+      break;
+
+    case "classBreaks":
+    case "class-breaks":
+    case "ClassBreaksRenderer":
+    case "esri.renderers.ClassBreaksRenderer":
+      newRendererType = "class-breaks";
+      break;
+
+    default:
+      console.warn(
+        `[ArcGIS Migration Warning] toCanonicalArcGisRendererType: ` +
+          `Unrecognized renderer type "${rendererType}". ` +
+          `Expected one of: simple, unique-value, class-breaks.`
+      );
+      return normalizedType;
   }
 
-  console.warn(
-    `[ArcGIS Migration Warning] ${methodName}: ` +
-      `Detected old ArcGIS 3.x ${propertyName} "${oldValue}". ` +
-      `It has been normalized to ArcGIS Maps SDK 5.x value "${newValue}".` +
-      `${context ? " " + context : ""}`
+  JsonUtils.warnArcGis3xMigration(
+    "toCanonicalArcGisRendererType",
+    "renderer type",
+    rendererType,
+    newRendererType
   );
+
+  return newRendererType;
 }
