@@ -1,52 +1,12 @@
-static updateLabelJson(
-  newLabelJsonArg: string | object | object[] | undefined,
-  featureLayer: FeatureLayer | GeoJSONLayer
-): void {
-  if (!newLabelJsonArg || !featureLayer) {
-    featureLayer.labelingInfo = [];
-    return;
-  }
+const placement =
+    featureLayer.geometryType === "polyline"
+      ? "center-along"
+      : individualLabelJson.labelPlacement ?? "above-right";
 
-  const jsonParseResult = JsonUtils.getJsonFor<any>(newLabelJsonArg);
-
-  if (jsonParseResult.error) {
-    console.warn("Could not parse new value for label json, staying on previous value", jsonParseResult.error);
-    return;
-  }
-
-  const parsedJson = jsonParseResult.parsedJson;
-  const parsedArray = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
-
-  const labelClasses: LabelClass[] = parsedArray.map((individualLabelJson: any) => {
-    const rawExpression =
-      individualLabelJson?.labelExpressionInfo?.expression ??
-      individualLabelJson?.expression ??
-      "$feature['label']";
-
-    const safeExpression =
-      rawExpression === "$feature.label"
-        ? "$feature['label']"
-        : rawExpression;
-
-    const labelSymbol = new TextSymbol({
-      color: individualLabelJson.symbol?.color ?? [0, 0, 0, 255],
-      haloColor: individualLabelJson.symbol?.haloColor ?? [255, 255, 255, 255],
-      haloSize: individualLabelJson.symbol?.haloSize ?? 1,
-      font: {
-        size: individualLabelJson.symbol?.font?.size ?? 12,
-        family: individualLabelJson.symbol?.font?.family ?? "sans-serif",
-        weight: individualLabelJson.symbol?.font?.weight ?? "normal",
-      },
-    });
-
-    return new LabelClass({
-      labelExpressionInfo: {
-        expression: safeExpression,
-      },
-      labelPlacement: individualLabelJson.labelPlacement ?? "above-right",
-      symbol: labelSymbol,
-    });
-  });
-
-  featureLayer.labelingInfo = labelClasses;
-}
+return new LabelClass({
+    labelExpressionInfo:{
+        expression:safeExpression
+    },
+    labelPlacement: placement,
+    symbol: labelSymbol
+});
