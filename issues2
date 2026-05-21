@@ -1,66 +1,33 @@
-private async waitForViewIdle(): Promise<void> {
-  if (!this.view) {
-    return;
-  }
+case "esrits":
+case "ts":
+case "textsymbol":
+case "text-symbol":
+case "text":
+  return {
+    type: "text",
+    text: symbol.text ?? symbol.label ?? symbol.value ?? "",
+    color: JsonUtils.normalizeColor(symbol.color, [255, 255, 255, 255]),
+    haloColor: symbol.haloColor ?? "black",
+    haloSize: symbol.haloSize ?? 1,
+    xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
+    yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
+    font: {
+      family: symbol.font?.family ?? "sans-serif",
+      size: symbol.font?.size ?? symbol.size ?? 12,
+      weight: symbol.font?.weight ?? "normal",
+    },
+  };
 
-  try {
-    await this.view.when();
-
-    while ((this.view as any).updating) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  } catch {}
-}
 
 
-async zoomTo(id: string | number, zoomLevel = 9): Promise<void> {
-  await this.componentReady();
 
-  const graphic = await this.getGraphic(id);
 
-  if (!graphic || !graphic.geometry || !this.view) {
-    console.warn("[geojson-layer] Cannot zoom to.", {
-      id,
-      hasGraphic: !!graphic,
-      hasGeometry: !!graphic?.geometry,
-      hasView: !!this.view,
-    });
-    return;
-  }
-
-  const geometry = graphic.geometry;
-
-  try {
-    if (geometry.type === "point") {
-      await this.view.goTo({
-        center: geometry as Point,
-        zoom: zoomLevel,
-      });
-    } else if (
-      geometry.type === "polygon" ||
-      geometry.type === "polyline" ||
-      geometry.type === "extent"
-    ) {
-      const extent = (geometry as any).extent;
-
-      if (extent) {
-        await this.view.goTo(extent.expand ? extent.expand(1.5) : extent);
-      }
-    }
-
-    await this.waitForViewIdle();
-
-    const popupPoint =
-      (this.constructor as any).getPopupPoint?.(geometry) ??
-      ((geometry as any).extent?.center as Point | undefined) ??
-      undefined;
-
-    if (popupPoint) {
-      await this.showGraphicPopup(graphic, popupPoint);
-    }
-  } catch (error) {
-    console.warn("[geojson-layer] zoomTo failed", error);
-  }
-}
+"sms",
+"sls",
+"sfs",
+"pms",
+"ts",
+"esrits",
+"textsymbol",
+"text-symbol",
+"text",
