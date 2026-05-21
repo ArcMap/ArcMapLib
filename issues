@@ -37,7 +37,7 @@ private refreshLabels(): void {
       return;
     }
 
-    const pt = UpGeojsonLayer.getPopupPoint(graphic.geometry);
+    const pt = jj.getPopupPoint(graphic.geometry);
     if (!pt) {
       return;
     }
