@@ -1,21 +1,17 @@
-const geometryType = String(
-  featureLayer.geometryType ?? ""
-).toLowerCase();
+if (!fieldInfos.length) {
+  fieldInfos = Object.keys(attributes)
+    .filter((key) => attributes[key] !== undefined && attributes[key] !== null)
+    .map((key) => ({
+      fieldName: key,
+      label: key,
+      visible: true,
+    }));
 
-const placement =
-  geometryType.includes("polyline")
-    ? "center-along"
-    : individualLabelJson.labelPlacement ?? "above-right";
-console.log(
-   "geometry:",
-   featureLayer.geometryType,
-   "placement:",
-   placement
-);
-return new LabelClass({
-    labelExpressionInfo: {
-        expression: safeExpression
-    },
-    labelPlacement: placement,
-    symbol: labelSymbol
-});
+  if (!fieldInfos.length) {
+    console.warn("[geojson-layer] popup skipped: no popup fields resolved", {
+      infoTemplate: this.infoTemplate,
+      attributes,
+    });
+    return null;
+  }
+}
