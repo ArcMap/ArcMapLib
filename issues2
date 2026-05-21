@@ -1,124 +1,503 @@
-static updateRenderer(
-  newRenderer: any,
-  featureLayer: FeatureLayer | GeoJSONLayer,
-  rendererTypeToModule: any,
-  symbolJson: any
-) {
-  if (newRenderer) {
-    const rendererParseResult = JsonUtils.getJsonFor(newRenderer);
+# ArcEsriFeatureLayer + ArcGeoJson Migration Changelog
+# ArcGIS 3.x → ArcGIS Maps SDK 5.x Compatibility Guide
 
-    if (rendererParseResult.error) {
-      console.warn(
-        "Could not parse new value for renderer, staying on the previous value",
-        rendererParseResult.error
-      );
-      return;
-    }
+Version: 2.x
 
-    const parsedRendererConfig = rendererParseResult.parsedJson;
+Purpose:
+Provide backward compatibility support between ArcGIS 3.x and ArcGIS Maps SDK 5.x while preserving consumer APIs for ArcEsriFeatureLayer and ArcGeoJson.
 
-    parsedRendererConfig.type = JsonUtils.toCanonicalArcGisRendererType(
-      parsedRendererConfig.type
-    );
+--------------------------------------------------------------------------------
+SECTION 1 — OVERVIEW
+--------------------------------------------------------------------------------
 
-    if (parsedRendererConfig.defaultSymbol) {
-      parsedRendererConfig.defaultSymbol = JsonUtils.toCanonicalArcGisSymbol(
-        parsedRendererConfig.defaultSymbol,
-        featureLayer.geometryType
-      );
-    }
+Supported compatibility:
 
-    if (Array.isArray(parsedRendererConfig.uniqueValueInfos)) {
-      parsedRendererConfig.uniqueValueInfos =
-        parsedRendererConfig.uniqueValueInfos.map((uniqueValueInfo: any) => {
-          return {
-            ...uniqueValueInfo,
-            symbol: JsonUtils.toCanonicalArcGisSymbol(
-              uniqueValueInfo.symbol,
-              featureLayer.geometryType
-            )
-          };
-        });
-    }
+✓ ArcGIS 3.x renderers
+✓ ArcGIS Maps SDK 5.x renderers
+✓ ArcEsriFeatureLayer
+✓ ArcGeoJson
+✓ Label JSON
+✓ Symbol normalization
+✓ Old → New renderer conversion
+✓ Backward compatibility support
 
-    if (Array.isArray(parsedRendererConfig.classBreakInfos)) {
-      parsedRendererConfig.classBreakInfos =
-        parsedRendererConfig.classBreakInfos.map((classBreakInfo: any) => {
-          return {
-            ...classBreakInfo,
-            symbol: JsonUtils.toCanonicalArcGisSymbol(
-              classBreakInfo.symbol,
-              featureLayer.geometryType
-            )
-          };
-        });
-    }
+Goal:
 
-    const rendererModuleName = rendererTypeToModule[parsedRendererConfig.type];
+Consumer applications written with older Esri syntax should continue to work
+without requiring changes.
 
-    if (rendererModuleName === undefined) {
-      console.error(
-        "Unrecognized renderer type",
-        parsedRendererConfig.type,
-        "Must be one of",
-        Object.keys(rendererTypeToModule)
-      );
-      return;
-    }
+--------------------------------------------------------------------------------
+SECTION 2 — RENDERER TYPE MIGRATION
+--------------------------------------------------------------------------------
 
-    let rendererInstance;
+Old Type                                        New Type
 
-    if (parsedRendererConfig.type === "simple") {
-      rendererInstance = new SimpleRenderer(parsedRendererConfig);
-    } else if (parsedRendererConfig.type === "unique-value") {
-      rendererInstance = new UniqueValueRenderer(parsedRendererConfig);
-    } else if (parsedRendererConfig.type === "class-breaks") {
-      rendererInstance = new ClassBreaksRenderer(parsedRendererConfig);
-    } else {
-      console.error("Unrecognized renderer type", parsedRendererConfig.type);
-      return;
-    }
+simple                                          simple
+uniqueValue                                     unique-value
+classBreaks                                     class-breaks
 
-    featureLayer.renderer = rendererInstance;
-  } else {
-    const renderer = new SimpleRenderer(symbolJson);
-    featureLayer.renderer = renderer;
-  }
+SimpleRenderer                                  simple
+UniqueValueRenderer                             unique-value
+ClassBreaksRenderer                             class-breaks
+
+esri.renderers.SimpleRenderer                   simple
+esri.renderers.UniqueValueRenderer              unique-value
+esri.renderers.ClassBreaksRenderer              class-breaks
+
+
+Example:
+
+OLD
+
+{
+   type:"uniqueValue"
 }
 
+NEW
 
-
-static toCanonicalArcGisRendererType(rendererType: string): string {
-  if (!rendererType) {
-    return "simple";
-  }
-
-  const normalizedType = String(rendererType).trim();
-
-  switch (normalizedType) {
-    case "simple":
-    case "SimpleRenderer":
-    case "esri.renderers.SimpleRenderer":
-      return "simple";
-
-    case "uniqueValue":
-    case "unique-value":
-    case "UniqueValueRenderer":
-    case "esri.renderers.UniqueValueRenderer":
-      return "unique-value";
-
-    case "classBreaks":
-    case "class-breaks":
-    case "ClassBreaksRenderer":
-    case "esri.renderers.ClassBreaksRenderer":
-      return "class-breaks";
-
-    default:
-      console.warn(
-        "Unrecognized renderer type",
-        rendererType,
-        "Must be one of simple, unique-value, class-breaks"
-      );
-      return normalizedType;
-  }
+{
+   type:"unique-value"
 }
+
+--------------------------------------------------------------------------------
+SECTION 3 — RENDERER FIELD MIGRATION
+--------------------------------------------------------------------------------
+
+Old Property                                    New Property
+
+field1                                          field
+field2                                          field2
+field3                                          field3
+
+Example:
+
+OLD
+
+{
+   field1:"SBDV_NAME"
+}
+
+NEW
+
+{
+   field:"SBDV_NAME"
+}
+
+Internal normalization:
+
+field1 → field
+
+--------------------------------------------------------------------------------
+SECTION 4 — LINE SYMBOL MIGRATION
+--------------------------------------------------------------------------------
+
+Old Symbol:
+
+type:"esriSLS"
+
+New Symbol:
+
+type:"simple-line"
+
+Style migration:
+
+esriSLSSolid                 → solid
+esriSLSDash                  → dash
+esriSLSDot                   → dot
+esriSLSDashDot               → dash-dot
+esriSLSDashDotDot            → dash-dot-dot
+esriSLSShortDash             → short-dash
+esriSLSShortDot              → short-dot
+esriSLSShortDashDot          → short-dash-dot
+esriSLSShortDashDotDot       → short-dash-dot-dot
+esriSLSLongDash              → long-dash
+esriSLSLongDashDot           → long-dash-dot
+esriSLSNull                  → none
+
+
+Example:
+
+OLD
+
+{
+   type:"esriSLS",
+   style:"esriSLSShortDash"
+}
+
+NEW
+
+{
+   type:"simple-line",
+   style:"short-dash"
+}
+
+--------------------------------------------------------------------------------
+SECTION 5 — MARKER SYMBOL MIGRATION
+--------------------------------------------------------------------------------
+
+Old Symbol:
+
+type:"esriSMS"
+
+New Symbol:
+
+type:"simple-marker"
+
+Style migration:
+
+esriSMSCircle        → circle
+esriSMSSquare        → square
+esriSMSDiamond       → diamond
+esriSMSCross         → cross
+esriSMSX             → x
+esriSMSPath          → path
+
+Example:
+
+OLD
+
+{
+   type:"esriSMS",
+   style:"esriSMSCircle"
+}
+
+NEW
+
+{
+   type:"simple-marker",
+   style:"circle"
+}
+
+--------------------------------------------------------------------------------
+SECTION 6 — FILL SYMBOL MIGRATION
+--------------------------------------------------------------------------------
+
+Old Symbol:
+
+type:"esriSFS"
+
+New Symbol:
+
+type:"simple-fill"
+
+Style migration:
+
+esriSFSSolid                     → solid
+esriSFSNull                      → none
+esriSFSHorizontal                → horizontal
+esriSFSVertical                  → vertical
+esriSFSForwardDiagonal           → forward-diagonal
+esriSFSBackwardDiagonal          → backward-diagonal
+esriSFSCross                     → cross
+esriSFSDiagonalCross             → diagonal-cross
+
+Example:
+
+OLD
+
+{
+   type:"esriSFS",
+   style:"esriSFSCross"
+}
+
+NEW
+
+{
+   type:"simple-fill",
+   style:"cross"
+}
+
+--------------------------------------------------------------------------------
+SECTION 7 — PICTURE MARKER MIGRATION
+--------------------------------------------------------------------------------
+
+Old Symbol:
+
+type:"esriPMS"
+
+New Symbol:
+
+type:"picture-marker"
+
+Supported mappings:
+
+url                     → url
+imageData               → url fallback
+width                   → width
+height                  → height
+xOffset                 → xoffset
+yOffset                 → yoffset
+angle                   → angle
+
+--------------------------------------------------------------------------------
+SECTION 8 — LABEL JSON MIGRATION
+--------------------------------------------------------------------------------
+
+OLD
+
+element.labelJson={
+
+   labelExpressionInfo:{
+      expression:"$feature.SBDV_NAME"
+   },
+
+   symbol:{
+      font:{},
+      color:[0,0,0]
+   }
+}
+
+NEW
+
+element.labelJson={
+
+   labelExpressionInfo:{
+      expression:"$feature['SBDV_NAME']"
+   },
+
+   symbol:{
+
+      type:"text",
+
+      font:{
+         size:10,
+         family:"Arial",
+         weight:"bold"
+      },
+
+      color:[0,0,0,255],
+
+      haloColor:[255,255,255,255],
+
+      haloSize:1
+   }
+}
+
+--------------------------------------------------------------------------------
+SECTION 9 — LABEL SYMBOL MIGRATION
+--------------------------------------------------------------------------------
+
+esriTS                 → text
+TextSymbol             → text
+text-symbol            → text
+text                   → text
+
+--------------------------------------------------------------------------------
+SECTION 10 — LABEL PROPERTY MIGRATION
+--------------------------------------------------------------------------------
+
+xOffset                → xoffset
+yOffset                → yoffset
+label                  → text
+value                  → text
+
+--------------------------------------------------------------------------------
+SECTION 11 — LABEL FONT MIGRATION
+--------------------------------------------------------------------------------
+
+font.size              → font.size
+font.family            → font.family
+font.weight            → font.weight
+font.style             → font.style
+
+--------------------------------------------------------------------------------
+SECTION 12 — INVALID LABEL VALUES AUTO FIXED
+--------------------------------------------------------------------------------
+
+Invalid:
+
+haloColor:"N/A"
+
+Converted:
+
+haloColor:[255,255,255,255]
+
+
+Invalid:
+
+style:"N/A"
+
+Converted:
+
+style:"solid"
+
+--------------------------------------------------------------------------------
+SECTION 13 — 3D LABEL HANDLING
+--------------------------------------------------------------------------------
+
+2D:
+
+type:"text"
+
+3D:
+
+type:"label-3d"
+
+Behavior:
+
+text          → normalize
+label-3d      → keep unchanged
+
+--------------------------------------------------------------------------------
+SECTION 14 — ArcGeoJson SUPPORT
+--------------------------------------------------------------------------------
+
+ArcGeoJson component:
+
+<arc-geojson-layer>
+
+Supported:
+
+✓ point
+✓ polyline
+✓ polygon
+✓ labels
+✓ renderer
+✓ popup
+✓ editing
+✓ symbol normalization
+
+Internal layers:
+
+featureLayer
+labelLayer
+sketchLayer
+
+
+Normalization applied before:
+
+featureLayer.renderer=
+featureLayer.labelingInfo=
+
+--------------------------------------------------------------------------------
+SECTION 15 — SUPPORTED SYMBOL TYPES
+--------------------------------------------------------------------------------
+
+Old:
+
+esriSLS
+esriSMS
+esriSFS
+esriPMS
+esriTS
+
+
+New:
+
+simple-line
+simple-marker
+simple-fill
+picture-marker
+text
+label-3d
+
+--------------------------------------------------------------------------------
+SECTION 16 — FULL BACKWARD COMPATIBLE EXAMPLE
+--------------------------------------------------------------------------------
+
+Consumer code:
+
+element.renderer={
+
+   type:"uniqueValue",
+
+   field1:"SBDV_NAME",
+
+   defaultSymbol:{
+
+      type:"esriSLS",
+      style:"esriSLSShortDot",
+      color:[0,0,0,255]
+
+   },
+
+   uniqueValueInfos:[
+
+      {
+
+         value:"OREGON EASTERN (OCE)",
+
+         symbol:{
+
+            type:"esriSLS",
+            style:"esriSLSSolid",
+            color:[0,255,0,255]
+
+         }
+
+      },
+
+      {
+
+         value:"HUNTINGTON SUB",
+
+         symbol:{
+
+            type:"esriSLS",
+            style:"esriSLSShortDash",
+            color:[0,0,255,255]
+
+         }
+
+      }
+   ]
+}
+
+Internally normalized to:
+
+{
+
+   type:"unique-value",
+
+   field:"SBDV_NAME",
+
+   defaultSymbol:{
+
+      type:"simple-line",
+      style:"short-dot"
+
+   },
+
+   uniqueValueInfos:[
+
+      {
+
+         symbol:{
+
+            type:"simple-line",
+            style:"solid"
+
+         }
+
+      },
+
+      {
+
+         symbol:{
+
+            type:"simple-line",
+            style:"short-dash"
+
+         }
+
+      }
+
+   ]
+}
+
+--------------------------------------------------------------------------------
+SECTION 17 — FINAL RESULT
+--------------------------------------------------------------------------------
+
+ArcGIS 3.x applications continue working without requiring consumer changes.
+
+Internally:
+
+✓ renderer normalized
+✓ symbols normalized
+✓ labelJson normalized
+✓ field mappings normalized
+✓ invalid values corrected
+✓ ArcGeoJson compatibility maintained
+✓ ArcEsriFeatureLayer compatibility maintained
+✓ ArcGIS Maps SDK 5.x support added
