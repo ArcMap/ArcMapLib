@@ -1,71 +1,247 @@
-const clickHandle = this.view.on("click", async (evt: any) => {
-  if (clickTimer) {
-    clearTimeout(clickTimer);
-    clickTimer = null;
-    return;
+private async getHitGraphic(evt: any): Promise<Graphic | null> {
+  if (!this.view || !this.featureLayer || !evt) {
+    return null;
   }
 
-  clickTimer = setTimeout(async () => {
-    clickTimer = null;
+  try {
+    const hit = await this.view.hitTest(evt);
 
-    const graphic = await this.getHitGraphic(evt);
-    if (!graphic) {
-      return;
+    const topResult = (hit?.results ?? []).find((result: any) => {
+      const graphic = result?.graphic as Graphic | undefined;
+      return !!graphic?.geometry && !!graphic?.layer;
+    });
+
+    if (!topResult?.graphic) {
+      return null;
     }
 
-    // ✅ IMPORTANT FIX:
-    // Check actual top-most clicked graphic across ALL layers.
-    // If top-most graphic is not from this layer, do not open this layer popup.
-    const allHit = await this.view.hitTest(evt);
-    const topGraphic = (allHit.results ?? [])
-      .map((r: any) => r?.graphic as Graphic)
-      .find((g: Graphic | null | undefined) => !!g?.geometry);
+    const topGraphic = topResult.graphic as Graphic;
 
     if (
-      topGraphic &&
       topGraphic.layer !== this.featureLayer &&
-      (topGraphic.layer as any)?.id !== this.featureLayer?.id
+      (topGraphic.layer as any)?.id !== this.featureLayer.id
     ) {
-      return;
+      return null;
     }
 
-    this.emitLayerEvent(
-      "layerClick",
-      this.graphicToGeoJsonFeature(graphic),
-      graphic,
-      {
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: graphic.attributes ?? {},
-        },
-      }
-    );
+    return topGraphic;
+  } catch (error) {
+    console.warn("[geojson-layer] getHitGraphic failed", error);
+    return null;
+  }
+}
 
-    if (
-      !this._editorOpen &&
-      !this.inDrawingMode &&
-      !this._isStartingDraw &&
-      !this.shouldSuppressPopup()
-    ) {
-      this.showGraphicPopup(graphic, evt.mapPoint);
-    }
 
-    if (
-      this.enableUserEdit &&
-      !this._editorOpen &&
-      !this.inDrawingMode &&
-      !this.infoTemplate
-    ) {
-      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-        this.removeFromGeoJSON(graphic);
-        this.graphicsEditor?.cancel();
+
+private async getHitGraphics(evt: any): Promise<Graphic[]> {
+  if (!this.view || !this.featureLayer || !evt) {
+    return [];
+  }
+
+  const topGraphic = await this.getHitGraphic(evt);
+
+  if (!topGraphic) {
+    return [];
+  }
+
+  try {
+    const hit = await this.view.hitTest(evt, {
+      include: [this.featureLayer],
+    });
+
+    const unique = new Map<string, Graphic>();
+
+    (hit?.results ?? []).forEach((result: any, index: number) => {
+      const graphic = result?.graphic as Graphic | undefined;
+
+      if (
+        !graphic?.geometry ||
+        (
+          graphic.layer !== this.featureLayer &&
+          (graphic.layer as any)?.id !== this.featureLayer.id
+        )
+      ) {
         return;
       }
 
-      this.activateGraphicsEditor(graphic);
+      const attrs = graphic.attributes ?? {};
+      const key =
+        attrs[this.uniqueIdPropertyName] ??
+        attrs.OBJECTID ??
+        attrs.objectId ??
+        attrs.id ??
+        index;
+
+      unique.set(String(key), graphic);
+    });
+
+    return Array.from(unique.values());
+  } catch (error) {
+    console.warn("[geojson-layer] getHitGraphics failed", error);
+    return [topGraphic];
+  }
+}
+
+
+private async showGraphicPopup(
+  graphic: Graphic,
+  location?: Point,
+  graphics: Graphic[] = []
+): Promise<void> {
+  if (!this.view || !graphic?.geometry) {
+    this.setViewCursor("default");
+    return;
+  }
+
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    this.closePopup();
+    return;
+  }
+
+  const attrs = graphic.attributes ?? {};
+  const objectId =
+    attrs[this.uniqueIdPropertyName] ??
+    attrs.OBJECTID ??
+    attrs.objectId ??
+    attrs.id ??
+    "";
+
+  const popupKey = `${this.featureLayer?.id ?? this.name ?? ""}-${objectId}`;
+  const now = Date.now();
+
+  if (
+    this._popupOpenInProgress ||
+    (this._lastPopupGraphicKey === popupKey && now - this._lastPopupOpenAt < 300)
+  ) {
+    return;
+  }
+
+  this._popupOpenInProgress = true;
+  this._lastPopupGraphicKey = popupKey;
+  this._lastPopupOpenAt = now;
+
+  try {
+    const popupPoint =
+      location ??
+      (this.constructor as any).getPopupPoint?.(graphic.geometry) ??
+      undefined;
+
+    if (!popupPoint) {
+      console.warn("[geojson-layer] popup skipped: no location");
+      return;
     }
-  }, 250);
-});
+
+    const popupGraphics = graphics.length ? graphics : [graphic];
+
+    const validPopupGraphics = popupGraphics.filter((item) => {
+      const template = this.buildPopupTemplateFromCurrent(item);
+
+      if (!template) {
+        return false;
+      }
+
+      item.popupTemplate = template;
+      return true;
+    });
+
+    if (!validPopupGraphics.length) {
+      console.warn("[geojson-layer] popup skipped: no valid popup templates");
+      return;
+    }
+
+    this._popupGraphic = graphic;
+    this._popupOpen = true;
+    this._showPopup = true;
+
+    this.closePopup();
+
+    const popup: any = this.view.popup;
+    this.view.popupEnabled = true;
+
+    popup.features = [];
+    popup.content = null;
+    popup.title = "";
+    popup.location = popupPoint;
+    popup.open = false;
+    popup.visible = false;
+
+    await Promise.resolve();
+
+    popup.features = validPopupGraphics;
+    popup.location = popupPoint;
+    popup.open = true;
+    popup.visible = true;
+  } catch (error) {
+    this._popupGraphic = null;
+    this._popupOpen = false;
+    this._showPopup = false;
+    console.warn("[geojson-layer] popup open failed", error);
+  } finally {
+    setTimeout(() => {
+      this._popupOpenInProgress = false;
+
+      if (!this._editorOpen && !this.inDrawingMode) {
+        this.setViewCursor("default");
+      }
+    }, 150);
+  }
+}
+
+
+
+private closePopup(): void {
+  try {
+    const popup: any = this.view?.popup;
+
+    if (popup) {
+      popup.features = [];
+      popup.content = null;
+      popup.title = "";
+      popup.location = null;
+      popup.open = false;
+      popup.visible = false;
+    }
+  } catch (error) {
+    console.warn("[geojson-layer] closePopup failed", error);
+  }
+
+  this._popupGraphic = null;
+  this._popupOpen = false;
+  this._showPopup = false;
+
+  this.clearPopupHighlight();
+
+  if (!this._editorOpen && !this.inDrawingMode) {
+    this.setViewCursor("default");
+  }
+}
+
+
+
+private clearPopupHighlight(): void {
+  try {
+    this._popupHighlightHandle?.remove?.();
+  } catch {}
+
+  this._popupHighlightHandle = null;
+
+  try {
+    const popup: any = this.view?.popup;
+
+    if (popup) {
+      popup.features = [];
+
+      if ("highlightEnabled" in popup) {
+        popup.highlightEnabled = false;
+      }
+    }
+  } catch {}
+}
+
+
+
