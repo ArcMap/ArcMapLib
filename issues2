@@ -1,96 +1,85 @@
-private closePopup(): void {
-  try {
-    const popup: any = this.view?.popup;
-
-    if (popup) {
-      popup.features = [];
-      popup.content = null;
-      popup.title = "";
-      popup.location = null;
-      popup.open = false;
-      popup.visible = false;
-    }
-
-    this.clearPopupHighlight();
-
-    this._popupGraphic = null;
-    this._popupOpen = false;
-    this._suppressPopupUntil = Date.now() + 150;
-
-    this.setViewCursor("default");
-  } catch (error) {
-    console.warn("[geojson-layer] closePopup failed", error);
-    this.setViewCursor("default");
-  }
-}
-
-
-private clearPopupHighlight(): void {
-  try {
-    this._popupHighlightHandle?.remove?.();
-  } catch {}
-
-  this._popupHighlightHandle = null;
-
-  try {
-    const popup: any = this.view?.popup;
-
-    if (popup) {
-      popup.features = [];
-      popup.content = null;
-      popup.title = "";
-      popup.location = null;
-      popup.open = false;
-      popup.visible = false;
-    }
-  } catch {}
-}
-
-
-private setupPopupCloseWatcher(): void {
-  try {
-    this._popupVisibleWatchHandle?.remove?.();
-  } catch {}
-
-  this._popupVisibleWatchHandle = null;
-
-  const popup: any = this.view?.popup;
-
-  if (!popup || typeof popup.watch !== "function") {
+private async showGraphicPopup(
+  graphic: Graphic,
+  location?: Point
+): Promise<void> {
+  if (!this.view || !graphic) {
     return;
   }
 
-  this._popupVisibleWatchHandle = popup.watch("visible", (visible: boolean) => {
-    if (!visible) {
-      this._popupGraphic = null;
-      this._popupOpen = false;
-      this.clearPopupHighlight();
-      this.setViewCursor("default");
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    this.closePopup();
+    return;
+  }
 
-      // Small delay prevents stuck pointer after ArcGIS popup close animation.
-      window.setTimeout(() => {
-        if (!this._editorOpen && !this.inDrawingMode) {
-          this.setViewCursor("default");
-        }
-      }, 100);
-    }
-  });
-}
+  const popupTemplate = this.buildPopupTemplateFromCurrent(graphic);
+  if (!popupTemplate) {
+    console.warn("[geojson-layer] popup skipped: no popup template", {
+      infoTemplate: this.infoTemplate,
+      attributes: graphic.attributes ?? {},
+    });
+    return;
+  }
 
+  const popupLocation =
+    location ??
+    UpGeojsonLayer.getPopupPoint(graphic.geometry) ??
+    undefined;
 
+  if (!popupLocation) {
+    console.warn("[geojson-layer] popup skipped: no popup location", {
+      geometry: graphic.geometry,
+    });
+    return;
+  }
 
+  try {
+    this._popupGraphic = graphic;
+    this._popupOpen = true;
+    this._showPopup = true;
 
-this._popupGraphic = graphic;
-this._popupOpen = true;
-this.setViewCursor("pointer");
+    graphic.popupTemplate = popupTemplate;
 
+    const popup: any = this.view.popup;
+    this.view.popupEnabled = true;
 
+    /*
+     * ArcGIS 5.x:
+     * - Do NOT assign popup.selectedFeature because it is read-only.
+     * - Use features/location/open/visible.
+     * - Clear old popup state first so stale polygon/geofence popup does not remain.
+     */
+    popup.features = [];
+    popup.content = null;
+    popup.title = "";
+    popup.location = popupLocation;
 
+    await Promise.resolve();
 
-finally {
-  window.setTimeout(() => {
-    if (!this._editorOpen && !this.inDrawingMode) {
-      this.setViewCursor("default");
-    }
-  }, 100);
+    popup.features = [graphic];
+    popup.location = popupLocation;
+    popup.open = true;
+    popup.visible = true;
+
+    requestAnimationFrame(() => {
+      try {
+        popup.features = [graphic];
+        popup.location = popupLocation;
+        popup.open = true;
+        popup.visible = true;
+      } catch (error) {
+        console.warn("[geojson-layer] popup force-open failed", error);
+      }
+    });
+  } catch (error) {
+    this._popupGraphic = null;
+    this._popupOpen = false;
+    this._showPopup = false;
+
+    console.warn("[geojson-layer] popup open failed", error);
+  }
 }
