@@ -1,57 +1,21 @@
-private async showGraphicPopup(graphic: Graphic, popupPoint?: Point): Promise<void> {
-  if (!this.view || !graphic) return;
+this._popupGraphic = graphic;
+this._popupOpen = true;
+this._showPopup = true;
 
-  const popupGraphics = [graphic];
+await this.waitForViewIdle();
 
-  const validPopupGraphics = popupGraphics.filter((item) => {
-    const template = this.buildPopupTemplateFromCurrent(item);
+this.closePopup();
 
-    if (!template) {
-      return false;
-    }
+const popup: any = this.view.popup;
+this.view.popupEnabled = true;
 
-    item.popupTemplate = template;
-    return true;
-  });
+popup.close();
 
-  if (!validPopupGraphics.length) {
-    console.warn("[geojson-layer] popup skipped: no valid popup templates");
-    this.closePopup();
-    return;
-  }
+await new Promise<void>((resolve) =>
+  requestAnimationFrame(() => resolve())
+);
 
-  this._popupGraphic = graphic;
-  this._popupOpen = true;
-  this._showPopup = true;
-
-  try {
-    this.view.popupEnabled = true;
-
-    await this.waitForViewIdle();
-
-    this.view.popup.close();
-
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-    this.view.popup.open({
-      features: validPopupGraphics,
-      location:
-        popupPoint ??
-        (graphic.geometry as any)?.extent?.center ??
-        graphic.geometry,
-    });
-  } catch (error) {
-    this._popupGraphic = null;
-    this._popupOpen = false;
-    this._showPopup = false;
-    console.warn("[geojson-layer] popup open failed.", error);
-  } finally {
-    setTimeout(() => {
-      this._popupOpenInProgress = false;
-
-      if (this._editorOpen && this._inDrawingMode) {
-        this.setViewCursor("default");
-      }
-    }, 150);
-  }
-}
+popup.open({
+  features: validPopupGraphics,
+  location: popupPoint,
+});
