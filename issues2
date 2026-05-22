@@ -1,185 +1,42 @@
-private static getCanonicalSymbolType(rawType: string): string {
-  const map: Record<string, string> = {
-    esrisms: "simple-marker",
-    sms: "simple-marker",
-    simplemarkersymbol: "simple-marker",
-    "simple-marker-symbol": "simple-marker",
-    esrisimplemarkersymbol: "simple-marker",
+private normalizeZoom(value: number | undefined): number {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return ArcMap.DEFAULT_ZOOM;
+  }
 
-    esripms: "picture-marker",
-    pms: "picture-marker",
-    picturemarkersymbol: "picture-marker",
-    "picture-marker-symbol": "picture-marker",
-
-    esrisls: "simple-line",
-    sls: "simple-line",
-    simplelinesymbol: "simple-line",
-    "simple-line-symbol": "simple-line",
-    esrisimplelinesymbol: "simple-line",
-
-    esricls: "simple-line",
-    cls: "simple-line",
-    cartographiclinesymbol: "simple-line",
-
-    esrisfs: "simple-fill",
-    sfs: "simple-fill",
-    simplefillsymbol: "simple-fill",
-    "simple-fill-symbol": "simple-fill",
-    esrisimplefillsymbol: "simple-fill",
-
-    esripfs: "picture-fill",
-    pfs: "picture-fill",
-    picturefillsymbol: "picture-fill",
-    "picture-fill-symbol": "picture-fill",
-
-    esrits: "text",
-    ts: "text",
-    textsymbol: "text",
-    "text-symbol": "text",
-    esritextsymbol: "text",
-
-    "simple-marker": "simple-marker",
-    "picture-marker": "picture-marker",
-    "simple-line": "simple-line",
-    "simple-fill": "simple-fill",
-    "picture-fill": "picture-fill",
-    text: "text",
-    "label-3d": "label-3d"
-  };
-
-  return map[rawType] ?? rawType;
+  return Math.max(
+    this.minZoom,
+    Math.min(this.maxZoom, value),
+  );
 }
 
 
-static normalizePlainSymbol(symbolJson: any): any {
-  if (!symbolJson) {
-    return symbolJson;
-  }
 
-  const parsed = JsonUtils.getJsonFor(symbolJson);
-
-  if (parsed.error) {
-    console.warn(
-      "[ArcGeoJSON][json-util] Could not parse symbol json",
-      parsed.error
-    );
-    return symbolJson;
-  }
-
-  return JsonUtils.toCanonicalArcGisSymbol(parsed.parsedJson);
+if (changedProperties.has("extent") && this.extent) {
+  await this.applyExtentFromProperty(this.extent);
+  return;
 }
 
-static toCanonicalArcGisSymbol(symbolInput: any, geometryType?: string): any {
-  if (!symbolInput) {
-    return JsonUtils.getDefaultSymbolJson(geometryType);
+if (changedProperties.has("center") && this.center) {
+  await this.applyCenterFromProperty(this.center);
+}
+
+if (changedProperties.has("zoom")) {
+  this.updateZoom(this.zoom, changedProperties.get("zoom") as number);
+}
+
+
+private updateZoom(newValue: number, oldValue?: number): void {
+  if (!this.view) return;
+
+  const normalizedZoom = this.normalizeZoom(newValue);
+
+  if (oldValue === normalizedZoom && this.view.zoom === normalizedZoom) {
+    return;
   }
 
-  const symbol =
-    typeof symbolInput.toJSON === "function"
-      ? symbolInput.toJSON()
-      : JSON.parse(JSON.stringify(symbolInput));
-
-  const rawType = String(
-    symbol.type ??
-      symbol.symbolType ??
-      symbol.esriType ??
-      symbol.declaredClass ??
-      ""
-  ).toLowerCase();
-
-  const canonicalType = JsonUtils.getCanonicalSymbolType(rawType);
-
-  if (JsonUtils.ARCGIS_3X_SYMBOL_TYPES.has(rawType)) {
-    JsonUtils.warnArcGisMigration(
-      "toCanonicalArcGisSymbol",
-      "symbol type",
-      rawType,
-      canonicalType
-    );
+  if (Math.abs((this.view.zoom ?? 0) - normalizedZoom) < 0.000001) {
+    return;
   }
 
-  switch (canonicalType) {
-    case "simple-marker":
-      return {
-        type: "simple-marker",
-        style: JsonUtils.normalizeMarkerStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
-        size: symbol.size ?? symbol.width ?? 18,
-        angle: symbol.angle ?? 0,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-        outline: JsonUtils.normalizeOutline(symbol.outline)
-      };
-
-    case "picture-marker":
-      return {
-        type: "picture-marker",
-        url: symbol.url ?? symbol.imageData ?? "",
-        width: symbol.width ?? symbol.size ?? 24,
-        height: symbol.height ?? symbol.size ?? 24,
-        angle: symbol.angle ?? 0,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0
-      };
-
-    case "simple-line":
-      return {
-        type: "simple-line",
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 1]),
-        width: symbol.width ?? 2,
-        style: JsonUtils.normalizeLineStyle(symbol.style)
-      };
-
-    case "simple-fill":
-      return {
-        type: "simple-fill",
-        style: JsonUtils.normalizeFillStyle(symbol.style),
-        color: JsonUtils.normalizeColor(symbol.color, [0, 120, 255, 0.18]),
-        outline: JsonUtils.normalizeOutline(symbol.outline)
-      };
-
-    case "picture-fill":
-      return {
-        ...symbol,
-        type: "picture-fill",
-        url: symbol.url ?? symbol.imageData ?? "",
-        outline: JsonUtils.normalizeOutline(symbol.outline)
-      };
-
-    case "text":
-      return {
-        type: "text",
-        text: symbol.text ?? symbol.label ?? symbol.value ?? "",
-        color: JsonUtils.normalizeColor(symbol.color, [255, 255, 255, 255]),
-        haloColor:
-          symbol.haloColor && symbol.haloColor !== "N/A"
-            ? symbol.haloColor
-            : [255, 255, 255, 255],
-        haloSize:
-          symbol.haloSize !== undefined && symbol.haloSize !== "N/A"
-            ? symbol.haloSize
-            : 1,
-        xoffset: symbol.xoffset ?? symbol.xOffset ?? 0,
-        yoffset: symbol.yoffset ?? symbol.yOffset ?? 0,
-        font: {
-          family: symbol.font?.family ?? "sans-serif",
-          size: symbol.font?.size ?? symbol.size ?? 12,
-          weight: symbol.font?.weight ?? "normal",
-          style: symbol.font?.style ?? "normal"
-        }
-      };
-
-    case "label-3d":
-      return symbol;
-
-    default:
-      console.warn("[ArcGeoJSON][json-util] Unknown symbol type. Falling back.", {
-        rawType,
-        canonicalType,
-        symbol,
-        geometryType
-      });
-
-      return JsonUtils.getDefaultSymbolJson(geometryType);
-  }
+  this.view.zoom = normalizedZoom;
 }
