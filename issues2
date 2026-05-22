@@ -1,42 +1,110 @@
-private normalizeZoom(value: number | undefined): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return ArcMap.DEFAULT_ZOOM;
+<arc-map
+  id="testMap"
+  basemap="streets"
+  zoom="5"
+  max-zoom="23"
+  min-zoom="0"
+  center='{"latitude":38.3,"longitude":-98.4}'
+  style="height: 700px; width: 100%; display: block;"
+></arc-map>
+
+<div style="padding: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+  <button onclick="logMapState()">Log Current State</button>
+  <button onclick="setZoom()">Set Zoom 8</button>
+  <button onclick="setCenter()">Set Center</button>
+  <button onclick="setExtent()">Set Extent</button>
+  <button onclick="clearExtentSetZoom()">Clear Extent + Zoom</button>
+</div>
+
+<script>
+  const mapEl = document.getElementById("testMap");
+
+  async function getView() {
+    const view = await mapEl.getViewInstance();
+    await view.when();
+    return view;
   }
 
-  return Math.max(
-    this.minZoom,
-    Math.min(this.maxZoom, value),
-  );
-}
+  async function logMapState() {
+    const view = await getView();
 
-
-
-if (changedProperties.has("extent") && this.extent) {
-  await this.applyExtentFromProperty(this.extent);
-  return;
-}
-
-if (changedProperties.has("center") && this.center) {
-  await this.applyCenterFromProperty(this.center);
-}
-
-if (changedProperties.has("zoom")) {
-  this.updateZoom(this.zoom, changedProperties.get("zoom") as number);
-}
-
-
-private updateZoom(newValue: number, oldValue?: number): void {
-  if (!this.view) return;
-
-  const normalizedZoom = this.normalizeZoom(newValue);
-
-  if (oldValue === normalizedZoom && this.view.zoom === normalizedZoom) {
-    return;
+    console.log("===== MAP STATE =====");
+    console.log("element.zoom:", mapEl.zoom);
+    console.log("view.zoom:", view.zoom);
+    console.log("view.center:", {
+      latitude: view.center?.latitude,
+      longitude: view.center?.longitude,
+    });
+    console.log("view.extent:", {
+      xmin: view.extent?.xmin,
+      ymin: view.extent?.ymin,
+      xmax: view.extent?.xmax,
+      ymax: view.extent?.ymax,
+      spatialReference: view.extent?.spatialReference?.wkid,
+    });
+    console.log("=====================");
   }
 
-  if (Math.abs((this.view.zoom ?? 0) - normalizedZoom) < 0.000001) {
-    return;
+  async function setZoom() {
+    mapEl.zoom = 8;
+    await mapEl.updateComplete;
+    await logMapState();
   }
 
-  this.view.zoom = normalizedZoom;
-}
+  async function setCenter() {
+    mapEl.center = {
+      latitude: 33.749,
+      longitude: -84.388,
+    };
+
+    await mapEl.updateComplete;
+    await logMapState();
+  }
+
+  async function setExtent() {
+    mapEl.extent = {
+      leftLongitude: -105,
+      rightLongitude: -94,
+      bottomLatitude: 31,
+      topLatitude: 38,
+    };
+
+    await mapEl.updateComplete;
+
+    setTimeout(logMapState, 500);
+  }
+
+  async function clearExtentSetZoom() {
+    mapEl.extent = null;
+    mapEl.center = {
+      latitude: 38.3,
+      longitude: -98.4,
+    };
+    mapEl.zoom = 6;
+
+    await mapEl.updateComplete;
+    await logMapState();
+  }
+
+  mapEl.addEventListener("zoom", (event) => {
+    console.log("zoom event:", event.detail);
+  });
+
+  mapEl.addEventListener("center-change", (event) => {
+    console.log("center-change event:", event.detail);
+  });
+
+  mapEl.addEventListener("extent-change", (event) => {
+    console.log("extent-change event:", event.detail);
+  });
+
+  window.addEventListener("load", async () => {
+    const view = await getView();
+
+    console.log("Map loaded");
+    console.log("Initial view.zoom:", view.zoom);
+    console.log("Initial element.zoom:", mapEl.zoom);
+
+    await logMapState();
+  });
+</script>
