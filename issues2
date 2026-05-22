@@ -1,23 +1,17 @@
-map.extent = {
-  leftLongitude: -105,
-  rightLongitude: -94,
-  bottomLatitude: 31,
-  topLatitude: 38
-};
+private async waitForViewIdle(): Promise<void> {
+  if (!this.view) return;
 
-setTimeout(() => {
+  try {
+    await this.view.when();
 
-  console.log("===== ELEMENT EXTENT =====");
-  console.log(map.extent);
+    if (typeof (this.view as any).whenIdle === "function") {
+      await (this.view as any).whenIdle();
+      return;
+    }
 
-  map.getViewInstance().then((view) => {
-
-    console.log("===== VIEW EXTENT =====");
-    console.log(view.extent);
-
-    console.log("===== VIEW ZOOM =====");
-    console.log(view.zoom);
-
-  });
-
-}, 1000);
+    await reactiveUtils.whenOnce(() => !this.view?.updating);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  } catch {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
