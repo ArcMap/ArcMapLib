@@ -1,21 +1,25 @@
-this._popupGraphic = graphic;
-this._popupOpen = true;
-this._showPopup = true;
-
-await this.waitForViewIdle();
-
-this.closePopup();
-
 const popup: any = this.view.popup;
 this.view.popupEnabled = true;
 
-popup.close();
+await this.waitForViewIdle();
 
-await new Promise<void>((resolve) =>
-  requestAnimationFrame(() => resolve())
-);
+popup.features = [];
+popup.content = null;
+popup.title = "";
+popup.location = popupPoint;
+popup.visible = false;
 
-popup.open({
-  features: validPopupGraphics,
-  location: popupPoint,
-});
+await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+popup.features = validPopupGraphics;
+popup.location = popupPoint;
+
+if (typeof popup.open === "function") {
+  popup.open({
+    features: validPopupGraphics,
+    location: popupPoint,
+  });
+} else {
+  popup.open = true;
+  popup.visible = true;
+}
