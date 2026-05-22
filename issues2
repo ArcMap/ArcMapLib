@@ -1,45 +1,23 @@
-if (
-  changedProperties.has("extent") &&
-  this.extent &&
-  this.extent.leftLongitude != null &&
-  this.extent.rightLongitude != null &&
-  this.extent.topLatitude != null &&
-  this.extent.bottomLatitude != null
-) {
-  await this.updateExtent(this.extent);
-} else if (changedProperties.has("center")) {
-  if (this._isReflectingCenterFromView) {
-    this._isReflectingCenterFromView = false;
-  } else {
-    await this.updateCenter(this.center);
-  }
-}
+map.extent = {
+  leftLongitude: -105,
+  rightLongitude: -94,
+  bottomLatitude: 31,
+  topLatitude: 38
+};
 
-if (changedProperties.has("zoom")) {
-  if (this._isReflectingZoomFromView) {
-    this._isReflectingZoomFromView = false;
-  } else {
-    const newZoom =
-      typeof this.zoom === "number"
-        ? this.zoom
-        : UpMap.DEFAULT_ZOOM;
+setTimeout(() => {
 
-    if (this.view.zoom !== newZoom) {
-      this.view.zoom = newZoom;
-    }
-  }
-}
+  console.log("===== ELEMENT EXTENT =====");
+  console.log(map.extent);
 
+  map.getViewInstance().then((view) => {
 
-if (
-  this.extent &&
-  this.extent.leftLongitude != null
-) {
-  await this.updateExtent(this.extent);
-} else {
-  await this.updateCenter(this.center);
+    console.log("===== VIEW EXTENT =====");
+    console.log(view.extent);
 
-  if (typeof this.zoom === "number") {
-    this.view.zoom = this.zoom;
-  }
-}
+    console.log("===== VIEW ZOOM =====");
+    console.log(view.zoom);
+
+  });
+
+}, 1000);
