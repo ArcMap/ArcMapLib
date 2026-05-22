@@ -1,25 +1,25 @@
-const popup: any = this.view.popup;
-this.view.popupEnabled = true;
+const replaceTokens = (value: string): string => {
+  return value.replace(/\$\{([^}]+)\}/g, (_match: string, key: string) => {
+    const cleanKey = key.trim();
 
-await this.waitForViewIdle();
+    // IMPORTANT:
+    // infoTemplate title/content supports only ${name}
+    if (cleanKey !== "name") {
+      return "";
+    }
 
-popup.features = [];
-popup.content = null;
-popup.title = "";
-popup.location = popupPoint;
-popup.visible = false;
-
-await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-popup.features = validPopupGraphics;
-popup.location = popupPoint;
-
-if (typeof popup.open === "function") {
-  popup.open({
-    features: validPopupGraphics,
-    location: popupPoint,
+    const nameValue = attributes.name;
+    return nameValue === undefined || nameValue === null
+      ? ""
+      : String(nameValue);
   });
-} else {
-  popup.open = true;
-  popup.visible = true;
+};
+
+
+
+const resolvedTitle = replaceTokens(rawTitle);
+const resolvedContent = replaceTokens(rawContent);
+
+if (!resolvedTitle.trim() && !resolvedContent.trim()) {
+  return null;
 }
