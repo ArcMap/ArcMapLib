@@ -1,182 +1,3 @@
-private applyGraphicDefaults(graphic: Graphic, featureIndex?: number): void {
-  if (!graphic.attributes) {
-    graphic.attributes = {};
-  }
-
-  const attrs = graphic.attributes as Record<string, any>;
-
-  // OBJECTID is always the array index
-  const objectId =
-    typeof featureIndex === "number" && !Number.isNaN(featureIndex)
-      ? featureIndex
-      : typeof attrs._featureIndex === "number"
-      ? attrs._featureIndex
-      : typeof attrs.OBJECTID === "number"
-      ? attrs.OBJECTID
-      : 0;
-
-  // Only set OBJECTID and _featureIndex — never touch name or id
-  attrs.OBJECTID = objectId;
-  attrs._featureIndex = objectId;
-
-  // Preserve name exactly — never assign ID into name
-  // name stays as-is from original properties
-
-  // Preserve business id exactly — never replace with OBJECTID
-  // attrs.id stays as-is from original properties
-
-  const rendererSymbol = this.getSymbolFromRendererConfig(this.renderer, graphic);
-
-  const selectedSymbol =
-    rendererSymbol ??
-    graphic.symbol ??
-    this.getDefaultSymbolForGeometry(graphic.geometry);
-
-  graphic.symbol = this.coerceSymbolForGeometry(selectedSymbol, graphic.geometry);
-
-  graphic.popupTemplate = null as any;
-}
-
-
-
-private geoJsonFeatureToGraphic(
-  feature: Feature,
-  featureIndex: number,
-  parent?: FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
-): Graphic | null {
-  if (!feature?.geometry) {
-    return null;
-  }
-
-  const geometry = this.geoJsonGeometryToUpGeometry(feature.geometry);
-
-  if (!geometry) {
-    return null;
-  }
-
-  const properties = {
-    ...(feature.properties ?? {}),
-  } as Record<string, any>;
-
-  // Store internal tracking only — do NOT mutate user fields
-  properties.OBJECTID = featureIndex;
-  properties._featureIndex = featureIndex;
-  properties._parentFeatureCollection = parent;
-
-  const graphic = new Graphic({
-    geometry,
-    attributes: properties,
-  });
-
-  this.applyGraphicDefaults(graphic, featureIndex);
-
-  return graphic;
-}
-
-
-
-private graphicToGeoJsonFeature(
-  graphic: Graphic,
-  index?: number
-): Feature | null {
-  if (!graphic?.geometry) {
-    return null;
-  }
-
-  const geometry = this.arcGeometryToGeoJson(graphic.geometry);
-
-  if (!geometry) {
-    return null;
-  }
-
-  const attrs = {
-    ...(graphic.attributes ?? {}),
-  } as Record<string, any>;
-
-  const objectId =
-    typeof index === "number" && !Number.isNaN(index)
-      ? index
-      : typeof attrs._featureIndex === "number"
-      ? attrs._featureIndex
-      : typeof attrs.OBJECTID === "number"
-      ? attrs.OBJECTID
-      : 0;
-
-  // Preserve original id and name exactly as they were
-  const originalId   = attrs.id;
-  const originalName = attrs.name;
-
-  // Remove internal tracking fields before emitting
-  delete attrs._parentFeatureCollection;
-
-  return {
-    type: "Feature",
-    id: originalId,       // original business id preserved
-    geometry,
-    properties: {
-      ...attrs,
-
-      // Always index-based OBJECTID
-      OBJECTID: objectId,
-      _featureIndex: objectId,
-
-      // Preserve exactly — never overwrite with OBJECTID
-      id:   originalId,
-      name: originalName,
-    },
-  };
-}
-
-
-
-
-
-
-
-
-
-
-
-private geoJsonFeatureToGraphic(
-  feature: Feature,
-  featureIndex: number,
-  parent?: FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
-): Graphic | null {
-  if (!feature?.geometry) {
-    return null;
-  }
-
-  const geometry = this.geoJsonGeometryToUpGeometry(feature.geometry);
-  if (!geometry) {
-    return null;
-  }
-
-  // FIX: Deep clone via JSON round-trip so we NEVER mutate
-  // the original Angular object that was passed in by reference.
-  // Angular passes the same object reference on every change detection
-  // cycle — without deep clone, our mutations bleed back into
-  // the original Angular data model.
-  const properties = JSON.parse(
-    JSON.stringify(feature.properties ?? {})
-  ) as Record<string, any>;
-
-  // Safe to mutate now — this is our own copy
-  properties.OBJECTID = featureIndex;
-  properties._featureIndex = featureIndex;
-  properties._parentFeatureCollection = parent;
-
-  const graphic = new Graphic({
-    geometry,
-    attributes: properties,
-  });
-
-  this.applyGraphicDefaults(graphic, featureIndex);
-
-  return graphic;
-}
-
-
-
 private async updateGeoJson(
   value: string | FeatureCollection<GeoJsonGeometry, GeoJsonProperties> | null
 ): Promise<void> {
@@ -204,11 +25,10 @@ private async updateGeoJson(
       return;
     }
 
-    // FIX: Deep clone the entire parsed GeoJSON so Angular's
-    // original object is never touched during processing.
-    // This is the root cause of mutation from Angular —
-    // we were processing the live Angular reference directly.
-    const parsedGeoJson = JSON.parse(
+    // FIX: Deep clone IMMEDIATELY after parsing.
+    // Angular/NgRx passes frozen/immutable store objects.
+    // Any mutation without deep clone writes back into the store.
+    const parsedGeoJson: any = JSON.parse(
       JSON.stringify(parsedResult.parsedJson)
     );
 
@@ -230,7 +50,6 @@ private async updateGeoJson(
       if (!graphic) {
         return;
       }
-      this.applyGraphicDefaults(graphic, index);
       graphics.push(graphic);
     });
 
@@ -246,4 +65,172 @@ private async updateGeoJson(
   } finally {
     this._isUpdatingGeoJson = false;
   }
+}
+
+
+
+
+private geoJsonFeatureToGraphic(
+  feature: Feature,
+  featureIndex: number,
+  parent?: FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
+): Graphic | null {
+  if (!feature?.geometry) {
+    return null;
+  }
+
+  const geometry = this.geoJsonGeometryToUpGeometry(feature.geometry);
+  if (!geometry) {
+    return null;
+  }
+
+  // FIX: Deep clone so Angular store is never touched
+  const properties = JSON.parse(
+    JSON.stringify(feature.properties ?? {})
+  ) as Record<string, any>;
+
+  // Snapshot original user fields BEFORE we add anything
+  const originalId   = properties.id;
+  const originalName = properties.name;
+
+  // Only add internal tracking fields
+  // NEVER overwrite user fields like name, id, etc.
+  properties.OBJECTID        = featureIndex;
+  properties._featureIndex   = featureIndex;
+
+  // Restore user fields explicitly in case anything above touched them
+  if (originalId !== undefined) {
+    properties.id = originalId;
+  }
+  if (originalName !== undefined) {
+    properties.name = originalName;
+  }
+
+  const graphic = new Graphic({
+    geometry,
+    attributes: properties,
+  });
+
+  // Pass featureIndex so applyGraphicDefaults
+  // does NOT generate a new ID
+  this.applyGraphicDefaults(graphic, featureIndex);
+
+  return graphic;
+}
+
+
+
+
+private applyGraphicDefaults(
+  graphic: Graphic,
+  featureIndex?: number
+): void {
+  if (!graphic.attributes) {
+    graphic.attributes = {};
+  }
+
+  const attrs = graphic.attributes as Record<string, any>;
+
+  // Snapshot ALL user fields before doing anything
+  const originalId   = attrs.id;
+  const originalName = attrs.name;
+
+  // OBJECTID = array index only
+  const objectId =
+    typeof featureIndex === "number" && !Number.isNaN(featureIndex)
+      ? featureIndex
+      : typeof attrs._featureIndex === "number"
+      ? attrs._featureIndex
+      : typeof attrs.OBJECTID === "number"
+      ? attrs.OBJECTID
+      : 0;
+
+  // Only write OBJECTID and _featureIndex
+  attrs.OBJECTID      = objectId;
+  attrs._featureIndex = objectId;
+
+  // Explicitly restore — guarantee name and id are never overwritten
+  if (originalId !== undefined) {
+    attrs.id = originalId;
+  }
+  if (originalName !== undefined) {
+    attrs.name = originalName;
+  }
+
+  // Symbol
+  const rendererSymbol = this.getSymbolFromRendererConfig(
+    this.renderer,
+    graphic
+  );
+
+  const selectedSymbol =
+    rendererSymbol ??
+    graphic.symbol ??
+    this.getDefaultSymbolForGeometry(graphic.geometry);
+
+  graphic.symbol = this.coerceSymbolForGeometry(
+    selectedSymbol,
+    graphic.geometry
+  );
+
+  // Popup — null during editing
+  graphic.popupTemplate =
+    this._editorOpen || this.inDrawingMode || this._isStartingDraw
+      ? (null as any)
+      : this.buildPopupTemplateFromCurrent(graphic);
+}
+
+
+
+private graphicToGeoJsonFeature(
+  graphic: Graphic,
+  index?: number
+): Feature | null {
+  if (!graphic?.geometry) {
+    return null;
+  }
+
+  const geometry = this.arcGeometryToGeoJson(graphic.geometry);
+  if (!geometry) {
+    return null;
+  }
+
+  // Deep clone attrs so we can safely delete internal fields
+  const attrs = JSON.parse(
+    JSON.stringify(graphic.attributes ?? {})
+  ) as Record<string, any>;
+
+  const objectId =
+    typeof index === "number" && !Number.isNaN(index)
+      ? index
+      : typeof attrs._featureIndex === "number"
+      ? attrs._featureIndex
+      : typeof attrs.OBJECTID === "number"
+      ? attrs.OBJECTID
+      : 0;
+
+  // Capture user fields
+  const originalId   = attrs.id;
+  const originalName = attrs.name;
+
+  // Remove internal tracking fields
+  delete attrs._parentFeatureCollection;
+  delete attrs._featureIndex;
+
+  return {
+    type: "Feature",
+    id: originalId,
+    geometry,
+    properties: {
+      // All original attrs (already cleaned)
+      ...attrs,
+
+      // Index-based OBJECTID
+      OBJECTID: objectId,
+
+      // Guarantee user fields are never overwritten
+      id:   originalId,
+      name: originalName,
+    },
+  };
 }
