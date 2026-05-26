@@ -1,15 +1,246 @@
-private getFeatureLookupId(feature: any): any {
-  return (
-    feature?.properties?.OBJECTID ??
-    feature?.properties?.id ??
-    feature?.id ??
-    0
+private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+  if (!graphicToUpdate?.geometry) {
+    return;
+  }
+
+  this.applyGraphicDefaults(graphicToUpdate);
+
+  /**
+   * Convert WebMercator -> Geographic before converting to GeoJSON.
+   * Do not mutate the original graphic reference directly.
+   */
+  let graphicForGeoJson = graphicToUpdate;
+
+  if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
+    graphicForGeoJson = graphicToUpdate.clone();
+
+    graphicForGeoJson.geometry =
+      webMercatorUtils.webMercatorToGeographic(
+        graphicToUpdate.geometry
+      ) as Geometry;
+  }
+
+  const convertedFeature = this.graphicToGeoJsonFeature(graphicForGeoJson);
+
+  if (!convertedFeature?.geometry) {
+    return;
+  }
+
+  const isCircle = this.isCircleGraphic(graphicToUpdate);
+
+  const parsedResult = this.getJsonForAny(this.geojson);
+
+  const currentGeoJson =
+    !parsedResult.error &&
+    parsedResult.parsedJson &&
+    Array.isArray(parsedResult.parsedJson.features)
+      ? parsedResult.parsedJson
+      : {
+          type: "FeatureCollection",
+          features: [],
+        };
+
+  /**
+   * IMPORTANT:
+   * OBJECTID is our edit/update key.
+   * Do not use uniqueIdPropertyName here because it can point to name/id
+   * and can mutate user attributes.
+   */
+  const updateId =
+    graphicToUpdate.attributes?.OBJECTID ??
+    graphicToUpdate.attributes?._featureIndex ??
+    0;
+
+  const existingFeature = currentGeoJson.features.find((feature: any) => {
+    const featureId =
+      feature?.properties?.OBJECTID ??
+      feature?.properties?._featureIndex ??
+      0;
+
+    return String(featureId) === String(updateId);
+  });
+
+  const preservedObjectId =
+    existingFeature?.properties?.OBJECTID ??
+    existingFeature?.properties?._featureIndex ??
+    updateId;
+
+  /**
+   * Remove internal/generated fields from converted properties.
+   * Keep only real user properties.
+   * Do NOT include name here as an internal field.
+   */
+  const INTERNAL_KEYS = new Set([
+    "OBJECTID",
+    "_featureIndex",
+    "_parentFeatureCollection",
+    "drawGeometryType",
+    "shapeType",
+    "shape",
+    "isCircle",
+    "isTemporaryDrawing",
+  ]);
+
+  if (this.uniqueIdPropertyName) {
+    INTERNAL_KEYS.add(this.uniqueIdPropertyName);
+  }
+
+  const userProperties = Object.fromEntries(
+    Object.entries({
+      ...(existingFeature?.properties ?? {}),
+      ...(convertedFeature.properties ?? {}),
+    }).filter(([key]) => !INTERNAL_KEYS.has(key))
+  ) as Record<string, any>;
+
+  /**
+   * Preserve original name/id exactly.
+   * Never assign fence id / OBJECTID / unique id into name.
+   */
+  const originalName =
+    existingFeature?.properties?.name ??
+    graphicToUpdate.attributes?.name ??
+    convertedFeature.properties?.name;
+
+  const originalId =
+    existingFeature?.properties?.id ??
+    graphicToUpdate.attributes?.id ??
+    convertedFeature.properties?.id ??
+    convertedFeature.id;
+
+  const normalizedFeature: Feature<GeoJsonGeometry, GeoJsonProperties> = {
+    type: "Feature",
+
+    // Preserve business id only.
+    id: originalId,
+
+    geometry: {
+      ...(convertedFeature.geometry as any),
+      type: "Polygon",
+      coordinates: this.normalizePolygonCoordinates(
+        (convertedFeature.geometry as any).coordinates
+      ),
+    } as GeoJsonGeometry,
+
+    properties: {
+      ...userProperties,
+
+      // OBJECTID must always be index/update id.
+      OBJECTID: preservedObjectId,
+      _featureIndex: preservedObjectId,
+
+      // Preserve exactly.
+      id: originalId,
+      name: originalName,
+
+      ...(isCircle
+        ? {
+            drawGeometryType: "circle",
+            shapeType: "circle",
+            shape: "circle",
+            isCircle: true,
+          }
+        : {
+            drawGeometryType: "polygon",
+            shapeType: "polygon",
+            shape: "polygon",
+            isCircle: false,
+          }),
+    },
+  };
+
+  let updated = false;
+
+  const updatedFeatures = currentGeoJson.features.map((feature: any) => {
+    const featureId =
+      feature?.properties?.OBJECTID ??
+      feature?.properties?._featureIndex ??
+      0;
+
+    if (String(featureId) === String(updateId)) {
+      updated = true;
+
+      return {
+        ...feature,
+
+        // Do not overwrite top-level id unless original id exists.
+        id: feature?.id ?? originalId,
+
+        geometry: normalizedFeature.geometry,
+
+        properties: {
+          ...(feature.properties ?? {}),
+          ...(normalizedFeature.properties ?? {}),
+
+          // Force preserve original user values.
+          id: feature?.properties?.id ?? originalId,
+          name: feature?.properties?.name ?? originalName,
+
+          // Force OBJECTID/index.
+          OBJECTID: feature?.properties?.OBJECTID ?? preservedObjectId,
+          _featureIndex:
+            feature?.properties?._featureIndex ??
+            feature?.properties?.OBJECTID ??
+            preservedObjectId,
+        },
+      };
+    }
+
+    return feature;
+  });
+
+  if (!updated) {
+    updatedFeatures.push(normalizedFeature as any);
+  }
+
+  const updatedGeoJson: FeatureCollection<
+    GeoJsonGeometry,
+    GeoJsonProperties
+  > = {
+    type: "FeatureCollection",
+    features: updatedFeatures as any,
+  };
+
+  this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
+
+  this.blockGeoJsonUpdate = true;
+  this.geojson = updatedGeoJson;
+  this.blockGeoJsonUpdate = false;
+
+  /**
+   * Update live graphic only with geometry.
+   * Preserve attributes, especially name/id.
+   */
+  this.featureLayer?.graphics?.forEach((graphic: Graphic) => {
+    const graphicId =
+      graphic.attributes?.OBJECTID ??
+      graphic.attributes?._featureIndex ??
+      0;
+
+    if (String(graphicId) === String(updateId)) {
+      graphic.geometry = graphicToUpdate.geometry;
+
+      graphic.attributes = {
+        ...(graphic.attributes ?? {}),
+        OBJECTID: preservedObjectId,
+        _featureIndex: preservedObjectId,
+        id: graphic.attributes?.id ?? originalId,
+        name: graphic.attributes?.name ?? originalName,
+      };
+
+      this.applyGraphicDefaults(graphic);
+    }
+  });
+
+  this.refreshLabels();
+
+  this.emitLayerEvent(
+    "userEditItemUpdated",
+    normalizedFeature as any,
+    graphicToUpdate,
+    {
+      geojson: updatedGeoJson,
+    }
   );
 }
 
 
-
-const updateId =
-  graphicToUpdate.attributes?.OBJECTID ??
-  graphicToUpdate.attributes?._featureIndex ??
-  0;
