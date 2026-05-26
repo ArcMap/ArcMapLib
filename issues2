@@ -1,23 +1,41 @@
-l@property({ attribute: false })
-get geojson(): string | FeatureCollection | null {
-  return this._geojson;
-}
+protected updated(changedProps: PropertyValues<this>): void {
 
-set geojson(value: string | FeatureCollection | null) {
-  const oldValue = this._geojson;
+  if (changedProps.has("geojson")) {
 
-  if (
-    value !== null &&
-    value !== undefined &&
-    typeof value === 'object'
-  ) {
-    // Deep clone — replicates what Stencil @Prop() did automatically
-    this._geojson = JSON.parse(JSON.stringify(value));
-  } else {
-    this._geojson = value as string | null;
+    // ── EXACT VALUE ANGULAR IS PASSING ──────────────────────────
+    console.log('[up-geojson-layer] ANGULAR PASSED:', {
+      // Raw reference
+      raw: this.geojson,
+
+      // Is it frozen? (NgRx store objects are frozen)
+      isFrozen: Object.isFrozen(this.geojson),
+
+      // First feature
+      firstFeature: (this.geojson as any)?.features?.[0],
+
+      // First feature properties — key fields
+      firstName:    (this.geojson as any)?.features?.[0]?.properties?.name,
+      firstId:      (this.geojson as any)?.features?.[0]?.properties?.id,
+
+      // Is first feature properties frozen?
+      isPropsFrozen: Object.isFrozen(
+        (this.geojson as any)?.features?.[0]?.properties
+      ),
+
+      // Total feature count
+      count: (this.geojson as any)?.features?.length,
+
+      // Type
+      type: typeof this.geojson,
+    });
+    // ────────────────────────────────────────────────────────────
+
+    if (!this.initComplete) {
+      this.pendingGeoJson = this.geojson;
+    } else {
+      void this.updateGeoJson(this.geojson);
+    }
   }
 
-  this.requestUpdate('geojson', oldValue);
+  // ... rest of updated()
 }
-
-private _geojson: string | FeatureCollection | null = null;
