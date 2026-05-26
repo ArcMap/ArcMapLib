@@ -1,41 +1,128 @@
-protected updated(changedProps: PropertyValues<this>): void {
+private showGraphicPopup(graphic: Graphic, mapPoint?: Point): void {
 
-  if (changedProps.has("geojson")) {
+  // LOG 1: Was showGraphicPopup even called?
+  console.log('[popup-debug] showGraphicPopup CALLED', {
+    hasGraphic: !!graphic,
+    hasGeometry: !!graphic?.geometry,
+    hasView: !!this.view,
+    hasPopup: !!this.view?.popup,
+    editorOpen: this._editorOpen,
+    inDrawingMode: this.inDrawingMode,
+    isStartingDraw: this._isStartingDraw,
+    suppressed: this.shouldSuppressPopup(),
+    suppressUntil: this._suppressPopupUntil,
+    now: Date.now(),
+    viewStationary: this.view?.stationary,
+    mapPoint: mapPoint ? {
+      lat: mapPoint.latitude,
+      lng: mapPoint.longitude
+    } : null,
+  });
 
-    // ── EXACT VALUE ANGULAR IS PASSING ──────────────────────────
-    console.log('[up-geojson-layer] ANGULAR PASSED:', {
-      // Raw reference
-      raw: this.geojson,
-
-      // Is it frozen? (NgRx store objects are frozen)
-      isFrozen: Object.isFrozen(this.geojson),
-
-      // First feature
-      firstFeature: (this.geojson as any)?.features?.[0],
-
-      // First feature properties — key fields
-      firstName:    (this.geojson as any)?.features?.[0]?.properties?.name,
-      firstId:      (this.geojson as any)?.features?.[0]?.properties?.id,
-
-      // Is first feature properties frozen?
-      isPropsFrozen: Object.isFrozen(
-        (this.geojson as any)?.features?.[0]?.properties
-      ),
-
-      // Total feature count
-      count: (this.geojson as any)?.features?.length,
-
-      // Type
-      type: typeof this.geojson,
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    console.log('[popup-debug] BLOCKED by guard', {
+      editorOpen: this._editorOpen,
+      inDrawingMode: this.inDrawingMode,
+      isStartingDraw: this._isStartingDraw,
+      suppressed: this.shouldSuppressPopup(),
     });
-    // ────────────────────────────────────────────────────────────
-
-    if (!this.initComplete) {
-      this.pendingGeoJson = this.geojson;
-    } else {
-      void this.updateGeoJson(this.geojson);
-    }
+    try { this.view?.popup?.close(); } catch {}
+    return;
   }
 
-  // ... rest of updated()
+  if (!graphic?.geometry || !this.view?.popup) {
+    console.log('[popup-debug] BLOCKED: no geometry or no popup');
+    return;
+  }
+
+  const location =
+    mapPoint ??
+    this.getPopupPoint(graphic.geometry) ??
+    undefined;
+
+  console.log('[popup-debug] location resolved', {
+    location,
+    fromMapPoint: !!mapPoint,
+    fromGeometry: !mapPoint,
+  });
+
+  if (!location) {
+    console.log('[popup-debug] BLOCKED: no location');
+    return;
+  }
+
+  const popupTemplate =
+    graphic.popupTemplate ??
+    this.buildPopupTemplateFromCurrent(graphic);
+
+  console.log('[popup-debug] popupTemplate', {
+    hasTemplate: !!popupTemplate,
+    title: (popupTemplate as any)?.title,
+  });
+
+  if (!popupTemplate) {
+    console.log('[popup-debug] BLOCKED: no popup template');
+    return;
+  }
+
+  graphic.popupTemplate = popupTemplate;
+
+  console.log('[popup-debug] view.stationary =', this.view?.stationary);
+
+  // Check if stationary
+  if (this.view.stationary === false) {
+    console.log('[popup-debug] view is MOVING — waiting for stationary');
+
+    const handle = this.view.watch('stationary', (isStationary: boolean) => {
+      if (isStationary) {
+        handle.remove();
+        console.log('[popup-debug] view is now STATIONARY — opening popup');
+        setTimeout(() => this._doOpenPopup(graphic, location), 100);
+      }
+    });
+  } else {
+    console.log('[popup-debug] view already STATIONARY — opening popup now');
+    this._doOpenPopup(graphic, location);
+  }
+}
+
+private _doOpenPopup(graphic: Graphic, location: any): void {
+  try {
+    this.view.popupEnabled = true;
+
+    console.log('[popup-debug] calling openPopup', {
+      location,
+      feature: graphic.attributes,
+    });
+
+    if (typeof this.view.openPopup === 'function') {
+      this.view.openPopup({
+        location,
+        features: [graphic],
+        updateLocationEnabled: false,
+      });
+    } else {
+      this.view.popup.open({
+        location,
+        features: [graphic],
+      });
+    }
+
+    console.log('[popup-debug] openPopup called successfully');
+
+    setTimeout(() => {
+      try {
+        this.view.popup?.reposition?.();
+        console.log('[popup-debug] reposition called');
+      } catch {}
+    }, 150);
+
+  } catch (error) {
+    console.warn('[popup-debug] openPopup FAILED', error);
+  }
 }
