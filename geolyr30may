@@ -1,275 +1,68 @@
 private buildPopupTemplate(graphic: Graphic): PopupTemplate | null {
-  console.log("[arc-geojson-layer] buildPopupTemplate called", {
-    hasInfoTemplate: !!this.infoTemplate,
-    infoTemplate: this.infoTemplate,
-    infoTemplateKeys: this.infoTemplate
-      ? Object.keys(this.infoTemplate)
-      : [],
-    attributes: graphic?.attributes,
-  });
+  if (!this.infoTemplate) return null;
 
-  if (!this.infoTemplate) {
-    console.warn(
-      "[arc-geojson-layer] buildPopupTemplate: no infoTemplate set"
-    );
-    return null;
-  }
+  const attributes = graphic?.attributes ?? {};
 
-  if (!graphic) {
-    console.warn(
-      "[arc-geojson-layer] buildPopupTemplate: no graphic"
-    );
-    return null;
-  }
+  const resolveTokens = (str: string): string =>
+    str.replace(/\$\{([^}]+)\}/g, (_, key: string) => {
+      const val = attributes[key.trim()];
+      return val !== undefined && val !== null ? String(val) : "";
+    });
 
-  const attributes = graphic.attributes ?? {};
-  const tmpl = this.infoTemplate;
+  const tmpl: any =
+    typeof this.infoTemplate === "string"
+      ? (() => { try { return JSON.parse(this.infoTemplate as string); } catch { return { content: this.infoTemplate }; } })()
+      : this.infoTemplate;
 
-  console.log("[arc-geojson-layer] buildPopupTemplate: tmpl:", tmpl);
-  console.log("[arc-geojson-layer] buildPopupTemplate: tmpl keys:", Object.keys(tmpl));
+  // ── Resolve title ──────────────────────────────────────────
+  let title: any = tmpl?.title ?? tmpl?.Title ?? "Details";
+  if (typeof title === "function") title = title.call(tmpl, graphic);
+  if (typeof title === "string")   title = resolveTokens(title);
 
-  // Token replacer
-  const resolveTokens = (str: string): string => {
-    if (!str || typeof str !== "string") return str;
-    return str
-      .replace(/\$\{([^}]+)\}/g, (_, k) => {
-        const v = attributes[k.trim()];
-        console.log(`[arc-geojson-layer] token \${${k.trim()}} =>`, v);
-        return v == null ? "" : String(v);
-      })
-      .replace(/\{([^}]+)\}/g, (_, k) => {
-        if (k.includes("/") || k.includes("expression")) {
-          return `{${k}}`;
-        }
-        const v = attributes[k.trim()];
-        console.log(`[arc-geojson-layer] token {${k.trim()}} =>`, v);
-        return v == null ? "" : String(v);
-      });
-  };
+  console.log("[arc-geojson-layer] buildPopupTemplate: resolved title:", title);
 
-  try {
-    // ── Title ─────────────────────────────────────────────────
-    const rawTitle =
-      tmpl?.title ??
-      tmpl?.Title ??
-      tmpl?.listItem ??
-      tmpl?.listTitle ??
-      tmpl?.heading ??
-      tmpl?.header ??
-      tmpl?.name ??
-      null;
+  // ── Resolve content ────────────────────────────────────────
+  let rawContent: any =
+    tmpl?.content ??
+    tmpl?.Content ??
+    tmpl?.details ??
+    tmpl?.body ??
+    null;
 
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: rawTitle:", rawTitle
-    );
+  console.log("[arc-geojson-layer] buildPopupTemplate: rawContent typeof:", typeof rawContent);
 
-    let title: string;
-    if (rawTitle === null || rawTitle === undefined) {
-      title = "";
-    } else if (typeof rawTitle === "function") {
-      title = String(rawTitle.call(tmpl, graphic) ?? "");
+  let content: any = null;
+
+  if (typeof rawContent === "function") {
+    // ✅ Call function, get back HTML string
+    const result = rawContent.call(tmpl, graphic);
+    console.log("[arc-geojson-layer] buildPopupTemplate: content is string from function");
+    if (typeof result === "string" && result.trim()) {
+      content = resolveTokens(result);
     } else {
-      title = resolveTokens(String(rawTitle));
+      content = result ?? null;
     }
+  } else if (typeof rawContent === "string" && rawContent.trim()) {
+    // ✅ Plain string template
+    content = resolveTokens(rawContent);
+    console.log("[arc-geojson-layer] buildPopupTemplate: content resolved from string:", content);
+  } else if (Array.isArray(rawContent) || (rawContent !== null && typeof rawContent === "object")) {
+    // ✅ ArcGIS content array/object — pass through as-is, do NOT serialize
+    content = rawContent;
+  }
+  // ❌ null/undefined → content stays null, no JSON dump
 
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: resolved title:", title
-    );
+  console.log("[arc-geojson-layer] buildPopupTemplate: hasValidAttributes:", true);
+  console.log("[arc-geojson-layer] buildPopupTemplate: hasResolvedContent:", !!content);
 
-    // ── Content ───────────────────────────────────────────────
-    const rawContent =
-      tmpl?.content ??
-      tmpl?.Content ??
-      tmpl?.details ??
-      tmpl?.body ??
-      tmpl?.description ??
-      tmpl?.template ??
-      null;
-
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: rawContent:", rawContent,
-      "typeof:", typeof rawContent
-    );
-
-    let resolvedContent: any = null;
-
-    if (typeof rawContent === "function") {
-      // Call function — may return string, HTMLElement, or object
-      const result = rawContent.call(tmpl, graphic);
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: function result:", result,
-        "typeof:", typeof result
-      );
-
-      if (typeof result === "string" && result.trim()) {
-        // String HTML — use directly
-        resolvedContent = resolveTokens(result);
-        console.log(
-          "[arc-geojson-layer] buildPopupTemplate: content is string from function"
-        );
-      } else if (
-        result instanceof HTMLElement ||
-        result instanceof Element
-      ) {
-        // DOM element — wrap in CustomContent not needed,
-        // ArcGIS accepts HTMLElement as content
-        resolvedContent = result;
-        console.log(
-          "[arc-geojson-layer] buildPopupTemplate: content is HTMLElement"
-        );
-      } else if (result !== null && result !== undefined) {
-        // Object or anything else — convert to readable HTML string
-        // Do NOT JSON.stringify — render as key/value pairs
-        console.log(
-          "[arc-geojson-layer] buildPopupTemplate: content function returned non-string object, converting to key/value display"
-        );
-        console.log(
-          "[arc-geojson-layer] buildPopupTemplate: result keys:", 
-          typeof result === "object" ? Object.keys(result) : "not-object"
-        );
-        // Ignore the function result object — fall through to
-        // use attributes table instead
-        resolvedContent = null;
-      }
-    } else if (
-      typeof rawContent === "string" &&
-      rawContent.trim()
-    ) {
-      resolvedContent = resolveTokens(rawContent);
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: content resolved from string"
-      );
-    } else if (
-      rawContent !== null &&
-      typeof rawContent === "object"
-    ) {
-      // If it's already an ArcGIS content descriptor array
-      if (Array.isArray(rawContent)) {
-        resolvedContent = rawContent;
-      } else {
-        // Unknown object — ignore, use attributes table
-        resolvedContent = null;
-        console.log(
-          "[arc-geojson-layer] buildPopupTemplate: rawContent is plain object, ignoring, will use fieldInfos"
-        );
-      }
-    }
-
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: resolvedContent:", resolvedContent
-    );
-
-    // ── Validate ──────────────────────────────────────────────
-    const SKIP = new Set([
-      "OBJECTID",
-      "_featureIndex",
-      "__isTemporaryDrawing",
-      "__labelFor",
-      "_parentFeatureCollection",
-    ]);
-
-    const hasValidAttributes = Object.entries(attributes).some(
-      ([k, v]) =>
-        !k.startsWith("_") &&
-        !SKIP.has(k) &&
-        v !== null &&
-        v !== undefined &&
-        String(v).trim() !== ""
-    );
-
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: hasValidAttributes:", hasValidAttributes,
-      "hasResolvedContent:", !!resolvedContent
-    );
-
-    if (!resolvedContent && !hasValidAttributes) {
-      console.warn(
-        "[arc-geojson-layer] buildPopupTemplate: nothing to show — skipping"
-      );
-      return null;
-    }
-
-    // ── Build PopupTemplate ───────────────────────────────────
-    let popupTemplate: PopupTemplate;
-
-    if (
-      resolvedContent &&
-      typeof resolvedContent === "string"
-    ) {
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: using string content"
-      );
-      popupTemplate = new PopupTemplate({
-        title,
-        content: resolvedContent,
-        actions: [] as any,
-      });
-    } else if (
-      Array.isArray(resolvedContent) &&
-      resolvedContent.length > 0
-    ) {
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: using array content"
-      );
-      popupTemplate = new PopupTemplate({
-        title,
-        content: resolvedContent,
-        actions: [] as any,
-      });
-    } else if (
-      resolvedContent instanceof HTMLElement ||
-      resolvedContent instanceof Element
-    ) {
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: using HTMLElement content"
-      );
-      // Wrap HTMLElement in a function for ArcGIS CustomContent
-      popupTemplate = new PopupTemplate({
-        title,
-        content: () => resolvedContent,
-        actions: [] as any,
-      });
-    } else {
-      // No usable content from infoTemplate function —
-      // fall back to native ArcGIS fields attribute table
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: falling back to native fieldInfos table"
-      );
-
-      const fieldInfos = Object.keys(attributes)
-        .filter((k) => !k.startsWith("_") && !SKIP.has(k))
-        .map((k) => ({
-          fieldName: k,
-          label: k,
-          visible: true,
-        }));
-
-      console.log(
-        "[arc-geojson-layer] buildPopupTemplate: fieldInfos:", fieldInfos
-      );
-
-      popupTemplate = new PopupTemplate({
-        title,
-        content: [
-          {
-            type: "fields",
-            fieldInfos,
-          },
-        ] as any,
-        actions: [] as any,
-      });
-    }
-
-    console.log(
-      "[arc-geojson-layer] buildPopupTemplate: final template:", popupTemplate
-    );
-
-    return popupTemplate;
-
-  } catch (error) {
-    console.error(
-      "[arc-geojson-layer] buildPopupTemplate failed:", error
-    );
+  // ── Skip popup if nothing to show ─────────────────────────
+  if (!content) {
+    console.warn("[arc-geojson-layer] buildPopupTemplate: no content resolved, skipping popup");
     return null;
   }
+
+  console.log("[arc-geojson-layer] buildPopupTemplate: using string content");
+  console.log("[arc-geojson-layer] buildPopupTemplate: final template:");
+
+  return new PopupTemplate({ title, content });
 }
