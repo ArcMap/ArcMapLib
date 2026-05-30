@@ -1,3 +1,118 @@
+private async resolveAncestorMapAndView(): Promise<void> {
+  const mapElement = this.closest("arc-map") || this.closest("ArcMap");
+
+  if (!mapElement) {
+    throw new Error("[arc-geojson-layer] ancestor arc-map not found");
+  }
+
+  this.ancestorMapElement = mapElement;
+  const anyMap = mapElement as any;
+
+  if (anyMap.view) {
+    this.view = anyMap.view;
+  } else if (typeof anyMap.getViewInstance === "function") {
+    this.view = await anyMap.getViewInstance();
+  } else if (typeof anyMap.getView === "function") {
+    this.view = await anyMap.getView();
+  }
+
+  if (!this.view) {
+    throw new Error("[arc-geojson-layer] map view not resolved from arc-map");
+  }
+
+  if (this.view.ready !== true) {
+    await this.view.when?.();
+  }
+
+  // ─── DISABLE ALL ARCGIS AUTO POPUP IMMEDIATELY ───────────────────────
+  this._killArcGISDefaultPopup();
+  // Watch for view changes and re-kill if ArcGIS re-enables it
+  this.view.watch("popup", () => this._killArcGISDefaultPopup());
+  // ─────────────────────────────────────────────────────────────────────
+
+  if (this.pendingGeoJson !== undefined) {
+    const _pendingGeoJson = this.pendingGeoJson;
+    this.pendingGeoJson = undefined;
+    await this.updateGeoJson(_pendingGeoJson);
+  }
+}
+
+private _killArcGISDefaultPopup(): void {
+  try {
+    if (!this.view) return;
+
+    // Kill on the view itself
+    this.view.popupEnabled = false;
+
+    const popup: any = this.view?.popup;
+    if (!popup) return;
+
+    // Kill every ArcGIS auto-trigger mechanism
+    popup.autoOpenEnabled = false;
+    popup.highlightEnabled = false;
+    popup.dockEnabled = false;
+
+    // Clear any existing open state
+    try { popup.close?.(); } catch { }
+    try { popup.visible = false; } catch { }
+    try { popup.open = false; } catch { }
+    try { popup.features = []; } catch { }
+    try { popup.content = null; } catch { }
+    try { popup.title = ""; } catch { }
+
+    // Remove ArcGIS default "Zoom to" action
+    try {
+      if (popup.actions) {
+        popup.actions.removeAll?.();
+      }
+    } catch { }
+
+    // Also kill on any popup component from arc-map
+    try {
+      const mapEl = this.ancestorMapElement as any;
+      const popupEl =
+        typeof mapEl?.getPopupComponent === "function"
+          ? mapEl.getPopupComponent()
+          : null;
+      if (popupEl) {
+        popupEl.autoOpenEnabled = false;
+        try { popupEl.actions?.removeAll?.(); } catch { }
+      }
+    } catch { }
+
+  } catch { }
+}
+
+
+
+
+private bindViewEvents(): void {
+  if (!this.view || !this.featureLayer) return;
+
+  this.cleanupViewEvents();
+  this.setupPopupCloseWatcher();
+
+  // ─── INTERCEPT ALL ARCGIS DEFAULT POPUP TRIGGERS ─────────────────────
+  // This fires before ArcGIS processes the click internally
+  const immediateClickHandle = this.view.on("immediate-click", (evt: any) => {
+    // Kill ArcGIS default popup on every click — we handle it manually
+    this.view.popupEnabled = false;
+    try { this.view.popup?.close?.(); } catch { }
+    try { this.view.popup.autoOpenEnabled = false; } catch { }
+  });
+  this.eventHandles.push({ remove: () => immediateClickHandle.remove() });
+  // ─────────────────────────────────────────────────────────────────────
+
+  let clickTimer: any = null;
+
+  // ... rest of your existing bindViewEvents code unchanged
+
+
+
+
+
+
+
 private showGraphicPopup(
   graphic: Graphic,
   mapPoint: Point,
@@ -11,7 +126,7 @@ private showGraphicPopup(
   ) return;
 
   if (!this.infoTemplate) {
-    console.warn('[popup-debug] showGraphicPopup: infoTemplate is not set, skipping popup');
+    console.warn('[popup-debug] showGraphicPopup: no infoTemplate set');
     return;
   }
 
@@ -19,34 +134,30 @@ private showGraphicPopup(
   const popupGraphic = popupGraphics[0];
   if (!popupGraphic || !this.view?.popup) return;
 
-  // Build template BEFORE opening — assign to all graphics
-  const templates: PopupTemplate[] = [];
+  // Build templates synchronously before touching the popup
+  let builtCount = 0;
   popupGraphics.forEach((g) => {
     const tpl = this.buildPopupTemplateFromCurrent(g);
     if (tpl) {
       g.popupTemplate = tpl;
-      templates.push(tpl);
-    } else {
-      console.warn('[popup-debug] No template built for graphic', g.attributes);
+      builtCount++;
     }
   });
 
-  if (templates.length === 0) {
-    console.warn('[popup-debug] No popup templates built — aborting popup open');
+  if (builtCount === 0) {
+    console.warn('[popup-debug] showGraphicPopup: no templates built');
     return;
   }
-
-  this.view.popupEnabled = true;
-
-  // Clear any previous popup state first
-  try { this.view.popup.features = []; } catch { }
-  try { this.view.popup.visible = false; } catch { }
 
   const location =
     mapPoint ??
     ArcGeojsonLayer.getPopupPoint(popupGraphic.geometry) ??
     undefined;
 
+  // Kill ArcGIS default popup state first
+  this._killArcGISDefaultPopup();
+
+  // Now open OUR popup
   if (this.view.stationary === false) {
     const handle = this.view.watch("stationary", (isStationary: boolean) => {
       if (isStationary) {
@@ -55,41 +166,52 @@ private showGraphicPopup(
       }
     });
   } else {
-    // Open synchronously — no setTimeout needed
     this._doOpenPopupMultiple(popupGraphics, location);
   }
 }
 
+
+
+
 private _doOpenPopupMultiple(graphics: Graphic[], location: any): void {
   try {
+    // Briefly re-enable just to open our popup
     this.view.popupEnabled = true;
 
     const popup: any = this.view?.popup;
     if (!popup) return;
 
-    // Set everything before opening
+    popup.autoOpenEnabled = false;  // keep this off even while we open
+    popup.highlightEnabled = false;
+
+    // Remove "Zoom to" and other default actions
+    try { popup.actions?.removeAll?.(); } catch { }
+
     try { popup.location = location ?? undefined; } catch { }
     try { popup.features = graphics; } catch { }
     try { (popup as any).updateLocationEnabled = false; } catch { }
 
-    // Open the popup
     if (typeof popup.open === "function") {
-      try { popup.open({ features: graphics, location: location ?? undefined }); } catch { }
-    } else if (typeof popup.open === "boolean") {
+      try {
+        popup.open({ features: graphics, location: location ?? undefined });
+      } catch { }
+    } else {
       try { popup.open = true; } catch { }
     }
 
     try { popup.visible = true; } catch { }
 
-    // Reposition after DOM updates
     requestAnimationFrame(() => {
       try { popup.reposition?.(); } catch { }
+      // Re-kill auto open after our popup is rendered
+      try { popup.autoOpenEnabled = false; } catch { }
     });
 
-    // Force DOM visibility as last resort
     setTimeout(() => {
       try {
-        const dom = document.querySelector(".esri-popup-main-container") as HTMLElement;
+        const dom = document.querySelector(
+          ".esri-popup-main-container"
+        ) as HTMLElement;
         if (dom) {
           dom.style.display = "block";
           dom.style.visibility = "visible";
@@ -99,59 +221,5 @@ private _doOpenPopupMultiple(graphics: Graphic[], location: any): void {
 
   } catch (error) {
     console.warn('[popup-debug] _doOpenPopupMultiple FAILED', error);
-  }
-}
-
-
-
-private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
-  if (!graphic) return null;
-
-  const attributes = graphic.attributes ?? {};
-
-  const replaceTokens = (value: string): string =>
-    value.replace(/\$\{([^}]+)\}/g, (_, key: string) => {
-      const v = attributes[key.trim()];
-      return v === undefined || v === null ? "" : String(v);
-    });
-
-  try {
-    let title: any =
-      this.infoTemplate?.title ??
-      this.infoTemplate?.listTitle ??
-      "Details";
-
-    if (typeof title === "function") {
-      title = title.call(this.infoTemplate, graphic);
-    }
-    if (typeof title === "string") {
-      title = replaceTokens(title);
-    }
-
-    let content: any =
-      this.infoTemplate?.content ??
-      this.infoTemplate?.details ??
-      (typeof this.infoTemplate === "string" ? this.infoTemplate : null);
-
-    if (typeof content === "function") {
-      content = content.call(this.infoTemplate, graphic);
-    }
-    if (typeof content === "string") {
-      content = replaceTokens(content);
-    }
-
-    // If still no content, render all attributes as a table
-    if (!content || typeof content !== "string") {
-      const rows = Object.entries(attributes)
-        .filter(([k]) => !k.startsWith("_") && k !== "OBJECTID")
-        .map(([k, v]) => `<tr><td><b>${k}</b></td><td>${v ?? ""}</td></tr>`)
-        .join("");
-      content = `<table style="width:100%;border-collapse:collapse">${rows}</table>`;
-    }
-
-    return new PopupTemplate({ title, content });
-  } catch (error) {
-    console.error("[arc-geojson-layer] buildPopupTemplateFromCurrent failed", error);
-    return null;
   }
 }
