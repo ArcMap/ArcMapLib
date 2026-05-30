@@ -1,48 +1,27 @@
-private _isOpeningPopup = false; // Add this field at top of class
+private _isOpeningPopup = false; // ensure this field exists at top of class
 
 private setupPopupCloseWatcher(): void {
   try { this._popupVisibleWatchHandle?.remove?.(); } catch { }
   this._popupVisibleWatchHandle = null;
 
-  const popup: any = this.view?.popup;
-  if (!popup) return;
-
+  // Do NOT watch popup.visible — it fires during ArcGIS
+  // internal open/close cycles and interferes with our state.
+  // Instead watch view.stationary to release stuck state.
   try {
     this._popupVisibleWatchHandle = reactiveUtils.watch(
-      () => this.view?.popup?.visible,
-      (visible: boolean) => {
+      () => this.view?.stationary,
+      (stationary: boolean) => {
         console.log(
-          "[arc-geojson-layer] popup visible changed:", visible,
-          "isOpeningPopup:", this._isOpeningPopup
+          "[arc-geojson-layer] view.stationary changed:", stationary
         );
-
-        // If WE are currently opening the popup, ignore
-        // the false->true->false flicker ArcGIS fires
-        if (this._isOpeningPopup) {
-          console.log(
-            "[arc-geojson-layer] popup watcher: ignored during open sequence"
-          );
-          return;
-        }
-
-        if (!visible) {
-          // Small delay to avoid reacting to ArcGIS
-          // internal open/close flicker
-          setTimeout(() => {
-            // Re-check — if popup became visible again
-            // in the meantime, do not reset
-            const stillHidden = !this.view?.popup?.visible;
+        if (stationary) {
+          // Map stopped moving — release any stuck opening guard
+          if (this._isOpeningPopup) {
             console.log(
-              "[arc-geojson-layer] popup watcher: stillHidden after delay:", stillHidden
+              "[arc-geojson-layer] stationary: releasing stuck _isOpeningPopup"
             );
-            if (stillHidden && !this._isOpeningPopup) {
-              this._popupOpen = false;
-              this.setViewCursor("default");
-              console.log(
-                "[arc-geojson-layer] popup closed externally, reset state"
-              );
-            }
-          }, 300);
+            this._isOpeningPopup = false;
+          }
         }
       }
     );
@@ -59,25 +38,20 @@ private showGraphicPopup(
   graphics: Graphic[]
 ): void {
   console.log("[arc-geojson-layer] showGraphicPopup called", {
-    graphic,
-    mapPoint,
     graphicsCount: graphics.length,
-    infoTemplate: this.infoTemplate,
+    hasInfoTemplate: !!this.infoTemplate,
     editorOpen: this._editorOpen,
     inDrawingMode: this.inDrawingMode,
     isOpeningPopup: this._isOpeningPopup,
+    stationary: this.view?.stationary,
   });
 
   if (this._editorOpen) {
     console.warn("[arc-geojson-layer] showGraphicPopup: editor open, skipping");
     return;
   }
-  if (this.inDrawingMode) {
-    console.warn("[arc-geojson-layer] showGraphicPopup: drawing mode, skipping");
-    return;
-  }
-  if (this._isStartingDraw) {
-    console.warn("[arc-geojson-layer] showGraphicPopup: isStartingDraw, skipping");
+  if (this.inDrawingMode || this._isStartingDraw) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: drawing, skipping");
     return;
   }
   if (this.shouldSuppressPopup()) {
@@ -88,6 +62,9 @@ private showGraphicPopup(
     console.warn("[arc-geojson-layer] showGraphicPopup: no infoTemplate, skipping");
     return;
   }
+
+  // Always release any previous stuck guard before opening
+  this._isOpeningPopup = false;
 
   const popupGraphics = graphics.filter(
     (g) => g?.geometry && g?.layer === this.featureLayer
@@ -102,11 +79,12 @@ private showGraphicPopup(
     return;
   }
 
+  // Build templates
   let builtAny = false;
   popupGraphics.forEach((g, i) => {
     const tpl = this.buildPopupTemplate(g);
     console.log(
-      `[arc-geojson-layer] showGraphicPopup: template[${i}]:`, tpl
+      `[arc-geojson-layer] showGraphicPopup: template[${i}]:`, !!tpl
     );
     if (tpl) {
       g.popupTemplate = tpl;
@@ -124,69 +102,93 @@ private showGraphicPopup(
     ArcGeojsonLayer.getPopupPoint(graphic.geometry) ??
     undefined;
 
-  try {
-    const popup = this.view?.popup;
-    if (!popup) {
-      console.error("[arc-geojson-layer] showGraphicPopup: no popup on view");
-      return;
-    }
+  const openPopup = () => {
+    try {
+      const popup = this.view?.popup;
+      if (!popup) {
+        console.error("[arc-geojson-layer] showGraphicPopup: no popup");
+        return;
+      }
 
-    popup.autoOpenEnabled = false;
-    popup.highlightEnabled = false;
-    try { popup.actions?.removeAll?.(); } catch { }
+      // Kill ArcGIS auto behavior
+      popup.autoOpenEnabled = false;
+      popup.highlightEnabled = false;
+      try { popup.actions?.removeAll?.(); } catch { }
 
-    // Set flag BEFORE opening so watcher ignores flicker
-    this._isOpeningPopup = true;
-    this._popupOpen = true;
+      // Set guard
+      this._isOpeningPopup = true;
+      this._popupOpen = true;
 
-    popup.features = popupGraphics;
-    popup.location = location;
+      // Set features and location
+      popup.features = popupGraphics;
+      popup.location = location;
 
-    if (typeof (this.view as any).openPopup === "function") {
+      // Open using correct API
+      if (typeof (this.view as any).openPopup === "function") {
+        console.log(
+          "[arc-geojson-layer] showGraphicPopup: using view.openPopup()"
+        );
+        (this.view as any).openPopup({
+          features: popupGraphics,
+          location,
+          updateLocationEnabled: false,
+        });
+      } else {
+        console.log(
+          "[arc-geojson-layer] showGraphicPopup: using popup.open = true"
+        );
+        (popup as any).open = true;
+        popup.visible = true;
+      }
+
+      // Remove zoom action
+      setTimeout(() => {
+        try { popup.actions?.removeAll?.(); } catch { }
+      }, 50);
+
+      // Release guard after ArcGIS settles
+      // Use longer timeout to cover Angular change detection cycle
+      setTimeout(() => {
+        this._isOpeningPopup = false;
+        console.log(
+          "[arc-geojson-layer] showGraphicPopup: _isOpeningPopup released"
+        );
+      }, 800);
+
       console.log(
-        "[arc-geojson-layer] showGraphicPopup: using view.openPopup()"
+        "[arc-geojson-layer] showGraphicPopup: popup opened"
       );
-      (this.view as any).openPopup({
-        features: popupGraphics,
-        location,
-        updateLocationEnabled: false,
-      });
-    } else {
-      console.log(
-        "[arc-geojson-layer] showGraphicPopup: using popup.open = true"
+
+    } catch (err) {
+      console.error(
+        "[arc-geojson-layer] showGraphicPopup open failed:", err
       );
-      (popup as any).open = true;
-      popup.visible = true;
-    }
-
-    // Clear zoom action
-    setTimeout(() => {
-      try {
-        popup.actions?.removeAll?.();
-        console.log("[arc-geojson-layer] showGraphicPopup: actions cleared");
-      } catch { }
-    }, 50);
-
-    // Release the opening guard after ArcGIS settles
-    setTimeout(() => {
+      this._popupOpen = false;
       this._isOpeningPopup = false;
-      console.log(
-        "[arc-geojson-layer] showGraphicPopup: _isOpeningPopup released"
-      );
-    }, 500);
+    }
+  };
 
+  // If map is not stationary wait for it to stop
+  // before opening popup — prevents ArcGIS from
+  // immediately closing it due to map movement
+  if (!this.view.stationary) {
     console.log(
-      "[arc-geojson-layer] showGraphicPopup: popup opened successfully"
+      "[arc-geojson-layer] showGraphicPopup: map not stationary, waiting..."
     );
-
-  } catch (err) {
-    console.error("[arc-geojson-layer] showGraphicPopup failed:", err);
-    this._popupOpen = false;
-    this._isOpeningPopup = false;
+    reactiveUtils.whenOnce(
+      () => this.view?.stationary === true
+    ).then(() => {
+      console.log(
+        "[arc-geojson-layer] showGraphicPopup: map now stationary, opening popup"
+      );
+      openPopup();
+    }).catch(() => {
+      openPopup();
+    });
+  } else {
+    openPopup();
   }
 }
-
-
 
 public closePopup(): void {
   console.log("[arc-geojson-layer] closePopup called", {
@@ -194,10 +196,10 @@ public closePopup(): void {
     isOpeningPopup: this._isOpeningPopup,
   });
 
-  // Do not close if we are in the middle of opening
+  // Never close if we are currently opening
   if (this._isOpeningPopup) {
     console.warn(
-      "[arc-geojson-layer] closePopup: skipped — popup is currently opening"
+      "[arc-geojson-layer] closePopup: skipped — currently opening"
     );
     return;
   }
@@ -210,8 +212,10 @@ public closePopup(): void {
       try {
         if (typeof popup.close === "function") {
           popup.close();
+          console.log("[arc-geojson-layer] closePopup: called popup.close()");
         } else {
           popup.open = false;
+          console.log("[arc-geojson-layer] closePopup: set popup.open = false");
         }
       } catch { }
       try { popup.visible = false; } catch { }
@@ -224,3 +228,143 @@ public closePopup(): void {
 
   console.log("[arc-geojson-layer] closePopup: done");
 }
+
+
+
+
+
+
+
+
+
+
+
+const clickHandle = this.view.on("click", async (evt: any) => {
+  if (this.isPopupDomTarget(evt?.native?.target)) {
+    console.log("[arc-geojson-layer] click: popup DOM, ignoring");
+    return;
+  }
+
+  if (this.inDrawingMode || this._isStartingDraw) {
+    console.log("[arc-geojson-layer] click: drawing mode, ignoring");
+    return;
+  }
+
+  // Always release stuck guard on any click
+  // so map never stays stuck
+  if (this._isOpeningPopup) {
+    console.log(
+      "[arc-geojson-layer] click: releasing stuck _isOpeningPopup"
+    );
+    this._isOpeningPopup = false;
+  }
+
+  try {
+    const hit = await this.view.hitTest(evt);
+    const allResults = hit?.results ?? [];
+
+    console.log(
+      "[arc-geojson-layer] click: hitTest results:", allResults.length
+    );
+
+    const thisLayerResults = allResults.filter(
+      (r: any) =>
+        r?.graphic?.geometry &&
+        r?.graphic?.layer === this.featureLayer
+    );
+
+    console.log(
+      "[arc-geojson-layer] click: thisLayerResults:", thisLayerResults.length
+    );
+
+    if (thisLayerResults.length === 0) {
+      if (this._popupOpen) {
+        console.log("[arc-geojson-layer] click: empty space, closing popup");
+        this.closePopup();
+      }
+      return;
+    }
+
+    // Check if another layer is visually on top
+    const topmostGraphic = allResults[0]?.graphic;
+    if (
+      topmostGraphic &&
+      topmostGraphic.layer !== this.featureLayer
+    ) {
+      try {
+        const topmostIndex = this.view.map.layers.indexOf(
+          topmostGraphic.layer
+        );
+        const thisIndex = this.view.map.layers.indexOf(
+          this.featureLayer
+        );
+        console.log(
+          "[arc-geojson-layer] click: layer order — topmost:", topmostIndex,
+          "this:", thisIndex
+        );
+        if (topmostIndex > thisIndex) {
+          console.log(
+            "[arc-geojson-layer] click: another layer on top, skipping"
+          );
+          return;
+        }
+      } catch { }
+    }
+
+    const thisLayerGraphics = thisLayerResults.map(
+      (r: any) => r.graphic as Graphic
+    );
+    const topGraphic = thisLayerGraphics[0];
+
+    console.log(
+      "[arc-geojson-layer] click: topGraphic:", topGraphic?.attributes
+    );
+
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(topGraphic),
+      topGraphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: topGraphic.attributes ?? {},
+        },
+      }
+    );
+
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this._isStartingDraw &&
+      !this.shouldSuppressPopup()
+    ) {
+      this.showGraphicPopup(
+        topGraphic,
+        evt.mapPoint,
+        thisLayerGraphics
+      );
+    }
+
+    if (
+      this.enableUserEdit &&
+      !this._editorOpen &&
+      !this.inDrawingMode
+    ) {
+      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+        this.removeFromGeoJSON(topGraphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
+      await this.activateGraphicsEditor(topGraphic);
+    }
+
+  } catch (err) {
+    console.error("[arc-geojson-layer] click handler failed:", err);
+    // Always release guard on error
+    this._isOpeningPopup = false;
+  }
+});
+
