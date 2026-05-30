@@ -1,253 +1,171 @@
-private _killArcGISDefaultPopup(): void {
-  try {
-    if (!this.view) return;
-
-    // Do NOT disable popupEnabled globally — it blocks our own popup too
-    // Only kill auto-open and the "Zoom to" default action
-    const popup: any = this.view?.popup;
-    if (!popup) return;
-
-    popup.autoOpenEnabled = false;
-    popup.highlightEnabled = false;
-
-    // Remove the "Zoom to" default action only
-    try {
-      if (popup.actions?.length > 0) {
-        const zoomAction = popup.actions.find(
-          (a: any) => a.id === "zoom-to" || a.title === "Zoom to"
-        );
-        if (zoomAction) {
-          popup.actions.remove(zoomAction);
-        }
-      }
-    } catch { }
-
-  } catch { }
-}
-
-
-
-private bindViewEvents(): void {
-  if (!this.view || !this.featureLayer) return;
-
-  this.cleanupViewEvents();
-  this.setupPopupCloseWatcher();
-
-  // Kill ArcGIS default popup auto-open — but do NOT disable popupEnabled
-  try {
-    if (this.view.popup) {
-      this.view.popup.autoOpenEnabled = false;
-      this.view.popup.highlightEnabled = false;
-      // Watch using reactiveUtils (not deprecated view.watch)
-      reactiveUtils.watch(
-        () => this.view?.popup?.visible,
-        (visible: boolean) => {
-          if (visible) {
-            // If ArcGIS opened it on its own (blank/zoom-to), close it
-            const popup: any = this.view?.popup;
-            const hasOurTemplate = popup?.features?.length > 0 &&
-              popup?.features?.[0]?.popupTemplate != null;
-            if (!hasOurTemplate && !this._popupOpen) {
-              try { popup?.close?.(); } catch { }
-              try { popup.visible = false; } catch { }
-            }
-          }
-        }
-      );
+const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
+  if (this._editorOpen || this.inDrawingMode) {
+    if (this._cursorResetTimer) {
+      clearTimeout(this._cursorResetTimer);
+      this._cursorResetTimer = null;
     }
-  } catch { }
-
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (this.isPopupDomTarget(evt?.native?.target)) return;
-
-    // Immediately close any ArcGIS-opened popup (the blank "Zoom to" one)
-    try {
-      const popup: any = this.view?.popup;
-      if (popup?.visible && !this._popupOpen) {
-        popup.close?.();
-        popup.visible = false;
-      }
-    } catch { }
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
+    if (this._currentCursor !== "default") {
+      this._currentCursor = "default";
+      this.setViewCursor("default");
     }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      const hit = await this.view.hitTest(evt);
-      const allResults = hit?.results ?? [];
-      const topResult = allResults[0];
-      const graphic = topResult?.graphic;
-
-      if (!graphic) return;
-      if (graphic.layer !== this.featureLayer) return;
-
-      const thisLayerGraphics = allResults
-        .map((r: any) => r.graphic)
-        .filter((g: Graphic) => g?.layer === this.featureLayer);
-
-      this.emitLayerEvent(
-        "layerClick",
-        this.graphicToGeoJsonFeature(graphic),
-        graphic,
-        {
-          event: {
-            coordinates: {
-              latitude: evt.mapPoint?.latitude ?? 0,
-              longitude: evt.mapPoint?.longitude ?? 0,
-            },
-            attributes: graphic.attributes ?? {},
-          },
-        },
-      );
-
-      if (
-        !this._editorOpen &&
-        !this.inDrawingMode &&
-        !this._isStartingDraw &&
-        !this.shouldSuppressPopup()
-      ) {
-        this.showGraphicPopup(
-          graphic,
-          evt.mapPoint,
-          thisLayerGraphics.length > 0 ? thisLayerGraphics : [graphic],
-        );
-      }
-
-      if (
-        this.enableUserEdit &&
-        !this._editorOpen &&
-        !this.inDrawingMode &&
-        this.infoTemplate
-      ) {
-        if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-          this.removeFromGeoJSON(graphic);
-          this.graphicsEditor?.cancel();
-          return;
-        }
-        this.activateGraphicsEditor(graphic);
-      }
-    }, 180);
-  });
-
-  // ... rest of your double-click and pointer-move handlers unchanged
-
-
-
-
-
-private showGraphicPopup(
-  graphic: Graphic,
-  mapPoint: Point,
-  graphics: Graphic[],
-): void {
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) return;
-
-  if (!this.infoTemplate) {
-    console.warn('[popup-debug] showGraphicPopup: no infoTemplate set, skipping');
     return;
   }
 
-  const popupGraphics = graphics.length > 1 ? graphics : [graphic];
-  const popupGraphic = popupGraphics[0];
-  if (!popupGraphic) return;
+  if (!this.featureLayer) return;
 
-  // Build and assign templates synchronously
-  let builtCount = 0;
-  popupGraphics.forEach((g) => {
-    const tpl = this.buildPopupTemplateFromCurrent(g);
-    if (tpl) {
-      g.popupTemplate = tpl;
-      builtCount++;
-    }
-  });
+  // Use hitTest with include filter for performance
+  this.view
+    .hitTest(evt, { include: [this.featureLayer] })
+    .then((hit: any) => {
+      const hasHit = (hit?.results ?? []).some(
+        (result: any) =>
+          result?.graphic?.geometry &&
+          (result?.graphic?.layer === this.featureLayer ||
+            (result?.graphic?.layer as any)?.id === this.featureLayer?.id)
+      );
 
-  if (builtCount === 0) {
-    console.warn('[popup-debug] no templates built, skipping popup');
-    return;
-  }
-
-  const location =
-    mapPoint ??
-    ArcGeojsonLayer.getPopupPoint(popupGraphic.geometry) ??
-    undefined;
-
-  this._popupOpen = true;
-  this._doOpenPopupMultiple(popupGraphics, location);
-}
-
-private _doOpenPopupMultiple(graphics: Graphic[], location: any): void {
-  try {
-    // Enable popupEnabled so the popup can render
-    this.view.popupEnabled = true;
-
-    const popup: any = this.view?.popup;
-    if (!popup) return;
-
-    // Keep auto-open off — we control when it opens
-    popup.autoOpenEnabled = false;
-    popup.highlightEnabled = false;
-
-    // Remove "Zoom to" action every time
-    try {
-      if (popup.actions) {
-        const zoomAction = popup.actions.find?.(
-          (a: any) => a.id === "zoom-to" || a.title === "Zoom to"
-        );
-        if (zoomAction) popup.actions.remove(zoomAction);
+      if (hasHit) {
+        // Clear any pending reset
+        if (this._cursorResetTimer) {
+          clearTimeout(this._cursorResetTimer);
+          this._cursorResetTimer = null;
+        }
+        if (this._currentCursor !== "pointer") {
+          this._currentCursor = "pointer";
+          this.setViewCursor("pointer");
+        }
+      } else {
+        // Only reset after short debounce to avoid flicker
+        if (this._currentCursor === "pointer" && !this._cursorResetTimer) {
+          this._cursorResetTimer = setTimeout(() => {
+            this._cursorResetTimer = null;
+            this._currentCursor = "default";
+            this.setViewCursor("default");
+          }, 100);
+        }
       }
-    } catch { }
+    })
+    .catch(() => {
+      if (this._currentCursor !== "default") {
+        this._currentCursor = "default";
+        this.setViewCursor("default");
+      }
+    });
+});
 
-    // Set features and location
-    popup.location = location ?? undefined;
-    popup.features = graphics;
 
-    // Open using the correct ArcGIS 5.x API
-    if (typeof popup.open === "function") {
-      popup.open({
-        features: graphics,
-        location: location ?? undefined,
-        updateLocationEnabled: false,
+
+
+
+private setViewCursor(cursor: "default" | "pointer"): void {
+  try {
+    const container = this.view?.container as HTMLElement | undefined;
+    if (!container) return;
+
+    // Set on container itself
+    container.style.cursor = cursor;
+
+    // Set on all ArcGIS canvas/surface elements
+    const selectors = [
+      ".esri-view-surface",
+      ".esri-view-root",
+      ".esri-overlay-surface",
+      ".esri-display-object",
+      "canvas",
+    ];
+
+    selectors.forEach((sel) => {
+      container.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+        el.style.setProperty("cursor", cursor, "important");
       });
-    } else {
-      popup.open = true;
-    }
-
-    popup.visible = true;
-
-    // Reposition after render
-    requestAnimationFrame(() => {
-      try { popup.reposition?.(); } catch { }
     });
 
-    // After popup is open, disable popupEnabled again
-    // so ArcGIS can't fire its own popup on next click
-    setTimeout(() => {
-      try { this.view.popupEnabled = false; } catch { }
-    }, 500);
+    // Also set directly on document body canvas elements inside the view
+    document.querySelectorAll<HTMLElement>(
+      ".esri-view canvas, .esri-view-surface canvas"
+    ).forEach((el) => {
+      el.style.setProperty("cursor", cursor, "important");
+    });
 
-  } catch (error) {
-    console.warn('[popup-debug] _doOpenPopupMultiple FAILED', error);
-    this._popupOpen = false;
-  }
+  } catch { }
 }
 
 
 
+private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
+  if (!graphic || !this.infoTemplate) return null;
 
-public closePopup(): void {
-  this._popupOpen = false;  // ← add this at the very top
+  const attributes = graphic.attributes ?? {};
 
-  // ... rest of existing closePopup unchanged
+  const resolveTokens = (value: string): string =>
+    value
+      // Support ${fieldName} syntax
+      .replace(/\$\{([^}]+)\}/g, (_, key: string) => {
+        const v = attributes[key.trim()];
+        return v === undefined || v === null ? "" : String(v);
+      })
+      // Support {fieldName} ArcGIS syntax
+      .replace(/\{([^}]+)\}/g, (_, key: string) => {
+        const v = attributes[key.trim()];
+        return v === undefined || v === null ? "" : String(v);
+      });
+
+  try {
+    const tmpl = this.infoTemplate;
+
+    // ── Title ──────────────────────────────────────────────
+    let title: any = tmpl?.title ?? tmpl?.listTitle ?? "Details";
+    if (typeof title === "function") {
+      title = title.call(tmpl, graphic);
+    }
+    if (typeof title === "string") {
+      title = resolveTokens(title);
+    }
+
+    // ── Content ────────────────────────────────────────────
+    let content: any = tmpl?.content ?? tmpl?.details ?? null;
+
+    if (typeof content === "function") {
+      content = content.call(tmpl, graphic);
+    }
+    if (typeof content === "string" && content.trim()) {
+      content = resolveTokens(content);
+    }
+
+    // ── Fallback: render attributes as a clean table ───────
+    if (!content || typeof content !== "string") {
+      const rows = Object.entries(attributes)
+        .filter(([k]) =>
+          !k.startsWith("_") &&
+          k !== "OBJECTID" &&
+          k !== "__isTemporaryDrawing" &&
+          k !== "__labelFor"
+        )
+        .map(
+          ([k, v]) =>
+            `<tr>
+              <td style="font-weight:600;padding:4px 10px;white-space:nowrap;
+                         border-bottom:1px solid #eee;color:#444">${k}</td>
+              <td style="padding:4px 10px;border-bottom:1px solid #eee">
+                ${v ?? ""}
+              </td>
+            </tr>`
+        )
+        .join("");
+      content = `<table style="width:100%;border-collapse:collapse;
+                               font-size:13px;font-family:sans-serif">
+                   ${rows}
+                 </table>`;
+    }
+
+    return new PopupTemplate({
+      title,
+      content,
+      actions: [] as any,  // removes "Zoom to"
+    });
+
+  } catch (error) {
+    console.error("[arc-geojson-layer] buildPopupTemplateFromCurrent failed", error);
+    return null;
+  }
 }
