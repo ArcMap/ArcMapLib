@@ -1,3 +1,162 @@
+private buildPopupTemplate(graphic: Graphic): PopupTemplate | null {
+  console.log("[arc-geojson-layer] buildPopupTemplate called", {
+    hasInfoTemplate: !!this.infoTemplate,
+    infoTemplate: this.infoTemplate,
+    attributes: graphic?.attributes,
+  });
+
+  if (!this.infoTemplate) {
+    console.warn("[arc-geojson-layer] buildPopupTemplate: no infoTemplate set, skipping");
+    return null;
+  }
+
+  if (!graphic) {
+    console.warn("[arc-geojson-layer] buildPopupTemplate: no graphic provided");
+    return null;
+  }
+
+  const attributes = graphic.attributes ?? {};
+  const tmpl = this.infoTemplate;
+
+  // Token replacer for both ${field} and {field} syntax
+  const resolveTokens = (str: string): string => {
+    console.log("[arc-geojson-layer] resolveTokens input:", str);
+    const resolved = str
+      .replace(/\$\{([^}]+)\}/g, (_, k) => {
+        const v = attributes[k.trim()];
+        console.log(`[arc-geojson-layer] resolveTokens: \${${k.trim()}} =>`, v);
+        return v == null ? "" : String(v);
+      })
+      .replace(/\{([^}]+)\}/g, (_, k) => {
+        const v = attributes[k.trim()];
+        console.log(`[arc-geojson-layer] resolveTokens: {${k.trim()}} =>`, v);
+        return v == null ? "" : String(v);
+      });
+    console.log("[arc-geojson-layer] resolveTokens output:", resolved);
+    return resolved;
+  };
+
+  try {
+    // ── Resolve title ──────────────────────────────────────────
+    let title: any = tmpl?.title ?? "Details";
+    console.log("[arc-geojson-layer] buildPopupTemplate: raw title:", title);
+
+    if (typeof title === "function") {
+      title = title.call(tmpl, graphic);
+      console.log("[arc-geojson-layer] buildPopupTemplate: title from function:", title);
+    }
+    if (typeof title === "string") {
+      title = resolveTokens(title);
+    }
+    console.log("[arc-geojson-layer] buildPopupTemplate: resolved title:", title);
+
+    // ── Resolve content ────────────────────────────────────────
+    let content: any = tmpl?.content ?? null;
+    console.log("[arc-geojson-layer] buildPopupTemplate: raw content:", content);
+
+    if (typeof content === "function") {
+      content = content.call(tmpl, graphic);
+      console.log("[arc-geojson-layer] buildPopupTemplate: content from function:", content);
+    }
+    if (typeof content === "string" && content.trim()) {
+      content = resolveTokens(content);
+    }
+    console.log("[arc-geojson-layer] buildPopupTemplate: resolved content:", content);
+
+    // ── Validate — do not show popup if no meaningful content ──
+    const SKIP = new Set([
+      "OBJECTID",
+      "_featureIndex",
+      "__isTemporaryDrawing",
+      "__labelFor",
+      "_parentFeatureCollection",
+    ]);
+
+    const hasValidAttributes = Object.entries(attributes).some(
+      ([k, v]) =>
+        !k.startsWith("_") &&
+        !SKIP.has(k) &&
+        v !== null &&
+        v !== undefined &&
+        String(v).trim() !== ""
+    );
+
+    console.log("[arc-geojson-layer] buildPopupTemplate: hasValidAttributes:", hasValidAttributes);
+    console.log("[arc-geojson-layer] buildPopupTemplate: hasContent:", !!content);
+
+    if (!content && !hasValidAttributes) {
+      console.warn(
+        "[arc-geojson-layer] buildPopupTemplate: no content and no valid attributes — skipping popup"
+      );
+      return null;
+    }
+
+    // ── Build native ArcGIS PopupTemplate ─────────────────────
+    // If content is a string (HTML) — pass directly to ArcGIS
+    // If content is null — pass fieldInfos so ArcGIS renders
+    // the attribute table natively using its own default style
+    let popupTemplate: PopupTemplate;
+
+    if (content && typeof content === "string") {
+      console.log("[arc-geojson-layer] buildPopupTemplate: using string content");
+      popupTemplate = new PopupTemplate({
+        title,
+        content,
+        actions: [] as any,
+      });
+    } else if (content && typeof content === "object") {
+      // Content is already a PopupTemplate content object
+      console.log("[arc-geojson-layer] buildPopupTemplate: using object content");
+      popupTemplate = new PopupTemplate({
+        title,
+        content,
+        actions: [] as any,
+      });
+    } else {
+      // No content string — let ArcGIS render native field table
+      // by passing fieldInfos derived from the graphic attributes
+      console.log("[arc-geojson-layer] buildPopupTemplate: no content — using native ArcGIS fieldInfos");
+
+      const fieldInfos = Object.keys(attributes)
+        .filter((k) => !k.startsWith("_") && !SKIP.has(k))
+        .map((k) => ({
+          fieldName: k,
+          label: k,
+          visible: true,
+        }));
+
+      console.log("[arc-geojson-layer] buildPopupTemplate: fieldInfos:", fieldInfos);
+
+      popupTemplate = new PopupTemplate({
+        title,
+        content: [
+          {
+            type: "fields",
+            fieldInfos,
+          },
+        ] as any,
+        actions: [] as any,
+      });
+    }
+
+    console.log("[arc-geojson-layer] buildPopupTemplate: built PopupTemplate:", popupTemplate);
+    return popupTemplate;
+
+  } catch (error) {
+    console.error(
+      "[arc-geojson-layer] buildPopupTemplate failed",
+      error
+    );
+    return null;
+  }
+}
+
+
+
+
+
+
+
 import { LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
