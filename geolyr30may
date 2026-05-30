@@ -1,3 +1,58 @@
+private _isOpeningPopup = false; // Add this field at top of class
+
+private setupPopupCloseWatcher(): void {
+  try { this._popupVisibleWatchHandle?.remove?.(); } catch { }
+  this._popupVisibleWatchHandle = null;
+
+  const popup: any = this.view?.popup;
+  if (!popup) return;
+
+  try {
+    this._popupVisibleWatchHandle = reactiveUtils.watch(
+      () => this.view?.popup?.visible,
+      (visible: boolean) => {
+        console.log(
+          "[arc-geojson-layer] popup visible changed:", visible,
+          "isOpeningPopup:", this._isOpeningPopup
+        );
+
+        // If WE are currently opening the popup, ignore
+        // the false->true->false flicker ArcGIS fires
+        if (this._isOpeningPopup) {
+          console.log(
+            "[arc-geojson-layer] popup watcher: ignored during open sequence"
+          );
+          return;
+        }
+
+        if (!visible) {
+          // Small delay to avoid reacting to ArcGIS
+          // internal open/close flicker
+          setTimeout(() => {
+            // Re-check — if popup became visible again
+            // in the meantime, do not reset
+            const stillHidden = !this.view?.popup?.visible;
+            console.log(
+              "[arc-geojson-layer] popup watcher: stillHidden after delay:", stillHidden
+            );
+            if (stillHidden && !this._isOpeningPopup) {
+              this._popupOpen = false;
+              this.setViewCursor("default");
+              console.log(
+                "[arc-geojson-layer] popup closed externally, reset state"
+              );
+            }
+          }, 300);
+        }
+      }
+    );
+  } catch (err) {
+    console.warn(
+      "[arc-geojson-layer] setupPopupCloseWatcher failed:", err
+    );
+  }
+}
+
 private showGraphicPopup(
   graphic: Graphic,
   mapPoint: Point,
@@ -10,6 +65,7 @@ private showGraphicPopup(
     infoTemplate: this.infoTemplate,
     editorOpen: this._editorOpen,
     inDrawingMode: this.inDrawingMode,
+    isOpeningPopup: this._isOpeningPopup,
   });
 
   if (this._editorOpen) {
@@ -33,21 +89,19 @@ private showGraphicPopup(
     return;
   }
 
-  // Only use graphics from THIS layer
   const popupGraphics = graphics.filter(
     (g) => g?.geometry && g?.layer === this.featureLayer
   );
 
   console.log(
-    "[arc-geojson-layer] showGraphicPopup: filtered popupGraphics:", popupGraphics.length
+    "[arc-geojson-layer] showGraphicPopup: popupGraphics:", popupGraphics.length
   );
 
   if (popupGraphics.length === 0) {
-    console.warn("[arc-geojson-layer] showGraphicPopup: no valid graphics from this layer");
+    console.warn("[arc-geojson-layer] showGraphicPopup: no valid graphics");
     return;
   }
 
-  // Build template for each graphic
   let builtAny = false;
   popupGraphics.forEach((g, i) => {
     const tpl = this.buildPopupTemplate(g);
@@ -70,8 +124,6 @@ private showGraphicPopup(
     ArcGeojsonLayer.getPopupPoint(graphic.geometry) ??
     undefined;
 
-  console.log("[arc-geojson-layer] showGraphicPopup: opening popup at:", location);
-
   try {
     const popup = this.view?.popup;
     if (!popup) {
@@ -83,25 +135,31 @@ private showGraphicPopup(
     popup.highlightEnabled = false;
     try { popup.actions?.removeAll?.(); } catch { }
 
+    // Set flag BEFORE opening so watcher ignores flicker
+    this._isOpeningPopup = true;
     this._popupOpen = true;
 
-    // Set features FIRST then open
     popup.features = popupGraphics;
     popup.location = location;
 
     if (typeof (this.view as any).openPopup === "function") {
-      console.log("[arc-geojson-layer] showGraphicPopup: using view.openPopup()");
+      console.log(
+        "[arc-geojson-layer] showGraphicPopup: using view.openPopup()"
+      );
       (this.view as any).openPopup({
         features: popupGraphics,
         location,
         updateLocationEnabled: false,
       });
     } else {
-      console.log("[arc-geojson-layer] showGraphicPopup: using popup.open = true");
+      console.log(
+        "[arc-geojson-layer] showGraphicPopup: using popup.open = true"
+      );
       (popup as any).open = true;
       popup.visible = true;
     }
 
+    // Clear zoom action
     setTimeout(() => {
       try {
         popup.actions?.removeAll?.();
@@ -109,10 +167,60 @@ private showGraphicPopup(
       } catch { }
     }, 50);
 
-    console.log("[arc-geojson-layer] showGraphicPopup: popup opened successfully");
+    // Release the opening guard after ArcGIS settles
+    setTimeout(() => {
+      this._isOpeningPopup = false;
+      console.log(
+        "[arc-geojson-layer] showGraphicPopup: _isOpeningPopup released"
+      );
+    }, 500);
+
+    console.log(
+      "[arc-geojson-layer] showGraphicPopup: popup opened successfully"
+    );
 
   } catch (err) {
     console.error("[arc-geojson-layer] showGraphicPopup failed:", err);
     this._popupOpen = false;
+    this._isOpeningPopup = false;
   }
+}
+
+
+
+public closePopup(): void {
+  console.log("[arc-geojson-layer] closePopup called", {
+    popupOpen: this._popupOpen,
+    isOpeningPopup: this._isOpeningPopup,
+  });
+
+  // Do not close if we are in the middle of opening
+  if (this._isOpeningPopup) {
+    console.warn(
+      "[arc-geojson-layer] closePopup: skipped — popup is currently opening"
+    );
+    return;
+  }
+
+  this._popupOpen = false;
+
+  try {
+    const popup: any = this.view?.popup;
+    if (popup) {
+      try {
+        if (typeof popup.close === "function") {
+          popup.close();
+        } else {
+          popup.open = false;
+        }
+      } catch { }
+      try { popup.visible = false; } catch { }
+      try { popup.features = []; } catch { }
+    }
+  } catch { }
+
+  try { this._popupHighlightHandle?.remove?.(); } catch { }
+  this._popupHighlightHandle = null;
+
+  console.log("[arc-geojson-layer] closePopup: done");
 }
