@@ -1,171 +1,335 @@
-const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-  if (this._editorOpen || this.inDrawingMode) {
-    if (this._cursorResetTimer) {
-      clearTimeout(this._cursorResetTimer);
-      this._cursorResetTimer = null;
-    }
-    if (this._currentCursor !== "default") {
-      this._currentCursor = "default";
-      this.setViewCursor("default");
-    }
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.isUserEditEnabled() || !graphic?.geometry) {
     return;
   }
 
-  if (!this.featureLayer) return;
+  // Close popup first
+  this.closePopup();
+  this._suppressPopupUntil = Date.now() + 2000;
 
-  // Use hitTest with include filter for performance
-  this.view
-    .hitTest(evt, { include: [this.featureLayer] })
-    .then((hit: any) => {
-      const hasHit = (hit?.results ?? []).some(
-        (result: any) =>
-          result?.graphic?.geometry &&
-          (result?.graphic?.layer === this.featureLayer ||
-            (result?.graphic?.layer as any)?.id === this.featureLayer?.id)
-      );
+  // Ensure editor exists
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
 
-      if (hasHit) {
-        // Clear any pending reset
-        if (this._cursorResetTimer) {
-          clearTimeout(this._cursorResetTimer);
-          this._cursorResetTimer = null;
-        }
-        if (this._currentCursor !== "pointer") {
-          this._currentCursor = "pointer";
-          this.setViewCursor("pointer");
-        }
-      } else {
-        // Only reset after short debounce to avoid flicker
-        if (this._currentCursor === "pointer" && !this._cursorResetTimer) {
-          this._cursorResetTimer = setTimeout(() => {
-            this._cursorResetTimer = null;
-            this._currentCursor = "default";
-            this.setViewCursor("default");
-          }, 100);
-        }
-      }
-    })
-    .catch(() => {
-      if (this._currentCursor !== "default") {
-        this._currentCursor = "default";
-        this.setViewCursor("default");
-      }
-    });
-});
+  if (!this.graphicsEditor) {
+    console.error("[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor");
+    return;
+  }
 
-
-
-
-
-private setViewCursor(cursor: "default" | "pointer"): void {
+  // If SVM is busy, cancel first
   try {
-    const container = this.view?.container as HTMLElement | undefined;
-    if (!container) return;
-
-    // Set on container itself
-    container.style.cursor = cursor;
-
-    // Set on all ArcGIS canvas/surface elements
-    const selectors = [
-      ".esri-view-surface",
-      ".esri-view-root",
-      ".esri-overlay-surface",
-      ".esri-display-object",
-      "canvas",
-    ];
-
-    selectors.forEach((sel) => {
-      container.querySelectorAll<HTMLElement>(sel).forEach((el) => {
-        el.style.setProperty("cursor", cursor, "important");
-      });
-    });
-
-    // Also set directly on document body canvas elements inside the view
-    document.querySelectorAll<HTMLElement>(
-      ".esri-view canvas, .esri-view-surface canvas"
-    ).forEach((el) => {
-      el.style.setProperty("cursor", cursor, "important");
-    });
-
+    const state = (this.graphicsEditor as any).state;
+    if (state === "active") {
+      this.graphicsEditor.cancel();
+      await new Promise((r) => setTimeout(r, 100));
+    }
   } catch { }
-}
 
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this.enableInfoPopupWindow(false);
 
+  // Find the actual graphic in featureLayer by ID
+  const id =
+    graphic.attributes?.OBJECTID ??
+    graphic.attributes?._featureIndex ??
+    graphic.attributes?.[this.uniqueIdPropertyName] ??
+    0;
 
-private buildPopupTemplateFromCurrent(graphic: Graphic): PopupTemplate | null {
-  if (!graphic || !this.infoTemplate) return null;
+  const sourceGraphic = this.featureLayer?.graphics?.find((g: Graphic) => {
+    const gid =
+      g.attributes?.OBJECTID ??
+      g.attributes?._featureIndex ??
+      0;
+    return String(gid) === String(id);
+  }) ?? graphic;
 
-  const attributes = graphic.attributes ?? {};
+  // Remove from featureLayer
+  try {
+    this.featureLayer?.graphics?.remove(sourceGraphic);
+  } catch { }
 
-  const resolveTokens = (value: string): string =>
-    value
-      // Support ${fieldName} syntax
-      .replace(/\$\{([^}]+)\}/g, (_, key: string) => {
-        const v = attributes[key.trim()];
-        return v === undefined || v === null ? "" : String(v);
-      })
-      // Support {fieldName} ArcGIS syntax
-      .replace(/\{([^}]+)\}/g, (_, key: string) => {
-        const v = attributes[key.trim()];
-        return v === undefined || v === null ? "" : String(v);
-      });
+  // Clone to sketchLayer
+  const editGraphic = sourceGraphic.clone();
+
+  // Ensure correct attributes
+  if (!editGraphic.attributes) editGraphic.attributes = {};
+  const isCircle = this.isCircleGraphic(editGraphic);
+
+  if (isCircle) {
+    editGraphic.attributes.isCircle = true;
+    editGraphic.attributes.drawGeometryType = "circle";
+    editGraphic.attributes.shapeType = "circle";
+    editGraphic.attributes.shape = "circle";
+  }
+
+  // Assign a valid symbol so SVM shows handles
+  if (!editGraphic.symbol) {
+    if (isCircle || editGraphic.geometry?.type === "polygon") {
+      editGraphic.symbol = {
+        type: "simple-fill",
+        style: "solid",
+        color: [0, 120, 255, 0.2],
+        outline: {
+          type: "simple-line",
+          color: [0, 120, 255, 1],
+          width: 2,
+          style: "solid",
+        },
+      } as any;
+    } else if (editGraphic.geometry?.type === "polyline") {
+      editGraphic.symbol = {
+        type: "simple-line",
+        color: [0, 120, 255, 1],
+        width: 3,
+        style: "solid",
+      } as any;
+    } else {
+      editGraphic.symbol = {
+        type: "simple-marker",
+        style: "circle",
+        size: 18,
+        color: [0, 120, 255, 1],
+        outline: {
+          type: "simple-line",
+          color: [255, 255, 255, 1],
+          width: 2,
+        },
+      } as any;
+    }
+  }
+
+  editGraphic.popupTemplate = null as any;
+
+  // Add to sketchLayer
+  this.sketchLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.add(editGraphic);
+
+  // Pick the right tool
+  const tool = isCircle ? "transform" : this.resolveUpdateTool(editGraphic);
+
+  const updateOptions: any = isCircle
+    ? {
+        tool: "transform",
+        enableRotation: false,
+        enableScaling: true,
+        preserveAspectRatio: true,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      }
+    : {
+        tool,
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        enableMoveAllGraphics: false,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      };
 
   try {
-    const tmpl = this.infoTemplate;
-
-    // ── Title ──────────────────────────────────────────────
-    let title: any = tmpl?.title ?? tmpl?.listTitle ?? "Details";
-    if (typeof title === "function") {
-      title = title.call(tmpl, graphic);
-    }
-    if (typeof title === "string") {
-      title = resolveTokens(title);
-    }
-
-    // ── Content ────────────────────────────────────────────
-    let content: any = tmpl?.content ?? tmpl?.details ?? null;
-
-    if (typeof content === "function") {
-      content = content.call(tmpl, graphic);
-    }
-    if (typeof content === "string" && content.trim()) {
-      content = resolveTokens(content);
-    }
-
-    // ── Fallback: render attributes as a clean table ───────
-    if (!content || typeof content !== "string") {
-      const rows = Object.entries(attributes)
-        .filter(([k]) =>
-          !k.startsWith("_") &&
-          k !== "OBJECTID" &&
-          k !== "__isTemporaryDrawing" &&
-          k !== "__labelFor"
-        )
-        .map(
-          ([k, v]) =>
-            `<tr>
-              <td style="font-weight:600;padding:4px 10px;white-space:nowrap;
-                         border-bottom:1px solid #eee;color:#444">${k}</td>
-              <td style="padding:4px 10px;border-bottom:1px solid #eee">
-                ${v ?? ""}
-              </td>
-            </tr>`
-        )
-        .join("");
-      content = `<table style="width:100%;border-collapse:collapse;
-                               font-size:13px;font-family:sans-serif">
-                   ${rows}
-                 </table>`;
-    }
-
-    return new PopupTemplate({
-      title,
-      content,
-      actions: [] as any,  // removes "Zoom to"
+    await this.graphicsEditor.update([editGraphic], updateOptions);
+    console.log("[arc-geojson-layer] activateGraphicsEditor: SVM update started", {
+      tool,
+      isCircle,
+      geometry: editGraphic.geometry?.type,
     });
-
-  } catch (error) {
-    console.error("[arc-geojson-layer] buildPopupTemplateFromCurrent failed", error);
-    return null;
+  } catch (err: any) {
+    console.error("[arc-geojson-layer] activateGraphicsEditor: SVM update failed", err);
+    // Rollback — put graphic back in featureLayer
+    this.sketchLayer?.graphics?.remove(editGraphic);
+    this.featureLayer?.graphics?.add(sourceGraphic);
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
   }
 }
+
+
+
+private bindEditorEvents(): void {
+  this.editorHandles?.forEach((handle: any) => {
+    try { handle?.remove?.(); } catch { }
+  });
+  this.editorHandles = [];
+
+  if (!this.graphicsEditor) return;
+
+  const createHandle = this.graphicsEditor.on("create", (event: any) => {
+    if (event.state === "start" || event.state === "active") {
+      this.inDrawingMode = true;
+      this._isStartingDraw = true;
+      this._editorOpen = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+      return;
+    }
+    if (event.state === "complete") {
+      const graphic = event.graphic as Graphic;
+      if (!graphic?.geometry) {
+        this.cancelDrawing();
+        return;
+      }
+      graphic.attributes = {
+        ...(graphic.attributes ?? {}),
+        __isTemporaryDrawing: false,
+      };
+      this.handleCreateComplete(graphic);
+      return;
+    }
+    if (event.state === "cancel") {
+      this.cancelDrawing();
+      return;
+    }
+  });
+
+  const updateHandle = this.graphicsEditor.on("update", (event: any) => {
+    if (event.state === "start") {
+      this._editorOpen = true;
+      this.inDrawingMode = false;
+      this._isStartingDraw = false;
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.enableInfoPopupWindow(false);
+      console.log("[arc-geojson-layer] SVM update started");
+      return;
+    }
+
+    if (event.state === "active") {
+      // Live update GeoJSON as user drags
+      const graphics = event.graphics ?? [];
+      graphics.forEach((g: Graphic) => {
+        if (!g?.geometry) return;
+        this.updateGeoJsonWithChanges(g);
+      });
+      return;
+    }
+
+    if (event.state === "complete") {
+      console.log("[arc-geojson-layer] SVM update complete");
+      const graphics = event.graphics ?? [];
+
+      graphics.forEach((g: Graphic) => {
+        if (!g?.geometry) return;
+
+        // Update GeoJSON
+        this.updateGeoJsonWithChanges(g);
+
+        // Move from sketchLayer back to featureLayer
+        try {
+          this.sketchLayer?.graphics?.remove(g);
+        } catch { }
+
+        // Apply final defaults and re-add to featureLayer
+        const finalGraphic = g.clone();
+        this.applyGraphicDefaults(finalGraphic);
+        try {
+          this.featureLayer?.graphics?.add(finalGraphic);
+        } catch { }
+      });
+
+      this._editorOpen = false;
+      this.enableInfoPopupWindow(true);
+      this.refreshLabels();
+    }
+  });
+
+  const deleteHandle = this.graphicsEditor.on("delete", (event: any) => {
+    event.graphics?.forEach((graphic: Graphic) => {
+      this.removeFromGeoJSON(graphic);
+      try { this.sketchLayer?.graphics?.remove(graphic); } catch { }
+    });
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+  });
+
+  this.editorHandles.push(createHandle, updateHandle, deleteHandle);
+}
+
+
+
+
+
+
+// Inside the clickTimer setTimeout, after showGraphicPopup call:
+
+if (
+  this.enableUserEdit &&
+  !this._editorOpen &&
+  !this.inDrawingMode
+) {
+  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+    this.removeFromGeoJSON(graphic);
+    this.graphicsEditor?.cancel();
+    return;
+  }
+
+  // Single click activates editor when enableUserEdit is true
+  await this.activateGraphicsEditor(graphic);
+}
+
+
+
+
+
+private finishActiveEditor(): void {
+  if (!this._editorOpen) return;
+
+  try {
+    this.graphicsEditor?.complete();
+  } catch { }
+
+  // Move any remaining sketch graphics back to featureLayer
+  try {
+    const sketchGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
+    sketchGraphics.forEach((g: Graphic) => {
+      this.sketchLayer?.graphics?.remove(g);
+      const finalGraphic = g.clone();
+      this.applyGraphicDefaults(finalGraphic);
+      this.featureLayer?.graphics?.add(finalGraphic);
+    });
+  } catch { }
+
+  this._editorOpen = false;
+  this.enableInfoPopupWindow(true);
+  this.setViewCursor("default");
+}
+
+
+
+
+
+public cancelDrawing(): void {
+  try { this.graphicsEditor?.cancel(); } catch { }
+
+  // Move any sketch graphics back to featureLayer
+  try {
+    const sketchGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
+    sketchGraphics.forEach((g: Graphic) => {
+      if (g.attributes?.__isTemporaryDrawing) {
+        // Discard temporary drawings
+        this.sketchLayer?.graphics?.remove(g);
+      } else {
+        // Keep non-temporary graphics — move back
+        this.sketchLayer?.graphics?.remove(g);
+        const finalGraphic = g.clone();
+        this.applyGraphicDefaults(finalGraphic);
+        this.featureLayer?.graphics?.add(finalGraphic);
+      }
+    });
+  } catch { }
+
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._editorOpen = false;
+  this._currentDrawGeometryType = undefined;
+  this._lastCreatedByDrawing = false;
+
+  this.closePopup();
+
+  this._activeVisibleType = null;
+  this.filterGraphicsByActiveType(null);
+  this.enableInfoPopupWindow(true);
+  this.setViewCursor("default");
+}
+
