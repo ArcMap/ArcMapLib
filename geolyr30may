@@ -1,68 +1,261 @@
-private buildPopupTemplate(graphic: Graphic): PopupTemplate | null {
-  if (!this.infoTemplate) return null;
+private showGraphicPopup(
+  graphic: Graphic,
+  mapPoint: Point,
+  graphics: Graphic[]
+): void {
+  console.log("[arc-geojson-layer] showGraphicPopup called", {
+    graphic,
+    mapPoint,
+    graphicsCount: graphics.length,
+    infoTemplate: this.infoTemplate,
+    editorOpen: this._editorOpen,
+    inDrawingMode: this.inDrawingMode,
+  });
 
-  const attributes = graphic?.attributes ?? {};
+  if (this._editorOpen) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: editor open, skipping");
+    return;
+  }
+  if (this.inDrawingMode) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: drawing mode, skipping");
+    return;
+  }
+  if (this._isStartingDraw) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: isStartingDraw, skipping");
+    return;
+  }
+  if (this.shouldSuppressPopup()) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: suppressed, skipping");
+    return;
+  }
+  if (!this.infoTemplate) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: no infoTemplate, skipping");
+    return;
+  }
 
-  const resolveTokens = (str: string): string =>
-    str.replace(/\$\{([^}]+)\}/g, (_, key: string) => {
-      const val = attributes[key.trim()];
-      return val !== undefined && val !== null ? String(val) : "";
-    });
+  // Only use graphics from THIS layer
+  const popupGraphics = graphics.filter(
+    (g) => g?.geometry && g?.layer === this.featureLayer
+  );
 
-  const tmpl: any =
-    typeof this.infoTemplate === "string"
-      ? (() => { try { return JSON.parse(this.infoTemplate as string); } catch { return { content: this.infoTemplate }; } })()
-      : this.infoTemplate;
+  console.log(
+    "[arc-geojson-layer] showGraphicPopup: filtered popupGraphics:", popupGraphics.length
+  );
 
-  // ── Resolve title ──────────────────────────────────────────
-  let title: any = tmpl?.title ?? tmpl?.Title ?? "Details";
-  if (typeof title === "function") title = title.call(tmpl, graphic);
-  if (typeof title === "string")   title = resolveTokens(title);
+  if (popupGraphics.length === 0) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: no valid graphics from this layer");
+    return;
+  }
 
-  console.log("[arc-geojson-layer] buildPopupTemplate: resolved title:", title);
-
-  // ── Resolve content ────────────────────────────────────────
-  let rawContent: any =
-    tmpl?.content ??
-    tmpl?.Content ??
-    tmpl?.details ??
-    tmpl?.body ??
-    null;
-
-  console.log("[arc-geojson-layer] buildPopupTemplate: rawContent typeof:", typeof rawContent);
-
-  let content: any = null;
-
-  if (typeof rawContent === "function") {
-    // ✅ Call function, get back HTML string
-    const result = rawContent.call(tmpl, graphic);
-    console.log("[arc-geojson-layer] buildPopupTemplate: content is string from function");
-    if (typeof result === "string" && result.trim()) {
-      content = resolveTokens(result);
-    } else {
-      content = result ?? null;
+  // Build template for each graphic
+  let builtAny = false;
+  popupGraphics.forEach((g, i) => {
+    const tpl = this.buildPopupTemplate(g);
+    console.log(
+      `[arc-geojson-layer] showGraphicPopup: template[${i}]:`, tpl
+    );
+    if (tpl) {
+      g.popupTemplate = tpl;
+      builtAny = true;
     }
-  } else if (typeof rawContent === "string" && rawContent.trim()) {
-    // ✅ Plain string template
-    content = resolveTokens(rawContent);
-    console.log("[arc-geojson-layer] buildPopupTemplate: content resolved from string:", content);
-  } else if (Array.isArray(rawContent) || (rawContent !== null && typeof rawContent === "object")) {
-    // ✅ ArcGIS content array/object — pass through as-is, do NOT serialize
-    content = rawContent;
-  }
-  // ❌ null/undefined → content stays null, no JSON dump
+  });
 
-  console.log("[arc-geojson-layer] buildPopupTemplate: hasValidAttributes:", true);
-  console.log("[arc-geojson-layer] buildPopupTemplate: hasResolvedContent:", !!content);
-
-  // ── Skip popup if nothing to show ─────────────────────────
-  if (!content) {
-    console.warn("[arc-geojson-layer] buildPopupTemplate: no content resolved, skipping popup");
-    return null;
+  if (!builtAny) {
+    console.warn("[arc-geojson-layer] showGraphicPopup: no templates built");
+    return;
   }
 
-  console.log("[arc-geojson-layer] buildPopupTemplate: using string content");
-  console.log("[arc-geojson-layer] buildPopupTemplate: final template:");
+  const location =
+    mapPoint ??
+    ArcGeojsonLayer.getPopupPoint(graphic.geometry) ??
+    undefined;
 
-  return new PopupTemplate({ title, content });
-}
+  console.log("[arc-geojson-layer] showGraphicPopup: opening popup at:", location);
+
+  try {
+    const popup = this.view?.popup;
+    if (!popup) {
+      console.error("[arc-geojson-layer] showGraphicPopup: no popup on view");
+      return;
+    }
+
+    popup.autoOpenEnabled = false;
+    popup.highlightEnabled = false;
+    try { popup.actions?.removeAll?.(); } catch { }
+
+    this._popupOpen = true;
+
+    // Set features FIRST then open
+    popup.features = popupGraphics;
+    popup.location = location;
+
+    if (typeof (this.view as any).openPopup === "function") {
+      console.log("[arc-geojson-layer] showGraphicPopup: using view.openPopup()");
+      (this.view as any).openPopup({
+        features: popupGraphics,
+        location,
+        updateLocationEnabled: false,
+      });
+    } else {
+      console.log("[arc-geojson-layer] showGraphicPopup: using popup.open = true");
+      (popup as any).open = true;
+      popup.visible = true;
+    }
+
+    setTimeout(() => {
+      try {
+        popup.actions?.removeAll?.();
+        console.log("[arc-geojson-layer] showGraphicPopup: actions cleared");
+      } catch { }
+    }, 50
+
+
+
+const clickHandle = this.view.on("click", async (evt: any) => {
+  if (this.isPopupDomTarget(evt?.native?.target)) {
+    console.log("[arc-geojson-layer] click: target is popup DOM, ignoring");
+    return;
+  }
+
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+  }
+
+  clickTimer = setTimeout(async () => {
+    clickTimer = null;
+
+    console.log("[arc-geojson-layer] click: running hitTest");
+
+    const hit = await this.view.hitTest(evt);
+    const allResults = hit?.results ?? [];
+
+    console.log(
+      "[arc-geojson-layer] click: total hitTest results:", allResults.length,
+      allResults.map((r: any) => ({
+        layerId: r?.graphic?.layer?.id,
+        layerTitle: r?.graphic?.layer?.title,
+        attributes: r?.graphic?.attributes,
+      }))
+    );
+
+    // Get the layer index in the map for ordering
+    // Higher index = on top visually
+    const getLayerIndex = (layer: any): number => {
+      if (!layer || !this.view?.map?.layers) return -1;
+      try {
+        return this.view.map.layers.indexOf(layer);
+      } catch {
+        return -1;
+      }
+    };
+
+    // Only get results from THIS specific featureLayer
+    const thisLayerResults = allResults.filter(
+      (r: any) =>
+        r?.graphic?.geometry &&
+        r?.graphic?.layer === this.featureLayer
+    );
+
+    console.log(
+      "[arc-geojson-layer] click: thisLayerResults:", thisLayerResults.length
+    );
+
+    if (thisLayerResults.length === 0) {
+      // Check if any other layer was hit
+      // If nothing was hit at all — close popup
+      // If another layer was hit — do nothing, let that layer handle it
+      const hitAnyGraphic = allResults.some(
+        (r: any) => r?.graphic?.geometry
+      );
+
+      console.log(
+        "[arc-geojson-layer] click: hitAnyGraphic:", hitAnyGraphic
+      );
+
+      if (!hitAnyGraphic && this._popupOpen) {
+        console.log("[arc-geojson-layer] click: empty space, closing popup");
+        this.closePopup();
+      }
+      return;
+    }
+
+    // Check if this layer's graphic is actually the TOPMOST
+    // graphic at the click point across ALL layers
+    // Get the topmost result from ALL layers
+    const topmostResult = allResults[0];
+    const topmostLayerIndex = getLayerIndex(
+      topmostResult?.graphic?.layer
+    );
+    const thisLayerIndex = getLayerIndex(this.featureLayer);
+
+    console.log(
+      "[arc-geojson-layer] click: topmostLayerIndex:", topmostLayerIndex,
+      "thisLayerIndex:", thisLayerIndex,
+      "topmostLayer:", topmostResult?.graphic?.layer?.id
+    );
+
+    // If a different layer is on top — do not show this layer's popup
+    // Let the top layer handle the click
+    if (
+      topmostResult?.graphic?.layer !== this.featureLayer &&
+      topmostLayerIndex > thisLayerIndex
+    ) {
+      console.log(
+        "[arc-geojson-layer] click: another layer is on top, skipping this layer's popup"
+      );
+      return;
+    }
+
+    // This layer IS the topmost — use its graphics
+    const thisLayerGraphics = thisLayerResults.map(
+      (r: any) => r.graphic
+    );
+    const topGraphic = thisLayerGraphics[0];
+
+    console.log(
+      "[arc-geojson-layer] click: topGraphic attributes:", topGraphic?.attributes
+    );
+
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(topGraphic),
+      topGraphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: topGraphic.attributes ?? {},
+        },
+      }
+    );
+
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this._isStartingDraw &&
+      !this.shouldSuppressPopup()
+    ) {
+      this.showGraphicPopup(
+        topGraphic,
+        evt.mapPoint,
+        thisLayerGraphics
+      );
+    }
+
+    if (
+      this.enableUserEdit &&
+      !this._editorOpen &&
+      !this.inDrawingMode
+    ) {
+      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+        this.removeFromGeoJSON(topGraphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
+      await this.activateGraphicsEditor(topGraphic);
+    }
+  }, 180);
+});
