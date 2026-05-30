@@ -1,1007 +1,617 @@
-// ─── PRIVATE FIELDS TO ADD AT TOP OF CLASS ───────────────────────────────
-private _customPopupEl: HTMLElement | null = null;
-private _customPopupCurrentIndex = 0;
-private _customPopupGraphics: Graphic[] = [];
-private _visibilityObserver: MutationObserver | null = null;
+import { LitElement, PropertyValues } from "lit";
+import { customElement, property } from "lit/decorators.js";
 
-// ─────────────────────────────────────────────────────────────────────────
+import Graphic from "@arcgis/core/Graphic";
+import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
+import PopupTemplate from "@arcgis/core/PopupTemplate";
+import Point from "@arcgis/core/geometry/Point";
+import Polygon from "@arcgis/core/geometry/Polygon";
+import Polyline from "@arcgis/core/geometry/Polyline";
+import Geometry from "@arcgis/core/geometry/Geometry";
+import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import TextSymbol from "@arcgis/core/symbols/TextSymbol";
+import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
+import * as centroidOperator from "@arcgis/core/geometry/operators/centroidOperator";
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
-async connectedCallback(): Promise<void> {
-  super.connectedCallback();
-  if (this.initComplete) {
-    return;
-  }
+import type {
+  Feature,
+  FeatureCollection,
+  Geometry as GeoJsonGeometry,
+  GeoJsonProperties,
+} from "geojson";
+import JsonUtils from "../common/json-utils";
 
-  this._lastGeoJsonSignature = undefined as any;
+@customElement("arc-geojson-layer")
+export class ArcGeojsonLayer extends LitElement {
 
-  this._setupVisibilityObserver();
+  // ─── Constants ───────────────────────────────────────────────
+  private readonly DEFAULT_SYMBOL_COLOR = JsonUtils.getRandomColor();
+  private readonly DEFAULT_LABEL_COLOR = JsonUtils.getRandomColor();
+  private readonly DEFAULT_LABEL_SIZE = 10;
 
-  await this.waitForAncestorMap();
+  // ─── Core references ─────────────────────────────────────────
+  private view: any;
+  private ancestorMapElement: any;
+  private featureLayer?: GraphicsLayer;
+  private labelLayer?: GraphicsLayer;
+  private sketchLayer?: GraphicsLayer;
+  private graphicsEditor?: SketchViewModel;
 
-  if (!this.isConnected) {
-    return;
-  }
+  // ─── Event handles ───────────────────────────────────────────
+  private eventHandles: any[] = [];
+  private editorHandles: any[] = [];
 
-  try {
-    await this.resolveAncestorMapAndView();
-
-    const initialGeoJson =
-      this.pendingGeoJson !== undefined ? this.pendingGeoJson : this.geojson;
-    await this.createLayer(initialGeoJson);
-    this.bindViewEvents();
-
-    this.initComplete = true;
-    this._readyResolve?.();
-    this.pendingGeoJson = undefined;
-
-    if (this.pendingInfoTemplate !== undefined) {
-      this.updateInfoTemplate(this.pendingInfoTemplate);
-      this.pendingInfoTemplate = undefined;
-    } else if (this.infoTemplate) {
-      this.updateInfoTemplate(this.infoTemplate);
-    }
-
-    if (this.pendingEnableUserEdit !== undefined) {
-      await this.updateEditing(this.pendingEnableUserEdit);
-      this.pendingEnableUserEdit = undefined;
-    }
-
-    if (this.geojson && this.featureLayer?.graphics?.length === 0) {
-      await this.updateGeoJson(this.geojson);
-    }
-  } catch (error) {
-    console.error("[arc-geojson-layer] connectedCallback failed", error);
-  }
-}
-
-disconnectedCallback(): void {
-  super.disconnectedCallback();
-
-  this._editingEnabled = false;
-  this._lastEditingState = undefined;
-
-  this.cleanupEditor();
-  this.cleanupViewEvents();
-  this.closePopup();
-  this._removeCustomPopup();
-
-  if (this._visibilityObserver) {
-    this._visibilityObserver.disconnect();
-    this._visibilityObserver = null;
-  }
-
-  // Remove layers BEFORE nulling references
-  const layersToRemove = [
-    this.featureLayer,
-    this.labelLayer,
-    this.sketchLayer,
-  ].filter(Boolean);
-
-  layersToRemove.forEach((layer) => {
-    try {
-      if (this.view?.map) {
-        this.view.map.remove(layer as any);
-      }
-    } catch (e) {
-      console.warn("[arc-geojson-layer] Failed to remove layer", e);
-    }
-  });
-
-  // Also remove by ID in case reference changed
-  try {
-    if (this.view?.map) {
-      const layerIds = layersToRemove
-        .map((l: any) => l?.id)
-        .filter(Boolean);
-      layerIds.forEach((id) => {
-        try {
-          const found = this.view.map.findLayerById(id);
-          if (found) {
-            this.view.map.remove(found);
-          }
-        } catch { }
-      });
-    }
-  } catch { }
-
-  // Null all references
-  this.featureLayer = undefined;
-  this.labelLayer = undefined;
-  this.sketchLayer = undefined;
-  this.graphicsEditor = undefined;
-  this.view = undefined;
-
-  this.initComplete = false;
-
-  // Reset signature and pending state
-  this._lastGeoJsonSignature = "";
-  this.pendingGeoJson = undefined;
-  this._popupOpen = false;
-  this._customPopupGraphics = [];
-  this._customPopupCurrentIndex = 0;
-
-  // Reset ready promise for next connectedCallback
-  this._readyPromise = new Promise((resolve) => {
+  // ─── Init state ──────────────────────────────────────────────
+  private initComplete = false;
+  private _readyResolve?: () => void;
+  private _readyPromise: Promise<void> = new Promise((resolve) => {
     this._readyResolve = resolve;
   });
-}
 
-private _setupVisibilityObserver(): void {
-  if (this._visibilityObserver) {
-    this._visibilityObserver.disconnect();
-    this._visibilityObserver = null;
-  }
+  // ─── Pending state ───────────────────────────────────────────
+  private pendingGeoJson:
+    | string
+    | FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
+    | null
+    | undefined;
+  private pendingInfoTemplate: any = undefined;
+  private pendingEnableUserEdit: boolean | undefined = undefined;
 
-  const collapsibleParent = this.closest(
-    "mat-expansion-panel, [cdkAccordionItem], details"
-  ) as HTMLElement | null;
+  // ─── Drawing / editing flags ─────────────────────────────────
+  private inDrawingMode = false;
+  private _isStartingDraw = false;
+  private _editorOpen = false;
+  private _currentDrawGeometryType: string | undefined;
+  private _suppressPopupUntil = 0;
+  private _lastCreatedByDrawing = false;
 
-  if (!collapsibleParent) return;
+  // ─── GeoJSON state ───────────────────────────────────────────
+  private blockGeoJsonUpdate = false;
+  private _isUpdatingGeoJson = false;
+  private _isClearingGeoJSONLayer = false;
+  private _lastGeoJsonSignature = "";
 
-  this._visibilityObserver = new MutationObserver(() => {
-    const isExpanded =
-      collapsibleParent.classList.contains("mat-expanded") ||
-      collapsibleParent.getAttribute("aria-expanded") === "true" ||
-      (collapsibleParent as any).open === true;
+  // ─── Cursor state ────────────────────────────────────────────
+  private _cursorResetTimer: any = null;
+  private _currentCursor: "default" | "pointer" = "default";
 
-    const isHidden =
-      (collapsibleParent as any).hidden === true ||
-      getComputedStyle(collapsibleParent).display === "none" ||
-      getComputedStyle(collapsibleParent).visibility === "hidden";
+  // ─── Visibility filter ───────────────────────────────────────
+  private _activeVisibleType: string | null = null;
 
-    if (!isExpanded || isHidden) {
-      this._removeLayers();
-    }
-  });
+  // ─── Edit state ──────────────────────────────────────────────
+  private _editingEnabled = false;
+  private _lastEditingState: boolean | undefined = undefined;
+  private _editingEnabledAt = 0;
 
-  this._visibilityObserver.observe(collapsibleParent, {
-    attributes: true,
-    attributeFilter: ["class", "hidden", "style", "aria-expanded"],
-  });
-}
+  // ─── Popup state ─────────────────────────────────────────────
+  private _popupOpen = false;
+  private _lastHoveredGraphic: Graphic | null = null;
+  private _popupHighlightHandle: any = null;
+  private _popupVisibleWatchHandle: any = null;
 
-private _removeLayers(): void {
-  const layers = [
-    this.featureLayer,
-    this.labelLayer,
-    this.sketchLayer,
-  ].filter(Boolean);
+  // ─── Properties ──────────────────────────────────────────────
 
-  layers.forEach((layer) => {
-    try {
-      if (this.view?.map) {
-        this.view.map.remove(layer as any);
-      }
-    } catch { }
-  });
+  @property({ attribute: "name" })
+  name: string | undefined;
 
-  // Also try by ID
-  try {
-    layers.forEach((layer: any) => {
-      if (!layer?.id) return;
-      try {
-        const found = this.view?.map?.findLayerById(layer.id);
-        if (found) this.view.map.remove(found);
-      } catch { }
-    });
-  } catch { }
-}
+  @property({ attribute: false })
+  geojson:
+    | string
+    | FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
+    | null = null;
 
-private async resolveAncestorMapAndView(): Promise<void> {
-  const mapElement = this.closest("arc-map") || this.closest("ArcMap");
+  @property({ attribute: false })
+  renderer: any = null;
 
-  if (!mapElement) {
-    throw new Error("[arc-geojson-layer] ancestor arc-map not found");
-  }
+  @property({ attribute: "info-template" })
+  infoTemplate: any;
 
-  this.ancestorMapElement = mapElement;
-  const anyMap = mapElement as any;
+  @property({ attribute: "label-json" })
+  labelJson: string | object | object[] = "";
 
-  if (anyMap.view) {
-    this.view = anyMap.view;
-  } else if (typeof anyMap.getViewInstance === "function") {
-    this.view = await anyMap.getViewInstance();
-  } else if (typeof anyMap.getView === "function") {
-    this.view = await anyMap.getView();
-  }
+  @property({ attribute: "label-color" })
+  labelColor: string | number[] = this.DEFAULT_LABEL_COLOR;
 
-  if (!this.view) {
-    throw new Error("[arc-geojson-layer] map view not resolved from arc-map");
-  }
+  @property({ type: Number, attribute: "label-size" })
+  labelSize = this.DEFAULT_LABEL_SIZE;
 
-  if (this.view.ready !== true) {
-    await this.view.when?.();
-  }
+  @property({ attribute: "layer-class" })
+  layerClass = "";
 
-  // Kill ArcGIS native popup completely
-  this._killArcGISDefaultPopup();
-
-  if (this.pendingGeoJson !== undefined) {
-    const _pendingGeoJson = this.pendingGeoJson;
-    this.pendingGeoJson = undefined;
-    await this.updateGeoJson(_pendingGeoJson);
-  }
-}
-
-private _killArcGISDefaultPopup(): void {
-  try {
-    if (!this.view) return;
-
-    this.view.popupEnabled = false;
-
-    const popup: any = this.view?.popup;
-    if (!popup) return;
-
-    popup.autoOpenEnabled = false;
-    popup.highlightEnabled = false;
-
-    try { popup.close?.(); } catch { }
-    try { popup.visible = false; } catch { }
-    try { popup.features = []; } catch { }
-
-    // Remove "Zoom to" action
-    try {
-      if (popup.actions) {
-        popup.actions.removeAll?.();
-      }
-    } catch { }
-
-  } catch { }
-}
-
-private bindViewEvents(): void {
-  if (!this.view || !this.featureLayer) return;
-
-  this.cleanupViewEvents();
-  this.setupPopupCloseWatcher();
-
-  // Kill ArcGIS popup on every click before it opens
-  const immediateClickHandle = this.view.on(
-    "immediate-click",
-    (_evt: any) => {
-      try {
-        this.view.popupEnabled = false;
-        const popup: any = this.view?.popup;
-        if (popup?.visible) {
-          popup.close?.();
-          popup.visible = false;
-        }
-      } catch { }
-    }
-  );
-  this.eventHandles.push({ remove: () => immediateClickHandle.remove() });
-
-  let clickTimer: any = null;
-
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (this.isPopupDomTarget(evt?.native?.target)) return;
-
-    // Close native popup immediately
-    try {
-      const popup: any = this.view?.popup;
-      if (popup?.visible) {
-        popup.close?.();
-        popup.visible = false;
-      }
-    } catch { }
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-      return;
-    }
-
-    clickTimer = setTimeout(async () => {
-      clickTimer = null;
-
-      const hit = await this.view.hitTest(evt);
-      const allResults = hit?.results ?? [];
-      const topResult = allResults[0];
-      const graphic = topResult?.graphic;
-
-      // Close custom popup if clicking empty space
-      if (!graphic || graphic.layer !== this.featureLayer) {
-        if (this._customPopupEl) {
-          this.closePopup();
-        }
-        return;
-      }
-
-      const thisLayerGraphics = allResults
-        .map((r: any) => r.graphic)
-        .filter((g: Graphic) => g?.layer === this.featureLayer);
-
-      this.emitLayerEvent(
-        "layerClick",
-        this.graphicToGeoJsonFeature(graphic),
-        graphic,
-        {
-          event: {
-            coordinates: {
-              latitude: evt.mapPoint?.latitude ?? 0,
-              longitude: evt.mapPoint?.longitude ?? 0,
-            },
-            attributes: graphic.attributes ?? {},
-          },
-        },
-      );
-
-      if (
-        !this._editorOpen &&
-        !this.inDrawingMode &&
-        !this._isStartingDraw &&
-        !this.shouldSuppressPopup()
-      ) {
-        if (this.infoTemplate) {
-          this.showGraphicPopup(
-            graphic,
-            evt.mapPoint,
-            thisLayerGraphics.length > 0 ? thisLayerGraphics : [graphic],
-          );
-        }
-      }
-
-      if (
-        this.enableUserEdit &&
-        !this._editorOpen &&
-        !this.inDrawingMode
-      ) {
-        if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-          this.removeFromGeoJSON(graphic);
-          this.graphicsEditor?.cancel();
-          return;
-        }
-        await this.activateGraphicsEditor(graphic);
-      }
-    }, 180);
-  });
-
-  const doubleClickHandle = this.view.on(
-    "double-click",
-    async (evt: any) => {
-      if (this.isPopupDomTarget(evt?.native?.target)) return;
-
-      evt.stopPropagation?.();
-      evt.preventDefault?.();
-
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-        clickTimer = null;
-      }
-
-      this._suppressPopupUntil = Date.now() + 1500;
-      this.enableInfoPopupWindow(false);
-
-      try { this.view!.popupEnabled = false; } catch { }
-      this.closePopup();
-
-      const dblGraphic = await this.getHitGraphic(evt);
-      if (dblGraphic) {
-        this.emitLayerEvent(
-          "doubleClick",
-          this.graphicToGeoJsonFeature(dblGraphic),
-          dblGraphic,
-          {
-            event: {
-              coordinates: {
-                latitude: evt.mapPoint?.latitude ?? 0,
-                longitude: evt.mapPoint?.longitude ?? 0,
-              },
-              attributes: dblGraphic.attributes ?? {},
-            },
-          },
-        );
-      }
-
-      await this.handleEditorDoubleClick(evt, "arcgis-double-click");
-    }
-  );
-
-  const nativeDoubleClick = async (event: MouseEvent) => {
-    if (this.isPopupDomTarget(event.target)) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      clickTimer = null;
-    }
-
-    this._suppressPopupUntil = Date.now() + 1500;
-    this.enableInfoPopupWindow(false);
-
-    try { this.view!.popupEnabled = false; } catch { }
-    this.closePopup();
-
-    const rect = this.view!.container.getBoundingClientRect();
-    const screenPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-    const mapPoint = this.view!.toMap(screenPoint) as Point;
-
-    await this.handleEditorDoubleClick(
-      { x: screenPoint.x, y: screenPoint.y, mapPoint },
-      "native-double-click",
-    );
-  };
-
-  this.view.container?.addEventListener("dblclick", nativeDoubleClick, true);
-
-  const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-    if (this._editorOpen || this.inDrawingMode) {
-      if (this._cursorResetTimer) {
-        clearTimeout(this._cursorResetTimer);
-        this._cursorResetTimer = null;
-      }
-      if (this._currentCursor !== "default") {
-        this._currentCursor = "default";
-        this.setViewCursor("default");
-      }
-      return;
-    }
-
-    if (!this.featureLayer) return;
-
-    this.view
-      .hitTest(evt, { include: [this.featureLayer] })
-      .then((hit: any) => {
-        const hasHit = (hit?.results ?? []).some(
-          (result: any) =>
-            result?.graphic?.geometry &&
-            (result?.graphic?.layer === this.featureLayer ||
-              (result?.graphic?.layer as any)?.id ===
-              this.featureLayer?.id)
-        );
-
-        if (hasHit) {
-          if (this._cursorResetTimer) {
-            clearTimeout(this._cursorResetTimer);
-            this._cursorResetTimer = null;
-          }
-          if (this._currentCursor !== "pointer") {
-            this._currentCursor = "pointer";
-            this.setViewCursor("pointer");
-          }
-        } else {
-          if (
-            this._currentCursor === "pointer" &&
-            !this._cursorResetTimer
-          ) {
-            this._cursorResetTimer = setTimeout(() => {
-              this._cursorResetTimer = null;
-              this._currentCursor = "default";
-              this.setViewCursor("default");
-            }, 100);
-          }
-        }
-      })
-      .catch(() => {
-        if (this._currentCursor !== "default") {
-          this._currentCursor = "default";
-          this.setViewCursor("default");
-        }
-      });
-  });
-
-  this.eventHandles.push(
-    { remove: () => clickHandle.remove() },
-    { remove: () => doubleClickHandle.remove() },
-    { remove: () => pointerMoveHandle.remove() },
-    {
-      remove: () => {
-        this.view?.container?.removeEventListener(
-          "dblclick",
-          nativeDoubleClick,
-          true
-        );
+  @property({
+    type: Boolean,
+    attribute: "enable-user-edit",
+    converter: {
+      fromAttribute(value: string | null): boolean {
+        return value !== null && value !== "false";
+      },
+      toAttribute(value: boolean): string | null {
+        return value ? "true" : null;
       },
     },
-  );
-}
+  })
+  enableUserEdit = false;
 
-private showGraphicPopup(
-  graphic: Graphic,
-  mapPoint: Point,
-  graphics: Graphic[],
-): void {
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) return;
+  @property({ type: Boolean, attribute: "enable-user-edit-move" })
+  enableUserEditMove = true;
 
-  if (!this.infoTemplate) return;
+  @property({ type: Boolean, attribute: "enable-user-edit-vertices" })
+  enableUserEditVertices = true;
 
-  this._removeCustomPopup();
+  @property({ type: Boolean, attribute: "enable-user-edit-add-vertices" })
+  enableUserEditAddVertices = true;
 
-  const popupGraphics = (graphics.length > 0 ? graphics : [graphic])
-    .filter((g) => g?.geometry);
+  @property({ type: Boolean, attribute: "enable-user-edit-delete-vertices" })
+  enableUserEditDeleteVertices = true;
 
-  if (popupGraphics.length === 0) return;
+  @property({ type: Boolean, attribute: "enable-user-edit-rotating" })
+  enableUserEditRotating = true;
 
-  this._customPopupGraphics = popupGraphics;
-  this._customPopupCurrentIndex = 0;
-  this._popupOpen = true;
+  @property({ type: Boolean, attribute: "enable-user-edit-scaling" })
+  enableUserEditScaling = true;
 
-  let screenPoint = { x: 0, y: 0 };
-  try {
-    const pt =
-      ArcGeojsonLayer.getPopupPoint(graphic.geometry) ?? mapPoint;
-    const sp = this.view.toScreen(pt);
-    screenPoint = { x: sp.x, y: sp.y };
-  } catch {
-    screenPoint = { x: 300, y: 200 };
-  }
+  @property({ type: Boolean, attribute: "enable-user-edit-uniform-scaling" })
+  enableUserEditUniformScaling = true;
 
-  this._renderCustomPopup(screenPoint);
-}
+  @property({ type: Boolean, attribute: "enable-user-edit-remove" })
+  enableUserEditRemove = true;
 
-private _renderCustomPopup(
-  screenPoint: { x: number; y: number }
-): void {
-  this._removeCustomPopup();
+  @property({ attribute: "unique-id-property-name" })
+  uniqueIdPropertyName = "id";
 
-  const graphic =
-    this._customPopupGraphics[this._customPopupCurrentIndex];
-  if (!graphic) return;
+  // ─── Lifecycle ───────────────────────────────────────────────
 
-  const content = this._buildPopupContent(graphic);
-  const container = this.view?.container as HTMLElement;
-  if (!container) return;
+  async connectedCallback(): Promise<void> {
+    super.connectedCallback();
 
-  const popup = document.createElement("div");
-  popup.setAttribute("data-arc-custom-popup", "true");
-  popup.style.cssText = `
-    position: absolute;
-    z-index: 9999;
-    width: 300px;
-    background: #ffffff;
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3),
-                0 2px 10px rgba(0,0,0,0.2);
-    font-family: "Avenir Next", Avenir, "Helvetica Neue",
-                 Helvetica, Arial, sans-serif;
-    overflow: hidden;
-    pointer-events: all;
-  `;
+    if (this.initComplete) {
+      return;
+    }
 
-  popup.innerHTML = content;
+    this._lastGeoJsonSignature = undefined as any;
 
-  if (getComputedStyle(container).position === "static") {
-    container.style.position = "relative";
-  }
-  container.appendChild(popup);
-  this._customPopupEl = popup;
+    await this.waitForAncestorMap();
 
-  // Position above the point
-  const popupH = popup.offsetHeight || 220;
-  const popupW = 300;
-  const ARROW_H = 10;
-  const PAD = 10;
+    if (!this.isConnected) {
+      return;
+    }
 
-  let x = screenPoint.x - popupW / 2;
-  let y = screenPoint.y - popupH - ARROW_H - 4;
+    try {
+      await this.resolveAncestorMapAndView();
 
-  const cw = container.offsetWidth;
-  x = Math.max(PAD, Math.min(x, cw - popupW - PAD));
-  y = Math.max(PAD, y);
+      const initialGeoJson =
+        this.pendingGeoJson !== undefined
+          ? this.pendingGeoJson
+          : this.geojson;
 
-  popup.style.left = `${x}px`;
-  popup.style.top = `${y}px`;
+      await this.createLayer(initialGeoJson);
+      this.bindViewEvents();
 
-  // Wire close button
-  popup
-    .querySelector("[data-action='close']")
-    ?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.closePopup();
-    });
+      this.initComplete = true;
+      this._readyResolve?.();
+      this.pendingGeoJson = undefined;
 
-  // Wire paginator prev/next
-  popup
-    .querySelector("[data-action='prev']")
-    ?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (this._customPopupCurrentIndex > 0) {
-        this._customPopupCurrentIndex--;
-        this._renderCustomPopup(screenPoint);
+      if (this.pendingInfoTemplate !== undefined) {
+        this.updateInfoTemplate(this.pendingInfoTemplate);
+        this.pendingInfoTemplate = undefined;
+      } else if (this.infoTemplate) {
+        this.updateInfoTemplate(this.infoTemplate);
       }
-    });
 
-  popup
-    .querySelector("[data-action='next']")
-    ?.addEventListener("click", (e) => {
-      e.stopPropagation();
+      if (this.pendingEnableUserEdit !== undefined) {
+        await this.updateEditing(this.pendingEnableUserEdit);
+        this.pendingEnableUserEdit = undefined;
+      }
+
       if (
-        this._customPopupCurrentIndex <
-        this._customPopupGraphics.length - 1
+        this.geojson &&
+        this.featureLayer?.graphics?.length === 0
       ) {
-        this._customPopupCurrentIndex++;
-        this._renderCustomPopup(screenPoint);
+        await this.updateGeoJson(this.geojson);
       }
+    } catch (error) {
+      console.error(
+        "[arc-geojson-layer] connectedCallback failed",
+        error
+      );
+    }
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+
+    this._editingEnabled = false;
+    this._lastEditingState = undefined;
+
+    this.cleanupEditor();
+    this.cleanupViewEvents();
+    this.closePopup();
+
+    // Remove layers from map BEFORE nulling references
+    const layersToRemove = [
+      this.featureLayer,
+      this.labelLayer,
+      this.sketchLayer,
+    ].filter(Boolean);
+
+    layersToRemove.forEach((layer) => {
+      try {
+        if (this.view?.map) {
+          this.view.map.remove(layer as any);
+        }
+      } catch { }
     });
 
-  // Close native ArcGIS popup
-  try {
-    const nativePopup: any = this.view?.popup;
-    if (nativePopup) {
-      nativePopup.close?.();
-      nativePopup.visible = false;
-      nativePopup.features = [];
-    }
-  } catch { }
-}
-
-private _buildPopupContent(graphic: Graphic): string {
-  const attributes = graphic.attributes ?? {};
-  const tmpl = this.infoTemplate;
-
-  const resolveTokens = (str: string): string =>
-    str
-      .replace(/\$\{([^}]+)\}/g, (_, k) => {
-        const v = attributes[k.trim()];
-        return v == null ? "" : String(v);
-      })
-      .replace(/\{([^}]+)\}/g, (_, k) => {
-        const v = attributes[k.trim()];
-        return v == null ? "" : String(v);
+    // Also remove by ID in case reference changed
+    try {
+      layersToRemove.forEach((layer: any) => {
+        if (!layer?.id) return;
+        try {
+          const found = this.view?.map?.findLayerById(layer.id);
+          if (found) this.view.map.remove(found);
+        } catch { }
       });
+    } catch { }
 
-  // Title
-  let title = "Details";
-  if (tmpl?.title) {
-    title =
-      typeof tmpl.title === "function"
-        ? String(tmpl.title(graphic) ?? "Details")
-        : resolveTokens(String(tmpl.title));
+    this.featureLayer = undefined;
+    this.labelLayer = undefined;
+    this.sketchLayer = undefined;
+    this.graphicsEditor = undefined;
+    this.view = undefined;
+
+    this.initComplete = false;
+    this._lastGeoJsonSignature = "";
+    this.pendingGeoJson = undefined;
+    this._popupOpen = false;
+
+    this._readyPromise = new Promise((resolve) => {
+      this._readyResolve = resolve;
+    });
   }
 
-  // Content
-  let bodyHtml = "";
-
-  if (tmpl?.content) {
-    if (typeof tmpl.content === "function") {
-      bodyHtml = String(tmpl.content(graphic) ?? "");
-    } else if (
-      typeof tmpl.content === "string" &&
-      tmpl.content.trim()
-    ) {
-      bodyHtml = resolveTokens(tmpl.content);
+  componentOnReady(): Promise<void> {
+    if (this.initComplete) {
+      return Promise.resolve();
     }
+    return this._readyPromise;
   }
 
-  // Fallback: auto attribute table
-  if (!bodyHtml) {
-    const SKIP = new Set([
-      "OBJECTID",
-      "_featureIndex",
-      "__isTemporaryDrawing",
-      "__labelFor",
-      "_parentFeatureCollection",
-    ]);
-
-    const entries = Object.entries(attributes).filter(
-      ([k]) => !k.startsWith("_") && !SKIP.has(k)
-    );
-
-    if (entries.length === 0) {
-      bodyHtml = `
-        <p style="margin:12px 16px;color:#888;font-size:13px">
-          No data available.
-        </p>`;
-    } else {
-      const rows = entries
-        .map(
-          ([k, v], i) => `
-        <tr style="background:${i % 2 === 0 ? "#fff" : "#f8f8f8"}">
-          <td style="
-            padding: 7px 14px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #6e6e6e;
-            border-right: 1px solid #ebebeb;
-            white-space: nowrap;
-            width: 38%;
-            vertical-align: top;
-          ">${k}</td>
-          <td style="
-            padding: 7px 14px;
-            font-size: 13px;
-            color: #323232;
-            word-break: break-word;
-          ">${v ?? ""}</td>
-        </tr>`
-        )
-        .join("");
-
-      bodyHtml = `
-        <table style="
-          width: 100%;
-          border-collapse: collapse;
-          border-top: 1px solid #ebebeb;
-        ">${rows}</table>`;
-    }
-  }
-
-  // Paginator
-  const total = this._customPopupGraphics.length;
-  const index = this._customPopupCurrentIndex;
-  const paginatorHtml =
-    total > 1
-      ? `<div style="
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 6px 12px;
-          background: #f7f7f7;
-          border-top: 1px solid #ddd;
-          font-size: 12px;
-          color: #555;
-        ">
-          <button data-action="prev" style="
-            border: none;
-            background: none;
-            cursor: pointer;
-            font-size: 18px;
-            color: #0079c1;
-            padding: 0 6px;
-            opacity: ${index === 0 ? "0.3" : "1"};
-            pointer-events: ${index === 0 ? "none" : "all"};
-          ">&#8249;</button>
-          <span>${index + 1} of ${total}</span>
-          <button data-action="next" style="
-            border: none;
-            background: none;
-            cursor: pointer;
-            font-size: 18px;
-            color: #0079c1;
-            padding: 0 6px;
-            opacity: ${index === total - 1 ? "0.3" : "1"};
-            pointer-events: ${index === total - 1 ? "none" : "all"};
-          ">&#8250;</button>
-        </div>`
-      : "";
-
-  return `
-    <div style="
-      background: #0079c1;
-      color: #fff;
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 36px;
-    ">
-      <span style="
-        font-size: 14px;
-        font-weight: 600;
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        margin-right: 8px;
-      ">${title}</span>
-      <button data-action="close" style="
-        background: none;
-        border: none;
-        color: #fff;
-        cursor: pointer;
-        font-size: 16px;
-        line-height: 1;
-        padding: 2px 4px;
-        opacity: 0.9;
-        flex-shrink: 0;
-      " title="Close">&#x2715;</button>
-    </div>
-
-    <div style="
-      max-height: 240px;
-      overflow-y: auto;
-      background: #fff;
-    ">
-      ${bodyHtml}
-    </div>
-
-    ${paginatorHtml}
-
-    <div style="
-      width: 0;
-      height: 0;
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-top: 9px solid #fff;
-      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.18));
-      margin: 0 auto;
-    "></div>
-  `;
-}
-
-private _removeCustomPopup(): void {
-  if (this._customPopupEl) {
-    try { this._customPopupEl.remove(); } catch { }
-    this._customPopupEl = null;
-  }
-}
-
-public closePopup(): void {
-  this._popupOpen = false;
-  this._removeCustomPopup();
-  this._customPopupGraphics = [];
-  this._customPopupCurrentIndex = 0;
-
-  try {
-    const popup: any = this.view?.popup;
-    if (popup) {
-      try { popup.features = []; } catch { }
-      try { popup.close?.(); } catch { }
-      try { popup.visible = false; } catch { }
-      try { popup.open = false; } catch { }
-    }
-  } catch { }
-
-  this._popupGraphic = null;
-  this._showPopup = false;
-
-  this.clearPopupHighlight();
-}
-
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) {
-    return;
-  }
-
-  this.closePopup();
-  this._suppressPopupUntil = Date.now() + 2000;
-
-  if (!this.graphicsEditor) {
-    await this.createEditor();
-  }
-
-  if (!this.graphicsEditor) {
-    console.error(
-      "[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor"
-    );
-    return;
-  }
-
-  // Cancel if SVM is busy
-  try {
-    const state = (this.graphicsEditor as any).state;
-    if (state === "active") {
-      this.graphicsEditor.cancel();
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  } catch { }
-
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this.enableInfoPopupWindow(false);
-
-  // Find source graphic in featureLayer by OBJECTID
-  const id =
-    graphic.attributes?.OBJECTID ??
-    graphic.attributes?._featureIndex ??
-    graphic.attributes?.[this.uniqueIdPropertyName] ??
-    0;
-
-  const sourceGraphic =
-    this.featureLayer?.graphics?.find((g: Graphic) => {
-      const gid =
-        g.attributes?.OBJECTID ?? g.attributes?._featureIndex ?? 0;
-      return String(gid) === String(id);
-    }) ?? graphic;
-
-  // Remove from featureLayer
-  try {
-    this.featureLayer?.graphics?.remove(sourceGraphic);
-  } catch { }
-
-  // Clone for sketchLayer
-  const editGraphic = sourceGraphic.clone();
-  if (!editGraphic.attributes) editGraphic.attributes = {};
-
-  const isCircle = this.isCircleGraphic(editGraphic);
-
-  if (isCircle) {
-    editGraphic.attributes.isCircle = true;
-    editGraphic.attributes.drawGeometryType = "circle";
-    editGraphic.attributes.shapeType = "circle";
-    editGraphic.attributes.shape = "circle";
-  }
-
-  // Assign symbol for edit handles to appear
-  if (isCircle || editGraphic.geometry?.type === "polygon") {
-    editGraphic.symbol = {
-      type: "simple-fill",
-      style: "solid",
-      color: [0, 120, 255, 0.2],
-      outline: {
-        type: "simple-line",
-        color: [0, 120, 255, 1],
-        width: 2,
-        style: "solid",
-      },
-    } as any;
-  } else if (editGraphic.geometry?.type === "polyline") {
-    editGraphic.symbol = {
-      type: "simple-line",
-      color: [0, 120, 255, 1],
-      width: 3,
-      style: "solid",
-    } as any;
-  } else {
-    editGraphic.symbol = {
-      type: "simple-marker",
-      style: "circle",
-      size: 18,
-      color: [0, 120, 255, 1],
-      outline: {
-        type: "simple-line",
-        color: [255, 255, 255, 1],
-        width: 2,
-      },
-    } as any;
-  }
-
-  editGraphic.popupTemplate = null as any;
-
-  // Move to sketchLayer
-  this.sketchLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.add(editGraphic);
-
-  const updateOptions: any = isCircle
-    ? {
-        tool: "transform",
-        enableRotation: false,
-        enableScaling: true,
-        preserveAspectRatio: true,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
+  protected updated(changedProps: PropertyValues<this>): void {
+    if (changedProps.has("geojson")) {
+      if (this.initComplete) {
+        void this.updateGeoJson(this.geojson);
+      } else if (this.view) {
+        void this.updateGeoJson(this.geojson);
+      } else {
+        this.pendingGeoJson = this.geojson;
       }
-    : {
-        tool: this.resolveUpdateTool(editGraphic),
-        enableRotation: this.enableUserEditRotating,
-        enableScaling: this.enableUserEditScaling,
-        preserveAspectRatio: this.enableUserEditUniformScaling,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      };
+    }
 
-  try {
-    await this.graphicsEditor.update([editGraphic], updateOptions);
-    console.log(
-      "[arc-geojson-layer] activateGraphicsEditor: SVM update started",
-      { isCircle, tool: updateOptions.tool }
-    );
-  } catch (err: any) {
-    console.error(
-      "[arc-geojson-layer] activateGraphicsEditor: SVM update failed",
-      err
-    );
-    // Rollback
-    this.sketchLayer?.graphics?.remove(editGraphic);
-    this.featureLayer?.graphics?.add(sourceGraphic);
-    this._editorOpen = false;
-    this.enableInfoPopupWindow(true);
+    if (changedProps.has("infoTemplate")) {
+      if (!this.initComplete) {
+        this.pendingInfoTemplate = this.infoTemplate;
+      } else if (this.view) {
+        this.updateInfoTemplate(this.infoTemplate);
+      }
+    }
+
+    if (!this.view) return;
+
+    if (changedProps.has("renderer")) {
+      this.updateRenderer(this.renderer);
+    }
+
+    if (
+      changedProps.has("labelJson") ||
+      changedProps.has("labelColor") ||
+      changedProps.has("labelSize")
+    ) {
+      this.refreshLabels();
+    }
+
+    if (changedProps.has("layerClass")) {
+      this.updateLayerClass(this.layerClass);
+    }
+
+    if (changedProps.has("enableUserEdit")) {
+      this._editingEnabled = this.enableUserEdit;
+      this._editingEnabledAt = this.enableUserEdit ? Date.now() : 0;
+      if (!this.initComplete) {
+        this.pendingEnableUserEdit = this.enableUserEdit;
+      } else {
+        void this.updateEditing(this.enableUserEdit);
+      }
+    }
+
+    if (
+      changedProps.has("enableUserEditMove") ||
+      changedProps.has("enableUserEditVertices") ||
+      changedProps.has("enableUserEditScaling") ||
+      changedProps.has("enableUserEditRotating") ||
+      changedProps.has("enableUserEditUniformScaling") ||
+      changedProps.has("enableUserEditAddVertices") ||
+      changedProps.has("enableUserEditDeleteVertices")
+    ) {
+      this.syncEditorOptions();
+    }
   }
-}
 
-private bindEditorEvents(): void {
-  this.editorHandles?.forEach((handle: any) => {
-    try { handle?.remove?.(); } catch { }
-  });
-  this.editorHandles = [];
+  // ─── Ancestor Resolution ─────────────────────────────────────
 
-  if (!this.graphicsEditor) return;
+  private async waitForAncestorMap(): Promise<void> {
+    return new Promise((resolve) => {
+      const found =
+        this.closest("arc-map") || this.closest("ArcMap");
+      if (found) { resolve(); return; }
+      const observer = new MutationObserver(() => {
+        const map =
+          this.closest("arc-map") || this.closest("ArcMap");
+        if (map) {
+          observer.disconnect();
+          resolve();
+        }
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    });
+  }
 
-  const createHandle = this.graphicsEditor.on(
-    "create",
-    (event: any) => {
+  private async resolveAncestorMapAndView(): Promise<void> {
+    const mapElement =
+      this.closest("arc-map") || this.closest("ArcMap");
+
+    if (!mapElement) {
+      throw new Error(
+        "[arc-geojson-layer] ancestor arc-map not found"
+      );
+    }
+
+    this.ancestorMapElement = mapElement;
+    const anyMap = mapElement as any;
+
+    if (anyMap.view) {
+      this.view = anyMap.view;
+    } else if (typeof anyMap.getViewInstance === "function") {
+      this.view = await anyMap.getViewInstance();
+    } else if (typeof anyMap.getView === "function") {
+      this.view = await anyMap.getView();
+    }
+
+    if (!this.view) {
+      throw new Error(
+        "[arc-geojson-layer] map view not resolved from arc-map"
+      );
+    }
+
+    if (this.view.ready !== true) {
+      await this.view.when?.();
+    }
+
+    // Disable auto-open but keep popup alive for paginator
+    try {
+      if (this.view.popup) {
+        this.view.popup.autoOpenEnabled = false;
+        this.view.popup.highlightEnabled = false;
+        try {
+          this.view.popup.actions?.removeAll?.();
+        } catch { }
+      }
+    } catch { }
+
+    if (this.pendingGeoJson !== undefined) {
+      const pending = this.pendingGeoJson;
+      this.pendingGeoJson = undefined;
+      await this.updateGeoJson(pending);
+    }
+  }
+
+  // ─── Layer Creation ──────────────────────────────────────────
+
+  private async createLayer(initialGeoJson: any): Promise<void> {
+    const layerId = `${this.name || "arc-geojson-layer"}-${Date.now()}`;
+
+    this.featureLayer = new GraphicsLayer({
+      id: `${layerId}-graphics`,
+      title: this.name,
+      listMode: "show",
+      elevationInfo: undefined,
+    });
+    (this.featureLayer as any).pickingEnabled = true;
+
+    this.labelLayer = new GraphicsLayer({
+      id: `${layerId}-labels`,
+      title: `${this.name}-labels`,
+      listMode: "hide",
+    });
+    (this.labelLayer as any).pickingEnabled = false;
+
+    this.sketchLayer = new GraphicsLayer({
+      id: `${layerId}-sketch`,
+      title: `${this.name}-sketch`,
+      listMode: "hide",
+    });
+    (this.sketchLayer as any).pickingEnabled = false;
+
+    this.view.map.add(this.featureLayer);
+    this.view.map.add(this.labelLayer);
+    this.view.map.add(this.sketchLayer);
+
+    this.updateLayerClass(this.layerClass);
+
+    if (initialGeoJson) {
+      await this.updateGeoJson(initialGeoJson);
+    }
+  }
+
+  // ─── Editing ─────────────────────────────────────────────────
+
+  private async updateEditing(enabled: boolean): Promise<void> {
+    if (this._lastEditingState === enabled) return;
+    this._lastEditingState = enabled;
+    this._editingEnabled = enabled;
+    this._editingEnabledAt = enabled ? Date.now() : 0;
+    if (enabled) {
+      await this.createEditor();
+    }
+  }
+
+  public async startDrawing(drawGeometryType: string): Promise<void> {
+    await this.componentOnReady();
+
+    this.featureLayer?.graphics?.removeAll();
+    this.sketchLayer?.graphics?.removeAll();
+    this.blockGeoJsonUpdate = true;
+    this.geojson = { type: "FeatureCollection", features: [] };
+    this.blockGeoJsonUpdate = false;
+
+    const normalizedType = String(drawGeometryType ?? "").toLowerCase();
+    await this.createEditor();
+
+    if (!this.graphicsEditor) {
+      console.error("[arc-geojson-layer] startDrawing: no graphicsEditor");
+      return;
+    }
+
+    this._currentDrawGeometryType = normalizedType;
+    this.inDrawingMode = true;
+    this._isStartingDraw = true;
+    this._editorOpen = false;
+    this._lastCreatedByDrawing = true;
+    this._suppressPopupUntil = Date.now() + 1500;
+    this._activeVisibleType = normalizedType;
+    this.filterGraphicsByActiveType(normalizedType);
+    this.enableInfoPopupWindow(false);
+    this.closePopup();
+
+    try { this.graphicsEditor.cancel(); } catch { }
+
+    const sketchTool = this.normalizeSketchTool(normalizedType);
+    this.graphicsEditor.create(sketchTool as any);
+  }
+
+  private filterGraphicsByActiveType(activeType: string | null): void {
+    if (!this.featureLayer) return;
+
+    if (!activeType) {
+      this.featureLayer.graphics.forEach((g: Graphic) => {
+        (g as any).visible = true;
+      });
+      return;
+    }
+
+    const type = activeType.toLowerCase();
+    this.featureLayer.graphics.forEach((g: Graphic) => {
+      const isCircle = this.isCircleGraphic(g);
+      const geomType = String(g.geometry?.type ?? "").toLowerCase();
+      let visible = false;
+      switch (type) {
+        case "circle":
+          visible = isCircle;
+          break;
+        case "polygon":
+        case "freehand-polygon":
+          visible = geomType === "polygon" && !isCircle;
+          break;
+        case "polyline":
+        case "freehand-polyline":
+        case "line":
+          visible = geomType === "polyline";
+          break;
+        case "point":
+          visible = geomType === "point";
+          break;
+        case "rectangle":
+        case "extent":
+          visible = geomType === "polygon" && !isCircle;
+          break;
+        default:
+          visible = true;
+      }
+      (g as any).visible = visible;
+    });
+  }
+
+  public cancelDrawing(): void {
+    try { this.graphicsEditor?.cancel(); } catch { }
+
+    try {
+      const sketchGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
+      sketchGraphics.forEach((g: Graphic) => {
+        try { this.sketchLayer?.graphics?.remove(g); } catch { }
+        if (!g.attributes?.__isTemporaryDrawing) {
+          const finalGraphic = g.clone();
+          this.applyGraphicDefaults(finalGraphic);
+          try { this.featureLayer?.graphics?.add(finalGraphic); } catch { }
+        }
+      });
+    } catch { }
+
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this._editorOpen = false;
+    this._currentDrawGeometryType = undefined;
+    this._lastCreatedByDrawing = false;
+
+    this.closePopup();
+    this._activeVisibleType = null;
+    this.filterGraphicsByActiveType(null);
+    this.enableInfoPopupWindow(true);
+    this.setViewCursor("default");
+  }
+
+  public closeEditor(): void {
+    if (!this._editorOpen) return;
+    this.finishActiveEditor();
+  }
+
+  public isEditorOpen(): boolean {
+    return this._editorOpen === true;
+  }
+
+  public closeSideSheetEditor(mode: "create" | "edit"): void {
+    if (mode === "create") {
+      this.cancelDrawing();
+      return;
+    }
+    this.closeEditor();
+  }
+
+  private async createEditor(): Promise<void> {
+    if (!this.view || !this.sketchLayer) return;
+    if (this.graphicsEditor) return;
+
+    try {
+      this.graphicsEditor = new SketchViewModel({
+        view: this.view,
+        layer: this.sketchLayer,
+        defaultUpdateOptions: {
+          tool: "reshape",
+          multipleSelectionEnabled: false,
+          toggleToolOnClick: false,
+        } as any,
+      });
+    } catch (err) {
+      console.error("[arc-geojson-layer] createEditor failed", err);
+      this.graphicsEditor = undefined;
+      return;
+    }
+
+    this.bindEditorEvents();
+  }
+
+  private bindEditorEvents(): void {
+    this.editorHandles?.forEach((handle: any) => {
+      try { handle?.remove?.(); } catch { }
+    });
+    this.editorHandles = [];
+
+    if (!this.graphicsEditor) return;
+
+    const createHandle = this.graphicsEditor.on("create", (event: any) => {
       if (event.state === "start" || event.state === "active") {
         this.inDrawingMode = true;
         this._isStartingDraw = true;
@@ -1027,12 +637,9 @@ private bindEditorEvents(): void {
         this.cancelDrawing();
         return;
       }
-    }
-  );
+    });
 
-  const updateHandle = this.graphicsEditor.on(
-    "update",
-    (event: any) => {
+    const updateHandle = this.graphicsEditor.on("update", (event: any) => {
       if (event.state === "start") {
         this._editorOpen = true;
         this.inDrawingMode = false;
@@ -1041,7 +648,6 @@ private bindEditorEvents(): void {
         this.enableInfoPopupWindow(false);
         return;
       }
-
       if (event.state === "active") {
         const graphics = event.graphics ?? [];
         graphics.forEach((g: Graphic) => {
@@ -1050,128 +656,1837 @@ private bindEditorEvents(): void {
         });
         return;
       }
-
       if (event.state === "complete") {
         const graphics = event.graphics ?? [];
         graphics.forEach((g: Graphic) => {
           if (!g?.geometry) return;
-
           this.updateGeoJsonWithChanges(g);
-
-          // Move from sketchLayer back to featureLayer
           try { this.sketchLayer?.graphics?.remove(g); } catch { }
-
           const finalGraphic = g.clone();
           this.applyGraphicDefaults(finalGraphic);
           try { this.featureLayer?.graphics?.add(finalGraphic); } catch { }
         });
-
         this._editorOpen = false;
         this.enableInfoPopupWindow(true);
         this.refreshLabels();
       }
-    }
-  );
+    });
 
-  const deleteHandle = this.graphicsEditor.on(
-    "delete",
-    (event: any) => {
+    const deleteHandle = this.graphicsEditor.on("delete", (event: any) => {
       event.graphics?.forEach((graphic: Graphic) => {
         this.removeFromGeoJSON(graphic);
         try { this.sketchLayer?.graphics?.remove(graphic); } catch { }
       });
       this._editorOpen = false;
       this.enableInfoPopupWindow(true);
-    }
-  );
-
-  this.editorHandles.push(createHandle, updateHandle, deleteHandle);
-}
-
-private finishActiveEditor(): void {
-  if (!this._editorOpen) return;
-
-  try { this.graphicsEditor?.complete(); } catch { }
-
-  // Move remaining sketch graphics back to featureLayer
-  try {
-    const sketchGraphics =
-      this.sketchLayer?.graphics?.toArray() ?? [];
-    sketchGraphics.forEach((g: Graphic) => {
-      try { this.sketchLayer?.graphics?.remove(g); } catch { }
-      const finalGraphic = g.clone();
-      this.applyGraphicDefaults(finalGraphic);
-      try { this.featureLayer?.graphics?.add(finalGraphic); } catch { }
     });
-  } catch { }
 
-  this._editorOpen = false;
-  this.enableInfoPopupWindow(true);
-  this.setViewCursor("default");
-}
+    this.editorHandles.push(createHandle, updateHandle, deleteHandle);
+  }
 
-public cancelDrawing(): void {
-  try { this.graphicsEditor?.cancel(); } catch { }
-
-  // Move non-temporary sketch graphics back to featureLayer
-  try {
-    const sketchGraphics =
-      this.sketchLayer?.graphics?.toArray() ?? [];
-    sketchGraphics.forEach((g: Graphic) => {
-      try { this.sketchLayer?.graphics?.remove(g); } catch { }
-      if (!g.attributes?.__isTemporaryDrawing) {
+  private finishActiveEditor(): void {
+    if (!this._editorOpen) return;
+    try { this.graphicsEditor?.complete(); } catch { }
+    try {
+      const sketchGraphics = this.sketchLayer?.graphics?.toArray() ?? [];
+      sketchGraphics.forEach((g: Graphic) => {
+        try { this.sketchLayer?.graphics?.remove(g); } catch { }
         const finalGraphic = g.clone();
         this.applyGraphicDefaults(finalGraphic);
-        try {
-          this.featureLayer?.graphics?.add(finalGraphic);
-        } catch { }
+        try { this.featureLayer?.graphics?.add(finalGraphic); } catch { }
+      });
+    } catch { }
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+    this.setViewCursor("default");
+  }
+
+  private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+    if (!this.isUserEditEnabled() || !graphic?.geometry) return;
+
+    this.closePopup();
+    this._suppressPopupUntil = Date.now() + 2000;
+
+    if (!this.graphicsEditor) {
+      await this.createEditor();
+    }
+    if (!this.graphicsEditor) return;
+
+    try {
+      const state = (this.graphicsEditor as any).state;
+      if (state === "active") {
+        this.graphicsEditor.cancel();
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } catch { }
+
+    this._editorOpen = true;
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+    this.enableInfoPopupWindow(false);
+
+    const id =
+      graphic.attributes?.OBJECTID ??
+      graphic.attributes?._featureIndex ??
+      graphic.attributes?.[this.uniqueIdPropertyName] ??
+      0;
+
+    const sourceGraphic =
+      this.featureLayer?.graphics?.find((g: Graphic) => {
+        const gid =
+          g.attributes?.OBJECTID ?? g.attributes?._featureIndex ?? 0;
+        return String(gid) === String(id);
+      }) ?? graphic;
+
+    try { this.featureLayer?.graphics?.remove(sourceGraphic); } catch { }
+
+    const editGraphic = sourceGraphic.clone();
+    if (!editGraphic.attributes) editGraphic.attributes = {};
+
+    const isCircle = this.isCircleGraphic(editGraphic);
+
+    if (isCircle) {
+      editGraphic.attributes.isCircle = true;
+      editGraphic.attributes.drawGeometryType = "circle";
+      editGraphic.attributes.shapeType = "circle";
+      editGraphic.attributes.shape = "circle";
+    }
+
+    if (isCircle || editGraphic.geometry?.type === "polygon") {
+      editGraphic.symbol = {
+        type: "simple-fill",
+        style: "solid",
+        color: [0, 120, 255, 0.2],
+        outline: {
+          type: "simple-line",
+          color: [0, 120, 255, 1],
+          width: 2,
+          style: "solid",
+        },
+      } as any;
+    } else if (editGraphic.geometry?.type === "polyline") {
+      editGraphic.symbol = {
+        type: "simple-line",
+        color: [0, 120, 255, 1],
+        width: 3,
+        style: "solid",
+      } as any;
+    } else {
+      editGraphic.symbol = {
+        type: "simple-marker",
+        style: "circle",
+        size: 18,
+        color: [0, 120, 255, 1],
+        outline: {
+          type: "simple-line",
+          color: [255, 255, 255, 1],
+          width: 2,
+        },
+      } as any;
+    }
+
+    editGraphic.popupTemplate = null as any;
+    this.sketchLayer?.graphics?.removeAll();
+    this.sketchLayer?.graphics?.add(editGraphic);
+
+    const updateOptions: any = isCircle
+      ? {
+          tool: "transform",
+          enableRotation: false,
+          enableScaling: true,
+          preserveAspectRatio: true,
+          multipleSelectionEnabled: false,
+          toggleToolOnClick: false,
+        }
+      : {
+          tool: this.resolveUpdateTool(editGraphic),
+          enableRotation: this.enableUserEditRotating,
+          enableScaling: this.enableUserEditScaling,
+          preserveAspectRatio: this.enableUserEditUniformScaling,
+          multipleSelectionEnabled: false,
+          toggleToolOnClick: false,
+        };
+
+    try {
+      await this.graphicsEditor.update([editGraphic], updateOptions);
+    } catch (err: any) {
+      console.error("[arc-geojson-layer] SVM update failed", err);
+      try { this.sketchLayer?.graphics?.remove(editGraphic); } catch { }
+      this.featureLayer?.graphics?.add(sourceGraphic);
+      this._editorOpen = false;
+      this.enableInfoPopupWindow(true);
+    }
+  }
+
+  private syncEditorOptions(): void {
+    if (!this.graphicsEditor) return;
+    try {
+      (this.graphicsEditor as any).defaultUpdateOptions = {
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        toggleToolOnClick: false,
+        multipleSelectionEnabled: false,
+      };
+    } catch { }
+  }
+
+  private normalizeSketchTool(tool: string): string {
+    const value = String(tool ?? "").toLowerCase();
+    switch (value) {
+      case "point": return "point";
+      case "line":
+      case "polyline":
+      case "freehand-polyline": return "polyline";
+      case "circle": return "circle";
+      case "rectangle":
+      case "extent": return "rectangle";
+      case "polygon":
+      case "freehand-polygon":
+      default: return "polygon";
+    }
+  }
+
+  private resolveUpdateTool(graphic: Graphic): string {
+    if (this.isCircleGraphic(graphic)) return "transform";
+    if (graphic.geometry?.type === "polygon") return "reshape";
+    return "move";
+  }
+
+  private isCircleGraphic(graphic: Graphic): boolean {
+    const attrs = graphic?.attributes ?? {};
+    return (
+      attrs.isCircle === true ||
+      attrs.isCircle === "true" ||
+      String(attrs.drawGeometryType ?? "").toLowerCase() === "circle" ||
+      String(attrs.shapeType ?? "").toLowerCase() === "circle" ||
+      String(attrs.shape ?? "").toLowerCase() === "circle" ||
+      Object.prototype.hasOwnProperty.call(attrs, "radius")
+    );
+  }
+
+  private isUserEditEnabled(): boolean {
+    return this._editingEnabled === true;
+  }
+
+  // ─── GeoJSON ─────────────────────────────────────────────────
+
+  private async updateGeoJson(
+    value:
+      | string
+      | FeatureCollection<GeoJsonGeometry, GeoJsonProperties>
+      | null
+  ): Promise<void> {
+    if (!this.featureLayer || this._isUpdatingGeoJson) return;
+    if (this.blockGeoJsonUpdate) return;
+
+    const signature = JSON.stringify(value ?? {});
+    if (signature === this._lastGeoJsonSignature) return;
+
+    this._lastGeoJsonSignature = signature;
+    this._isUpdatingGeoJson = true;
+
+    try {
+      const parsedResult = this.getJsonForAny(value);
+      if (parsedResult.error || !parsedResult.parsedJson) return;
+
+      const parsedGeoJson: any = JSON.parse(
+        JSON.stringify(parsedResult.parsedJson)
+      );
+
+      if (
+        parsedGeoJson.type !== "FeatureCollection" ||
+        !Array.isArray(parsedGeoJson.features)
+      ) return;
+
+      if (
+        parsedGeoJson.features.length === 0 &&
+        (this.featureLayer?.graphics?.length ?? 0) === 0
+      ) return;
+
+      this.clearGeoJSONLayer();
+
+      const graphics: Graphic[] = [];
+      parsedGeoJson.features.forEach(
+        (feature: any, index: number) => {
+          const graphic = this.geoJsonFeatureToGraphic(
+            feature,
+            index
+          );
+          if (!graphic) return;
+          graphics.push(graphic);
+        }
+      );
+
+      if (graphics.length > 0) {
+        this.featureLayer.addMany(graphics);
+      }
+
+      this.refreshLabels();
+      this.filterGraphicsByActiveType(this._activeVisibleType);
+    } catch (error) {
+      console.error("[arc-geojson-layer] updateGeoJson failed", error);
+    } finally {
+      this._isUpdatingGeoJson = false;
+    }
+  }
+
+  private clearGeoJSONLayer(): void {
+    if (this._editorOpen) return;
+    if (this._isClearingGeoJSONLayer) return;
+    this._isClearingGeoJSONLayer = true;
+    try {
+      this.featureLayer?.graphics?.removeAll();
+      this.labelLayer?.graphics?.removeAll();
+    } finally {
+      this._isClearingGeoJSONLayer = false;
+    }
+  }
+
+  private handleCreateComplete(graphic: Graphic): void {
+    this.inDrawingMode = false;
+    this._isStartingDraw = false;
+
+    const wasDrawnAsCircle =
+      this._currentDrawGeometryType === "circle" ||
+      this.isCircleGraphic(graphic);
+
+    if (!graphic.attributes) graphic.attributes = {};
+
+    if (wasDrawnAsCircle) {
+      graphic.attributes.isCircle = true;
+      graphic.attributes.drawGeometryType = "circle";
+      graphic.attributes.shapeType = "circle";
+      graphic.attributes.shape = "circle";
+    }
+
+    this.applyGraphicDefaults(graphic);
+    this.sketchLayer?.graphics?.remove(graphic);
+    try { this.featureLayer?.add(graphic); } catch { }
+
+    this.filterGraphicsByActiveType(this._activeVisibleType);
+    this.addToGeoJSON(graphic);
+    this.enableInfoPopupWindow(true);
+
+    const geoGraphic = graphic.clone();
+    if (geoGraphic.geometry?.spatialReference?.isWebMercator) {
+      geoGraphic.geometry = webMercatorUtils.webMercatorToGeographic(
+        geoGraphic.geometry!
+      ) as Geometry;
+    }
+
+    this.emitLayerEvent(
+      "userDrawItemAdded",
+      this.graphicToGeoJsonFeature(geoGraphic),
+      geoGraphic,
+      { geojson: this.geojson }
+    );
+  }
+
+  private addToGeoJSON(graphic: Graphic): void {
+    if (!graphic?.geometry) return;
+
+    if (graphic.geometry?.spatialReference?.isWebMercator) {
+      graphic = graphic.clone();
+      graphic.geometry = webMercatorUtils.webMercatorToGeographic(
+        graphic.geometry!
+      ) as Geometry;
+    }
+
+    const convertedFeature = this.graphicToGeoJsonFeature(graphic);
+    if (!convertedFeature) return;
+
+    const isCircle = this.isCircleGraphic(graphic);
+    if (isCircle && convertedFeature.properties) {
+      convertedFeature.properties.isCircle = true;
+      convertedFeature.properties.drawGeometryType = "circle";
+      convertedFeature.properties.shapeType = "circle";
+      convertedFeature.properties.shape = "circle";
+    }
+
+    const INTERNAL_KEYS = new Set([
+      "drawGeometryType", "shapeType", "shape", "isCircle",
+      "isTemporaryDrawing", "id", "OBJECTID",
+      this.uniqueIdPropertyName,
+    ]);
+
+    const userProperties = Object.fromEntries(
+      Object.entries(convertedFeature.properties ?? {}).filter(
+        ([key]) => !INTERNAL_KEYS.has(key)
+      )
+    );
+
+    const featureId =
+      graphic.attributes?.[this.uniqueIdPropertyName] ??
+      graphic.attributes?.OBJECTID ??
+      0;
+
+    const normalizedFeature = {
+      ...convertedFeature,
+      properties: { ...userProperties, OBJECTID: featureId },
+    };
+
+    const parsedResult = this.getJsonForAny(this.geojson);
+    const currentGeoJson =
+      !parsedResult.error &&
+      parsedResult.parsedJson &&
+      Array.isArray((parsedResult.parsedJson as any).features)
+        ? parsedResult.parsedJson
+        : { type: "FeatureCollection", features: [] };
+
+    (currentGeoJson as any).features.push(normalizedFeature as any);
+
+    this.blockGeoJsonUpdate = true;
+    this.geojson = currentGeoJson as any;
+    this.blockGeoJsonUpdate = false;
+  }
+
+  async findFeatureByUniqueId(
+    uniqueId: string | number
+  ): Promise<Graphic | undefined> {
+    return this.featureLayer?.graphics?.find(
+      (g: Graphic) =>
+        (g.attributes?.[this.uniqueIdPropertyName] !== undefined &&
+          String(g.attributes[this.uniqueIdPropertyName]) ===
+            String(uniqueId)) ||
+        (g.attributes?.OBJECTID !== undefined &&
+          String(g.attributes.OBJECTID) === String(uniqueId)) ||
+        (g.attributes?.id !== undefined &&
+          String(g.attributes?.id) === String(uniqueId))
+    );
+  }
+
+  private updateGeoJsonWithChanges(graphicToUpdate: Graphic): void {
+    if (!graphicToUpdate?.geometry) return;
+
+    this.applyGraphicDefaults(graphicToUpdate);
+
+    let graphicForGeoJson = graphicToUpdate;
+    if (graphicToUpdate.geometry?.spatialReference?.isWebMercator) {
+      graphicForGeoJson = graphicToUpdate.clone();
+      graphicForGeoJson.geometry =
+        webMercatorUtils.webMercatorToGeographic(
+          graphicToUpdate.geometry
+        ) as Geometry;
+    }
+
+    const convertedFeature =
+      this.graphicToGeoJsonFeature(graphicForGeoJson);
+    if (!convertedFeature?.geometry) return;
+
+    const isCircle = this.isCircleGraphic(graphicToUpdate);
+    const parsedResult = this.getJsonForAny(this.geojson);
+    const currentGeoJson = JSON.parse(
+      JSON.stringify(
+        !parsedResult.error &&
+        parsedResult.parsedJson &&
+        Array.isArray((parsedResult.parsedJson as any).features)
+          ? parsedResult.parsedJson
+          : { type: "FeatureCollection", features: [] }
+      )
+    );
+
+    const updateId =
+      graphicToUpdate.attributes?.[this.uniqueIdPropertyName] ??
+      graphicToUpdate.attributes?.OBJECTID ??
+      graphicToUpdate.attributes?.id ??
+      0;
+
+    const existingFeature = currentGeoJson.features.find(
+      (f: any) => {
+        const fid =
+          f?.properties?.[this.uniqueIdPropertyName] ??
+          f?.properties?.OBJECTID ??
+          f?.id ??
+          f?.properties?.id ??
+          0;
+        return String(fid) === String(updateId);
+      }
+    );
+
+    const preservedObjectId =
+      existingFeature?.properties?.OBJECTID ??
+      existingFeature?.properties?.[this.uniqueIdPropertyName] ??
+      existingFeature?.id ??
+      updateId;
+
+    const originalId =
+      existingFeature?.properties?.id ??
+      existingFeature?.id ??
+      updateId;
+
+    const INTERNAL_KEYS = new Set([
+      "OBJECTID", "_featureIndex", "_parentFeatureCollection",
+      "drawGeometryType", "shapeType", "shape", "isCircle",
+      "isTemporaryDrawing", this.uniqueIdPropertyName,
+    ]);
+
+    const userProperties = Object.fromEntries(
+      Object.entries({
+        ...(existingFeature?.properties ?? {}),
+        ...(convertedFeature.properties ?? {}),
+      }).filter(([key]) => !INTERNAL_KEYS.has(key))
+    ) as Record<string, any>;
+
+    const normalizedFeature = {
+      type: "Feature" as const,
+      id: originalId,
+      geometry: {
+        ...(convertedFeature.geometry as any),
+        coordinates: this.normalizePolygonCoordinates(
+          (convertedFeature.geometry as any).coordinates
+        ),
+      },
+      properties: {
+        ...userProperties,
+        OBJECTID: preservedObjectId,
+        _featureIndex: preservedObjectId,
+        ...(isCircle
+          ? {
+              drawGeometryType: "circle",
+              shapeType: "circle",
+              shape: "circle",
+              isCircle: true,
+            }
+          : {}),
+      },
+    };
+
+    let updated = false;
+    const updatedFeatures = currentGeoJson.features.map(
+      (feature: any) => {
+        const featureId =
+          feature?.properties?.[this.uniqueIdPropertyName] ??
+          feature?.properties?.OBJECTID ??
+          feature?.id ??
+          feature?.properties?.id ??
+          0;
+        if (String(featureId) === String(updateId)) {
+          updated = true;
+          return {
+            ...feature,
+            id: feature?.id ?? originalId,
+            geometry: normalizedFeature.geometry,
+            properties: {
+              ...(feature.properties ?? {}),
+              ...(normalizedFeature.properties ?? {}),
+              OBJECTID:
+                feature?.properties?.OBJECTID ?? preservedObjectId,
+              _featureIndex:
+                feature?.properties?._featureIndex ??
+                feature?.properties?.OBJECTID ??
+                preservedObjectId,
+            },
+          };
+        }
+        return feature;
+      }
+    );
+
+    if (!updated) {
+      updatedFeatures.push(normalizedFeature as any);
+    }
+
+    const updatedGeoJson: FeatureCollection<
+      GeoJsonGeometry,
+      GeoJsonProperties
+    > = {
+      type: "FeatureCollection",
+      features: updatedFeatures as any,
+    };
+
+    this._lastGeoJsonSignature = JSON.stringify(updatedGeoJson);
+    this.blockGeoJsonUpdate = true;
+    this.geojson = updatedGeoJson as any;
+    this.blockGeoJsonUpdate = false;
+
+    this.refreshLabels();
+
+    this.emitLayerEvent(
+      "userEditItemUpdated",
+      normalizedFeature as any,
+      graphicToUpdate,
+      { geojson: updatedGeoJson }
+    );
+  }
+
+  private removeFromGeoJSON(graphic: Graphic): void {
+    if (!this.featureLayer) return;
+
+    const convertedFeature = this.graphicToGeoJsonFeature(graphic);
+    if (!convertedFeature) return;
+
+    const parsedResult = this.getJsonForAny(this.geojson);
+    const currentGeoJson = JSON.parse(
+      JSON.stringify(
+        !parsedResult.error &&
+        parsedResult.parsedJson &&
+        Array.isArray((parsedResult.parsedJson as any).features)
+          ? parsedResult.parsedJson
+          : { type: "FeatureCollection", features: [] }
+      )
+    );
+
+    const removeId =
+      convertedFeature.properties?.OBJECTID ??
+      convertedFeature.properties?.id;
+
+    currentGeoJson.features = currentGeoJson.features.filter(
+      (feature: any) => {
+        const featureId =
+          feature?.properties?.OBJECTID ??
+          feature?.properties?._featureIndex ??
+          0;
+        return String(featureId) !== String(removeId);
+      }
+    );
+
+    this.blockGeoJsonUpdate = true;
+    this.geojson = currentGeoJson as any;
+    this.blockGeoJsonUpdate = false;
+
+    this.emitLayerEvent(
+      "userEditItemRemoved",
+      convertedFeature,
+      graphic,
+      { geojson: currentGeoJson }
+    );
+  }
+
+  private normalizePolygonCoordinates(coordinates: any): any {
+    if (!Array.isArray(coordinates)) return coordinates;
+    return coordinates.map((ring: any[]) => {
+      if (!Array.isArray(ring) || ring.length === 0) return ring;
+      const first = ring[0];
+      const last = ring[ring.length - 1];
+      const isClosed =
+        Array.isArray(first) &&
+        Array.isArray(last) &&
+        first[0] === last[0] &&
+        first[1] === last[1];
+      if (!isClosed) return [...ring, first];
+      return ring;
+    });
+  }
+
+  // ─── View Events ─────────────────────────────────────────────
+
+  private bindViewEvents(): void {
+    if (!this.view || !this.featureLayer) return;
+
+    this.cleanupViewEvents();
+    this.setupPopupCloseWatcher();
+
+    let clickTimer: any = null;
+
+    const clickHandle = this.view.on("click", async (evt: any) => {
+      if (this.isPopupDomTarget(evt?.native?.target)) return;
+
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+        return;
+      }
+
+      clickTimer = setTimeout(async () => {
+        clickTimer = null;
+
+        const hit = await this.view.hitTest(evt);
+        const allResults = hit?.results ?? [];
+
+        const thisLayerGraphics = allResults
+          .map((r: any) => r.graphic)
+          .filter(
+            (g: Graphic) =>
+              g?.geometry && g?.layer === this.featureLayer
+          );
+
+        if (thisLayerGraphics.length === 0) {
+          this.closePopup();
+          return;
+        }
+
+        const topGraphic = thisLayerGraphics[0];
+
+        this.emitLayerEvent(
+          "layerClick",
+          this.graphicToGeoJsonFeature(topGraphic),
+          topGraphic,
+          {
+            event: {
+              coordinates: {
+                latitude: evt.mapPoint?.latitude ?? 0,
+                longitude: evt.mapPoint?.longitude ?? 0,
+              },
+              attributes: topGraphic.attributes ?? {},
+            },
+          }
+        );
+
+        if (
+          !this._editorOpen &&
+          !this.inDrawingMode &&
+          !this._isStartingDraw &&
+          !this.shouldSuppressPopup()
+        ) {
+          this.showGraphicPopup(
+            topGraphic,
+            evt.mapPoint,
+            thisLayerGraphics
+          );
+        }
+
+        if (
+          this.enableUserEdit &&
+          !this._editorOpen &&
+          !this.inDrawingMode
+        ) {
+          if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+            this.removeFromGeoJSON(topGraphic);
+            this.graphicsEditor?.cancel();
+            return;
+          }
+          await this.activateGraphicsEditor(topGraphic);
+        }
+      }, 180);
+    });
+
+    const doubleClickHandle = this.view.on(
+      "double-click",
+      async (evt: any) => {
+        if (this.isPopupDomTarget(evt?.native?.target)) return;
+        evt.stopPropagation?.();
+        evt.preventDefault?.();
+
+        if (clickTimer) {
+          clearTimeout(clickTimer);
+          clickTimer = null;
+        }
+
+        this._suppressPopupUntil = Date.now() + 1500;
+        this.closePopup();
+      }
+    );
+
+    const nativeDoubleClick = (event: MouseEvent) => {
+      if (this.isPopupDomTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+      }
+      this._suppressPopupUntil = Date.now() + 1500;
+      this.closePopup();
+    };
+
+    this.view.container?.addEventListener(
+      "dblclick",
+      nativeDoubleClick,
+      true
+    );
+
+    const pointerMoveHandle = this.view.on(
+      "pointer-move",
+      (evt: any) => {
+        if (this._editorOpen || this.inDrawingMode) {
+          if (this._cursorResetTimer) {
+            clearTimeout(this._cursorResetTimer);
+            this._cursorResetTimer = null;
+          }
+          if (this._currentCursor !== "default") {
+            this._currentCursor = "default";
+            this.setViewCursor("default");
+          }
+          return;
+        }
+
+        if (!this.featureLayer) return;
+
+        this.view
+          .hitTest(evt, { include: [this.featureLayer] })
+          .then((hit: any) => {
+            const hasHit = (hit?.results ?? []).some(
+              (result: any) =>
+                result?.graphic?.geometry &&
+                (result?.graphic?.layer === this.featureLayer ||
+                  (result?.graphic?.layer as any)?.id ===
+                    this.featureLayer?.id)
+            );
+
+            if (hasHit) {
+              if (this._cursorResetTimer) {
+                clearTimeout(this._cursorResetTimer);
+                this._cursorResetTimer = null;
+              }
+              if (this._currentCursor !== "pointer") {
+                this._currentCursor = "pointer";
+                this.setViewCursor("pointer");
+              }
+            } else {
+              if (
+                this._currentCursor === "pointer" &&
+                !this._cursorResetTimer
+              ) {
+                this._cursorResetTimer = setTimeout(() => {
+                  this._cursorResetTimer = null;
+                  this._currentCursor = "default";
+                  this.setViewCursor("default");
+                }, 100);
+              }
+            }
+          })
+          .catch(() => {
+            if (this._currentCursor !== "default") {
+              this._currentCursor = "default";
+              this.setViewCursor("default");
+            }
+          });
+      }
+    );
+
+    this.eventHandles.push(
+      { remove: () => clickHandle.remove() },
+      { remove: () => doubleClickHandle.remove() },
+      { remove: () => pointerMoveHandle.remove() },
+      {
+        remove: () => {
+          this.view?.container?.removeEventListener(
+            "dblclick",
+            nativeDoubleClick,
+            true
+          );
+        },
+      }
+    );
+  }
+
+  private setViewCursor(cursor: "default" | "pointer"): void {
+    try {
+      const container = this.view?.container as
+        | HTMLElement
+        | undefined;
+      if (!container) return;
+      container.style.cursor = cursor;
+      const selectors = [
+        ".esri-view-surface",
+        ".esri-view-root",
+        ".esri-overlay-surface",
+        "canvas",
+      ];
+      selectors.forEach((sel) => {
+        container
+          .querySelectorAll<HTMLElement>(sel)
+          .forEach((el) => {
+            el.style.setProperty("cursor", cursor, "important");
+          });
+      });
+    } catch { }
+  }
+
+  private cleanupViewEvents(): void {
+    this.eventHandles?.forEach((handle: any) => {
+      try { handle?.remove?.(); } catch { }
+    });
+    this.eventHandles = [];
+
+    if (this._cursorResetTimer) {
+      clearTimeout(this._cursorResetTimer);
+      this._cursorResetTimer = null;
+    }
+    try { this._popupVisibleWatchHandle?.remove?.(); } catch { }
+    this._popupVisibleWatchHandle = null;
+    try { this._popupHighlightHandle?.remove?.(); } catch { }
+    this._popupHighlightHandle = null;
+  }
+
+  private isPopupDomTarget(target: EventTarget | null): boolean {
+    const element = target as HTMLElement | null;
+    return !!element?.closest?.(
+      ".esri-popup, .esri-popup-main-container, .esri-popup-pagination, .esri-popup-button, arcgis-popup"
+    );
+  }
+
+  // ─── Popup ───────────────────────────────────────────────────
+
+  private showGraphicPopup(
+    graphic: Graphic,
+    mapPoint: Point,
+    graphics: Graphic[]
+  ): void {
+    if (
+      this._editorOpen ||
+      this.inDrawingMode ||
+      this._isStartingDraw ||
+      this.shouldSuppressPopup()
+    ) return;
+
+    // Only show popup if infoTemplate is set and has content
+    if (!this.infoTemplate) return;
+
+    const popupGraphics = graphics.filter((g) => g?.geometry);
+    if (popupGraphics.length === 0) return;
+
+    // Build popup template for each graphic
+    let builtAny = false;
+    popupGraphics.forEach((g) => {
+      const tpl = this.buildPopupTemplate(g);
+      if (tpl) {
+        g.popupTemplate = tpl;
+        builtAny = true;
       }
     });
-  } catch { }
 
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._editorOpen = false;
-  this._currentDrawGeometryType = undefined;
-  this._lastCreatedByDrawing = false;
+    if (!builtAny) return;
 
-  this.closePopup();
+    const location =
+      mapPoint ??
+      ArcGeojsonLayer.getPopupPoint(graphic.geometry) ??
+      undefined;
 
-  this._activeVisibleType = null;
-  this.filterGraphicsByActiveType(null);
-  this.enableInfoPopupWindow(true);
-  this.setViewCursor("default");
+    // Use native ArcGIS popup — it handles paginator automatically
+    try {
+      const popup = this.view.popup;
+      if (!popup) return;
+
+      popup.autoOpenEnabled = false;
+      popup.highlightEnabled = false;
+      try { popup.actions?.removeAll?.(); } catch { }
+
+      this.view.popupEnabled = true;
+      this._popupOpen = true;
+
+      popup.open({
+        features: popupGraphics,
+        location,
+        updateLocationEnabled: false,
+      });
+
+      // Remove "Zoom to" after open
+      setTimeout(() => {
+        try { popup.actions?.removeAll?.(); } catch { }
+      }, 0);
+
+    } catch (err) {
+      console.warn("[arc-geojson-layer] showGraphicPopup failed", err);
+    }
+  }
+
+  private buildPopupTemplate(graphic: Graphic): PopupTemplate | null {
+    if (!this.infoTemplate) return null;
+
+    const attributes = graphic.attributes ?? {};
+    const tmpl = this.infoTemplate;
+
+    const resolveTokens = (str: string): string =>
+      str
+        .replace(/\$\{([^}]+)\}/g, (_, k) => {
+          const v = attributes[k.trim()];
+          return v == null ? "" : String(v);
+        })
+        .replace(/\{([^}]+)\}/g, (_, k) => {
+          const v = attributes[k.trim()];
+          return v == null ? "" : String(v);
+        });
+
+    // Resolve title
+    let title = "Details";
+    if (tmpl?.title) {
+      title =
+        typeof tmpl.title === "function"
+          ? String(tmpl.title(graphic) ?? "Details")
+          : resolveTokens(String(tmpl.title));
+    }
+
+    // Resolve content
+    let content: any = null;
+    if (tmpl?.content) {
+      if (typeof tmpl.content === "function") {
+        content = tmpl.content(graphic);
+      } else if (
+        typeof tmpl.content === "string" &&
+        tmpl.content.trim()
+      ) {
+        content = resolveTokens(tmpl.content);
+      }
+    }
+
+    // Only show popup if there is actual content or attributes to show
+    const SKIP = new Set([
+      "OBJECTID", "_featureIndex", "__isTemporaryDrawing",
+      "__labelFor", "_parentFeatureCollection",
+    ]);
+
+    const validEntries = Object.entries(attributes).filter(
+      ([k, v]) =>
+        !k.startsWith("_") &&
+        !SKIP.has(k) &&
+        v !== null &&
+        v !== undefined &&
+        String(v).trim() !== ""
+    );
+
+    // If no content and no valid attributes — do not show popup
+    if (!content && validEntries.length === 0) return null;
+
+    // Fallback: render attributes as clean table
+    if (!content) {
+      const rows = validEntries
+        .map(
+          ([k, v], i) => `
+          <tr style="background:${i % 2 === 0 ? "#fff" : "#f8f8f8"}">
+            <td style="
+              padding:7px 14px;
+              font-size:12px;
+              font-weight:600;
+              color:#6e6e6e;
+              border-right:1px solid #ebebeb;
+              white-space:nowrap;
+              width:38%;
+              vertical-align:top
+            ">${k}</td>
+            <td style="
+              padding:7px 14px;
+              font-size:13px;
+              color:#323232;
+              word-break:break-word
+            ">${v}</td>
+          </tr>`
+        )
+        .join("");
+      content = `
+        <table style="
+          width:100%;
+          border-collapse:collapse;
+          border-top:1px solid #ebebeb;
+          font-family:'Avenir Next',Avenir,sans-serif
+        ">${rows}</table>`;
+    }
+
+    return new PopupTemplate({
+      title,
+      content,
+      actions: [] as any,
+    });
+  }
+
+  private static getPopupPoint(
+    geometry: Geometry | null | undefined
+  ): Point | null {
+    if (!geometry) return null;
+    if (geometry.type === "point") return geometry as Point;
+    if (geometry.type === "polyline") {
+      const polyline = geometry as Polyline;
+      const paths = polyline.paths ?? [];
+      if (paths.length > 0 && paths[0].length > 0) {
+        const midIndex = Math.floor(paths[0].length / 2);
+        const midPoint = paths[0][midIndex];
+        return new Point({
+          x: midPoint[0],
+          y: midPoint[1],
+          spatialReference: polyline.spatialReference,
+        });
+      }
+    }
+    if (geometry.type === "polygon") {
+      return centroidOperator.execute(geometry as Polygon) ?? null;
+    }
+    return null;
+  }
+
+  public closePopup(): void {
+    this._popupOpen = false;
+    try {
+      const popup: any = this.view?.popup;
+      if (popup) {
+        try { popup.close?.(); } catch { }
+        try { popup.features = []; } catch { }
+        try { popup.visible = false; } catch { }
+        try { popup.open = false; } catch { }
+      }
+    } catch { }
+    try { this._popupHighlightHandle?.remove?.(); } catch { }
+    this._popupHighlightHandle = null;
+  }
+
+  private setupPopupCloseWatcher(): void {
+    try { this._popupVisibleWatchHandle?.remove?.(); } catch { }
+    this._popupVisibleWatchHandle = null;
+
+    const popup: any = this.view?.popup;
+    if (!popup || typeof popup.watch !== "function") return;
+
+    this._popupVisibleWatchHandle = popup.watch(
+      "visible",
+      (visible: boolean) => {
+        if (!visible) {
+          this._popupOpen = false;
+          this.setViewCursor("default");
+        }
+      }
+    );
+  }
+
+  private enableInfoPopupWindow(enable: boolean): void {
+    if (!this.view) return;
+    try { this.view.popupEnabled = enable; } catch { }
+    if (!enable) {
+      this.closePopup();
+    }
+  }
+
+  private updateInfoTemplate(template: any): void {
+    if (!template || template === "{}") return;
+    this.infoTemplate = template;
+  }
+
+  private shouldSuppressPopup(): boolean {
+    return Date.now() < this._suppressPopupUntil;
+  }
+
+  async openPopup(
+    id: string | number,
+    zoomLevel = 9
+  ): Promise<void> {
+    await this.componentOnReady();
+
+    const graphicMatch = await this.findFeatureByUniqueId(id);
+    if (!graphicMatch) {
+      console.warn(
+        `[arc-geojson-layer] openPopup: No feature found with id (${id})`
+      );
+      return;
+    }
+
+    if (graphicMatch.geometry && this.view) {
+      try {
+        if (graphicMatch.geometry.type.toLowerCase() === "point") {
+          await this.view.goTo({
+            center: graphicMatch.geometry as Point,
+            zoom: zoomLevel,
+          });
+        } else {
+          const extent = (graphicMatch.geometry as any).extent;
+          if (extent) {
+            await this.view.goTo(
+              extent.expand ? extent.expand(1.5) : extent
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("[arc-geojson-layer] openPopup zoom failed", e);
+      }
+    }
+
+    const tpl = this.buildPopupTemplate(graphicMatch);
+    if (!tpl) return;
+
+    graphicMatch.popupTemplate = tpl;
+
+    const popupPoint =
+      ArcGeojsonLayer.getPopupPoint(graphicMatch.geometry) ??
+      undefined;
+
+    try {
+      this.view.popupEnabled = true;
+      this.view.popup.open({
+        features: [graphicMatch],
+        location: popupPoint,
+        updateLocationEnabled: false,
+      });
+      setTimeout(() => {
+        try { this.view.popup.actions?.removeAll?.(); } catch { }
+      }, 0);
+    } catch (err) {
+      console.warn("[arc-geojson-layer] openPopup failed", err);
+    }
+  }
+
+  async zoomTo(
+    id: string | number,
+    zoomLevel = 9
+  ): Promise<void> {
+    await this.componentOnReady();
+
+    const graphic = await this.findFeatureByUniqueId(id);
+    if (!graphic || !graphic.geometry || !this.view) {
+      console.warn("[arc-geojson-layer] zoomTo: Cannot find feature", id);
+      return;
+    }
+
+    try {
+      if (graphic.geometry.type === "point") {
+        await this.view.goTo({
+          center: graphic.geometry as Point,
+          zoom: zoomLevel,
+        });
+      } else {
+        const extent = (graphic.geometry as any).extent;
+        if (extent) {
+          await this.view.goTo(
+            extent.expand ? extent.expand(1.5) : extent
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[arc-geojson-layer] zoomTo failed", err);
+    }
+  }
+
+  // ─── Events ──────────────────────────────────────────────────
+
+  private emitLayerEvent(
+    eventName: string,
+    feature?: Feature | null,
+    graphic?: Graphic | null,
+    extraData?: any
+  ): void {
+    const safeFeature =
+      feature ??
+      (graphic?.geometry
+        ? this.graphicToGeoJsonFeature(graphic)
+        : null);
+
+    const attributes =
+      safeFeature?.properties ?? graphic?.attributes ?? {};
+    const geometry =
+      safeFeature?.geometry ??
+      (graphic?.geometry
+        ? this.arcGeometryToGeoJson(graphic.geometry)
+        : null);
+
+    const objectId =
+      (attributes as any).OBJECTID ??
+      (attributes as any).objectId ??
+      (attributes as any).id ??
+      null;
+
+    this.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: {
+          type: eventName,
+          OBJECTID: objectId,
+          objectId,
+          feature: safeFeature,
+          graphic: graphic ?? null,
+          attributes,
+          properties: attributes,
+          geometry,
+          geojson: this.geojson,
+          layerId:
+            this.featureLayer?.id ??
+            this.name ??
+            "arc-geojson-layer",
+          ...extraData,
+        },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  // ─── Cleanup ─────────────────────────────────────────────────
+
+  private cleanupEditor(): void {
+    this.editorHandles?.forEach((handle: any) => {
+      try { handle?.remove?.(); } catch { }
+    });
+    this.editorHandles = [];
+    try { this.graphicsEditor?.cancel(); } catch { }
+    try { this.graphicsEditor?.destroy(); } catch { }
+    this.graphicsEditor = undefined;
+  }
+
+  // ─── Graphic conversion ──────────────────────────────────────
+
+  private geoJsonFeatureToGraphic(
+    feature: Feature,
+    featureIndex: number
+  ): Graphic | null {
+    if (!feature?.geometry) return null;
+
+    const geometry = this.geoJsonGeometryToUpGeometry(
+      feature.geometry
+    );
+    if (!geometry) return null;
+
+    const properties = JSON.parse(
+      JSON.stringify(feature.properties ?? {})
+    ) as Record<string, any>;
+
+    const originalId = properties.id;
+    const originalName = properties.name;
+
+    properties.OBJECTID = featureIndex;
+    properties._featureIndex = featureIndex;
+
+    if (originalId !== undefined) properties.id = originalId;
+    if (originalName !== undefined) properties.name = originalName;
+
+    const graphic = new Graphic({ geometry, attributes: properties });
+    this.applyGraphicDefaults(graphic, featureIndex);
+    return graphic;
+  }
+
+  private geoJsonGeometryToUpGeometry(
+    geometry: GeoJsonGeometry
+  ): Geometry | null {
+    if (!geometry) return null;
+    const spatialReference = new SpatialReference({ wkid: 4326 });
+
+    switch (geometry.type) {
+      case "Point": {
+        const c = geometry.coordinates as number[];
+        return new Point({
+          longitude: c[0],
+          latitude: c[1],
+          spatialReference,
+        });
+      }
+      case "MultiPoint": {
+        const c = geometry.coordinates as number[][];
+        if (!c.length) return null;
+        return new Point({
+          longitude: c[0][0],
+          latitude: c[0][1],
+          spatialReference,
+        });
+      }
+      case "LineString":
+        return new Polyline({
+          paths: [geometry.coordinates as number[][]],
+          spatialReference,
+        });
+      case "MultiLineString":
+        return new Polyline({
+          paths: geometry.coordinates as number[][][],
+          spatialReference,
+        });
+      case "Polygon":
+        return new Polygon({
+          rings: geometry.coordinates as number[][][],
+          spatialReference,
+        });
+      case "MultiPolygon": {
+        const rings = (
+          geometry.coordinates as number[][][][]
+        ).flat();
+        return new Polygon({ rings, spatialReference });
+      }
+      default:
+        console.warn(
+          "[arc-geojson-layer] unsupported GeoJSON geometry",
+          geometry
+        );
+        return null;
+    }
+  }
+
+  private graphicToGeoJsonFeature(
+    graphic: Graphic
+  ): Feature | null {
+    if (!graphic?.geometry) return null;
+
+    const geometry = this.arcGeometryToGeoJson(graphic.geometry);
+    if (!geometry) return null;
+
+    const objectId =
+      graphic.attributes?.[this.uniqueIdPropertyName] ??
+      graphic.attributes?.OBJECTID ??
+      graphic.attributes?.id ??
+      0;
+
+    return {
+      type: "Feature",
+      id: graphic.attributes?.id,
+      geometry,
+      properties: {
+        ...(graphic.attributes ?? {}),
+        [this.uniqueIdPropertyName]: objectId,
+        OBJECTID: objectId,
+      },
+    };
+  }
+
+  private arcGeometryToGeoJson(
+    geometry: any
+  ): GeoJsonGeometry | null {
+    if (!geometry) return null;
+
+    if (geometry.type === "point") {
+      return {
+        type: "Point",
+        coordinates: [
+          geometry.longitude ?? geometry.x,
+          geometry.latitude ?? geometry.y,
+        ],
+      } as GeoJsonGeometry;
+    }
+
+    if (geometry.type === "polyline") {
+      const paths = geometry.paths ?? [];
+      if (paths.length === 1) {
+        return {
+          type: "LineString",
+          coordinates: paths[0],
+        } as GeoJsonGeometry;
+      }
+      return {
+        type: "MultiLineString",
+        coordinates: paths,
+      } as GeoJsonGeometry;
+    }
+
+    if (geometry.type === "polygon") {
+      return {
+        type: "Polygon",
+        coordinates: this.normalizePolygonCoordinates(
+          geometry.rings ?? []
+        ),
+      } as GeoJsonGeometry;
+    }
+
+    return null;
+  }
+
+  // ─── Symbol / Renderer ───────────────────────────────────────
+
+  private applyGraphicDefaults(
+    graphic: Graphic,
+    featureIndex?: number
+  ): void {
+    if (!graphic.attributes) graphic.attributes = {};
+
+    const attrs = graphic.attributes as Record<string, any>;
+    const originalId = attrs.id;
+    const originalName = attrs.name;
+
+    const objectId =
+      typeof featureIndex === "number" && !Number.isNaN(featureIndex)
+        ? featureIndex
+        : typeof attrs._featureIndex === "number"
+        ? attrs._featureIndex
+        : typeof attrs.OBJECTID === "number"
+        ? attrs.OBJECTID
+        : 0;
+
+    attrs.OBJECTID = objectId;
+    attrs._featureIndex = objectId;
+
+    if (originalId !== undefined) attrs.id = originalId;
+    if (originalName !== undefined) attrs.name = originalName;
+
+    const rendererSymbol = this.getSymbolFromRendererConfig(
+      this.renderer,
+      graphic
+    );
+    const selectedSymbol =
+      rendererSymbol ??
+      graphic.symbol ??
+      this.getDefaultSymbolForGeometry(graphic.geometry);
+
+    graphic.symbol = this.coerceSymbolForGeometry(
+      selectedSymbol,
+      graphic.geometry
+    );
+    graphic.popupTemplate = null as any;
+  }
+
+  private getSymbolFromRendererConfig(
+    rendererRaw: any,
+    graphic: Graphic
+  ): any {
+    const parsed = JsonUtils.getJsonForAny(rendererRaw);
+    if (
+      parsed.error ||
+      !parsed.parsedJson ||
+      !graphic?.attributes
+    )
+      return null;
+
+    const renderer = parsed.parsedJson;
+    const rendererType = String(renderer.type ?? "").toLowerCase();
+
+    if (rendererType === "simple") {
+      const symbol = JsonUtils.createSymbolFromJson(
+        renderer.symbol ?? renderer.defaultSymbol,
+        graphic.geometry?.type
+      );
+      return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+    }
+
+    if (
+      rendererType !== "unique-value" &&
+      rendererType !== "uniquevalue"
+    ) {
+      if (!renderer.defaultSymbol) return null;
+      const symbol = JsonUtils.createSymbolFromJson(
+        renderer.defaultSymbol,
+        graphic.geometry?.type
+      );
+      return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+    }
+
+    const attrs = graphic.attributes ?? {};
+    const field1 = renderer.field1 ?? renderer.field;
+    const field2 = renderer.field2;
+    const field3 = renderer.field3;
+    const fields = [field1, field2, field3].filter(Boolean);
+    const values = fields.map((f: string) =>
+      String(attrs[f] ?? "").trim()
+    );
+
+    const hasDelimiter =
+      renderer.fieldDelimiter !== undefined &&
+      renderer.fieldDelimiter !== null;
+    const delimiter = hasDelimiter
+      ? String(renderer.fieldDelimiter)
+      : undefined;
+
+    const candidateKeys = new Set<string>();
+    if (hasDelimiter) candidateKeys.add(values.join(delimiter));
+    candidateKeys.add(values.join(""));
+    candidateKeys.add(values.join("|"));
+    candidateKeys.add(values.join(","));
+    candidateKeys.add(values.join(";"));
+    values.forEach((v) => { if (v) candidateKeys.add(v); });
+
+    const keys = Array.from(candidateKeys).map((v) =>
+      String(v ?? "").trim()
+    );
+
+    const matchedInfo = renderer.uniqueValueInfos?.find(
+      (info: any) => keys.includes(String(info.value ?? "").trim())
+    );
+
+    const rawSymbol =
+      matchedInfo?.symbol ??
+      renderer.defaultSymbol ??
+      renderer.symbol ??
+      null;
+    if (!rawSymbol) return null;
+
+    const symbol = JsonUtils.createSymbolFromJson(
+      rawSymbol,
+      graphic.geometry?.type
+    );
+    return this.coerceSymbolForGeometry(symbol, graphic.geometry);
+  }
+
+  private coerceSymbolForGeometry(
+    symbol: any,
+    geometry: Geometry | null | undefined
+  ): any {
+    if (!symbol || !geometry) return symbol;
+
+    const geometryType = String(
+      (geometry as any).type ?? ""
+    ).toLowerCase();
+    const symbolType = String(symbol.type ?? "").toLowerCase();
+
+    if (
+      geometryType === "point" ||
+      geometryType === "multipoint"
+    ) {
+      if (
+        symbolType === "simple-marker" ||
+        symbolType === "picture-marker"
+      )
+        return symbol;
+      const color = symbol.color ?? [0, 120, 255, 1];
+      return {
+        type: "simple-marker",
+        style: "circle",
+        size: 18,
+        color,
+        outline: {
+          type: "simple-line",
+          color: symbol.outline?.color ?? [255, 255, 255, 1],
+          width: symbol.outline?.width ?? 2,
+          style: "solid",
+        },
+      };
+    }
+
+    if (geometryType === "polyline") {
+      if (symbolType === "simple-line") return symbol;
+      return {
+        type: "simple-line",
+        color:
+          symbol.outline?.color ??
+          symbol.color ?? [0, 120, 255, 1],
+        width: symbol.outline?.width ?? symbol.width ?? 3,
+        style: "solid",
+      };
+    }
+
+    if (
+      geometryType === "polygon" ||
+      geometryType === "extent"
+    ) {
+      if (symbolType === "simple-fill") return symbol;
+      const baseColor =
+        symbol.color ??
+        symbol.outline?.color ?? [0, 120, 255, 1];
+      const fillColor = Array.isArray(baseColor)
+        ? [baseColor[0], baseColor[1], baseColor[2], 0.18]
+        : baseColor;
+      return {
+        type: "simple-fill",
+        style: "solid",
+        color: fillColor,
+        outline: {
+          type: "simple-line",
+          color: symbol.color ?? [0, 120, 255, 1],
+          width: symbol.width ?? 2,
+          style: "solid",
+        },
+      };
+    }
+
+    return symbol;
+  }
+
+  private getDefaultSymbolForGeometry(
+    geometry: Geometry | undefined | null
+  ): any {
+    if (!geometry) return null;
+    const geometryType = String(
+      (geometry as any).type ?? ""
+    ).toLowerCase();
+
+    if (
+      geometryType === "point" ||
+      geometryType === "multipoint"
+    ) {
+      return {
+        type: "simple-marker",
+        style: "circle",
+        size: 18,
+        color: [0, 120, 255, 1],
+        outline: {
+          type: "simple-line",
+          color: [255, 255, 255, 1],
+          width: 2,
+          style: "solid",
+        },
+      };
+    }
+
+    if (geometryType === "polyline") {
+      return {
+        type: "simple-line",
+        style: "solid",
+        color: [0, 120, 255, 1],
+        width: 3,
+      };
+    }
+
+    return {
+      type: "simple-fill",
+      style: "solid",
+      color: [0, 120, 255, 0.18],
+      outline: {
+        type: "simple-line",
+        color: [0, 120, 255, 1],
+        width: 2,
+        style: "solid",
+      },
+    };
+  }
+
+  // ─── Labels ──────────────────────────────────────────────────
+
+  private refreshLabels(): void {
+    if (!this.labelLayer || !this.featureLayer) return;
+    this.labelLayer.removeAll();
+
+    const hasLabelJson =
+      this.labelJson !== undefined &&
+      this.labelJson !== null &&
+      String(this.labelJson).trim() !== "";
+
+    if (!hasLabelJson) return;
+
+    const labelRulesRaw = JsonUtils.getLabelJson(
+      this.labelJson,
+      this.labelColor,
+      this.labelSize
+    );
+    const labelRules = Array.isArray(labelRulesRaw)
+      ? labelRulesRaw
+      : [labelRulesRaw];
+
+    const resolvedColor = JsonUtils.resolveLabelColor(
+      this.labelColor as any
+    );
+    const resolvedSize = JsonUtils.resolveLabelSize(this.labelSize);
+
+    this.featureLayer.graphics.forEach((graphic: Graphic) => {
+      if (!graphic.geometry) return;
+
+      const labelText = this.resolveLabelTextFromRules(
+        graphic,
+        labelRules
+      );
+      if (!labelText) return;
+
+      const pt = ArcGeojsonLayer.getPopupPoint(graphic.geometry);
+      if (!pt) return;
+
+      this.labelLayer!.add(
+        new Graphic({
+          geometry: pt,
+          attributes: {
+            __labelFor: graphic.attributes?.OBJECTID,
+          },
+          symbol: new TextSymbol({
+            text: labelText,
+            color: resolvedColor as any,
+            haloColor: "black",
+            haloSize: 1,
+            xoffset: 3,
+            yoffset: 3,
+            font: {
+              size: resolvedSize,
+              family: "sans-serif",
+              weight: "bold",
+            },
+          }),
+        })
+      );
+    });
+  }
+
+  private resolveLabelTextFromRules(
+    graphic: Graphic,
+    labelRules: any[]
+  ): string {
+    if (!graphic?.attributes || !Array.isArray(labelRules))
+      return "";
+
+    for (const rule of labelRules) {
+      if (!rule) continue;
+
+      const where = rule.where;
+      if (
+        where &&
+        !this.matchesSimpleWhere(graphic.attributes, where)
+      )
+        continue;
+
+      const expression =
+        rule.labelExpressionInfo?.expression ??
+        rule.labelExpression ??
+        rule.expression;
+
+      if (!expression || typeof expression !== "string") continue;
+
+      const match = expression.match(
+        /\[(\$Feature\.{([a-zA-Z0-9_]+)})/
+      );
+      if (!match?.[1]) continue;
+
+      const value = graphic.attributes[match[1]];
+      if (
+        value !== undefined &&
+        value !== null &&
+        String(value).trim() !== ""
+      ) {
+        return String(value);
+      }
+    }
+    return "";
+  }
+
+  private matchesSimpleWhere(
+    attributes: any,
+    where: string
+  ): boolean {
+    if (!where || !attributes) return true;
+
+    const match = where.match(
+      /^([a-zA-Z0-9_]+)\s*([=!<>]{1,2})\s*(['"]?)(.+?)\3$/
+    );
+    if (!match) return true;
+
+    const field = match[1];
+    const operator = match[2];
+    const expectedRaw = match[4];
+    const actual = attributes[field];
+
+    if (actual === undefined || actual === null) return false;
+
+    const actualNumber = Number(actual);
+    const expectedNumber = Number(expectedRaw);
+    const useNumber =
+      !Number.isNaN(actualNumber) && !Number.isNaN(expectedNumber);
+
+    const left = useNumber ? actualNumber : String(actual);
+    const right = useNumber ? expectedNumber : String(expectedRaw);
+
+    switch (operator) {
+      case "=":
+      case "==": return left === right;
+      case "!=": return left !== right;
+      case ">": return left > right;
+      case ">=": return left >= right;
+      case "<": return left < right;
+      case "<=": return left <= right;
+      default: return true;
+    }
+  }
+
+  private updateRenderer(renderer: any): void {
+    this.featureLayer?.graphics?.forEach((graphic: Graphic) => {
+      graphic.symbol =
+        this.getSymbolFromRendererConfig(renderer, graphic) ??
+        this.getDefaultSymbolForGeometry(graphic.geometry);
+    });
+  }
+
+  private updateLayerClass(layerClass: string): void {
+    if (!this.featureLayer) return;
+    (this.featureLayer as any).className = layerClass;
+  }
+
+  // ─── Utilities ───────────────────────────────────────────────
+
+  private getJsonForAny(
+    value: any
+  ): { error: boolean; parsedJson: any } {
+    const result = JsonUtils.getJsonForAny(value);
+    return {
+      error: result.error ?? false,
+      parsedJson: result.parsedJson ?? null,
+    };
+  }
+
+  async getLayerId(): Promise<string> {
+    await this.componentOnReady();
+    return this.featureLayer?.id ?? "";
+  }
+
+  private async waitForViewIdle(): Promise<void> {
+    if (!this.view) return;
+    try {
+      await this.view.when();
+      await reactiveUtils.whenOnce(() => !this.view.updating);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve())
+      );
+    } catch {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve())
+      );
+    }
+  }
 }
 
-private setViewCursor(cursor: "default" | "pointer"): void {
-  try {
-    const container = this.view?.container as HTMLElement | undefined;
-    if (!container) return;
-
-    container.style.cursor = cursor;
-
-    const selectors = [
-      ".esri-view-surface",
-      ".esri-view-root",
-      ".esri-overlay-surface",
-      ".esri-display-object",
-      "canvas",
-    ];
-
-    selectors.forEach((sel) => {
-      container
-        .querySelectorAll<HTMLElement>(sel)
-        .forEach((el) => {
-          el.style.setProperty("cursor", cursor, "important");
-        });
-    });
-
-    document
-      .querySelectorAll<HTMLElement>(
-        ".esri-view canvas, .esri-view-surface canvas"
-      )
-      .forEach((el) => {
-        el.style.setProperty("cursor", cursor, "important");
-      });
-  } catch { }
+declare global {
+  interface HTMLElementTagNameMap {
+    "arc-geojson-layer": ArcGeojsonLayer;
+  }
 }
