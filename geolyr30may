@@ -1,22 +1,76 @@
-const hitResult = await this.view.hitTest(event, {
-  include: [this.featureLayer, this.sketchLayer].filter(Boolean)
-});
+// Single click — TRANSFORM (move/scale/rotate)
+const clickHandle = (view as any).on("click", async (evt: any) => {
+  if (!this.enableUserEdit) return;
+  if (this.inDrawingMode) return;
 
-const allResults = hitResult.results ?? [];
-if (allResults.length === 0) {
-  this.closePopup();
-  return;
-}
+  const hitResult = await view.hitTest(evt, {
+    include: [this.featureLayer, this.sketchLayer].filter(Boolean)
+  });
+  const hit = hitResult.results?.[0];
+  if (!hit) return;
 
-const graphic = allResults[0].graphic;
+  const graphic = hit.graphic;
 
-if (this.enableUserEdit) {
-  if ((event.native?.ctrlKey || event.native?.metaKey) && this.enableUserEditRemove) {
+  if ((evt.native?.ctrlKey || evt.native?.metaKey) && this.enableUserEditRemove) {
     await this.removeFromGeoJSON(graphic);
     return;
   }
-  await this.activateGraphicsEditor(graphic);
-  return;
-}
 
-await this.showGraphicPopup(graphic, event.mapPoint);
+  // Single click = transform tool
+  await this.activateGraphicsEditor(graphic, "transform");
+});
+
+// Double click — RESHAPE (vertex editing)
+const dblClickHandle = (view as any).on("double-click", async (evt: any) => {
+  evt.stopPropagation(); // prevent map zoom on double click
+  if (!this.enableUserEdit) return;
+  if (this.inDrawingMode) return;
+
+  const hitResult = await view.hitTest(evt, {
+    include: [this.featureLayer, this.sketchLayer].filter(Boolean)
+  });
+  const hit = hitResult.results?.[0];
+  if (!hit) return;
+
+  // Double click = reshape tool (vertex editing)
+  await this.activateGraphicsEditor(hit.graphic, "reshape");
+});
+
+this.eventHandles.push(clickHandle, dblClickHandle);
+
+
+
+
+
+private async activateGraphicsEditor(
+  graphic: Graphic,
+  forceTool?: "transform" | "reshape"
+): Promise<void> {
+  ...
+
+  const isCircle = this.isCircleGraphic(editGraphic);
+
+  // Determine tool — circles always use transform
+  const tool = isCircle
+    ? "transform"
+    : forceTool ?? this.resolveUpdateTool(editGraphic);
+
+  const updateOptions: any = isCircle
+    ? {
+        tool: "transform",
+        enableRotation: false,
+        enableScaling: true,
+        preserveAspectRatio: true,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      }
+    : {
+        tool,  // ← "transform" on single click, "reshape" on double click
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      };
+  ...
+}
