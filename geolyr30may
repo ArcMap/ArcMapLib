@@ -1,7 +1,33 @@
+private async createEditor(): Promise<void> {
+  if (!this.featureLayer) return;
+
+  // Guard — prevent duplicate registration
+  if (this._editorCreated) return;
+  this._editorCreated = true;
+
+  // Cleanup old handles first
+  this.editorHandles?.forEach((h: any) => { try { h?.remove?.(); } catch { } });
+  this.editorHandles = [];
+
+  const view = await this._getView();
+  if (!view) return;
+
+  // ✅ _handleClick is registered HERE on the view click event
+  const clickHandle = (view as any).on("click", async (evt: any) => {
+    await this._handleClick(evt);
+  });
+
+  this.editorHandles.push(clickHandle);
+}
+
+// ✅ _handleClick is a separate private method called from above
 private async _handleClick(event: any): Promise<void> {
   if (!this.view) return;
+  if (this.inDrawingMode) return;
+  if (this._isStartingDraw) return;
+  if (Date.now() < this._suppressPopupUntil) return;
 
-  // ✅ Only test against our layers — skip everything else
+  // ✅ Only test our two layers — biggest performance win
   const hitResult = await this.view.hitTest(event, {
     include: [this.featureLayer, this.sketchLayer].filter(Boolean)
   });
@@ -30,5 +56,17 @@ private async _handleClick(event: any): Promise<void> {
   }
 
   const graphic = uniqueResults[0].graphic;
-  // ... rest of handler
+
+  // Edit mode — activate editor
+  if (this.enableUserEdit) {
+    if ((event.native?.ctrlKey || event.native?.metaKey) && this.enableUserEditRemove) {
+      await this.removeFromGeoJson(graphic);
+      return;
+    }
+    await this.activateGraphicsEditor(graphic);
+    return;
+  }
+
+  // Popup mode
+  await this.showGraphicPopup(graphic, event.mapPoint);
 }
