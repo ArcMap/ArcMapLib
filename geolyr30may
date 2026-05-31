@@ -1,164 +1,34 @@
-private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) {
-    return;
-  }
+private async _handleClick(event: any): Promise<void> {
+  if (!this.view) return;
 
-  this.closePopup();
-  this._suppressPopupUntil = Date.now() + 2000;
-
-  if (!this.graphicsEditor) {
-    await this.createEditor();
-  }
-
-  if (!this.graphicsEditor) {
-    console.error("[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor");
-    return;
-  }
-
-  // Cancel if SVM is busy
-  try {
-    const state = (this.graphicsEditor as any).state;
-    if (state === "active") {
-      this.graphicsEditor.cancel();
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  } catch { }
-
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this.enableInfoPopupWindow(false);
-
-  // Find source graphic in featureLayer by ID
-  const id =
-    graphic.attributes?.OBJECTID ??
-    graphic.attributes?._featureIndex ??
-    graphic.attributes?.[this.uniqueIdPropertyName] ??
-    0;
-
-  const sourceGraphic =
-    this.featureLayer?.graphics?.find((g: Graphic) => {
-      const gid =
-        g.attributes?.OBJECTID ?? g.attributes?._featureIndex ?? 0;
-      return String(gid) === String(id);
-    }) ?? graphic;
-
-  // Remove from featureLayer so it doesn't render double
-  try {
-    this.featureLayer?.graphics?.remove(sourceGraphic);
-  } catch { }
-
-  // Clone for sketchLayer
-  const editGraphic = sourceGraphic.clone();
-  if (!editGraphic.attributes) editGraphic.attributes = {};
-
-  const isCircle = this.isCircleGraphic(editGraphic);
-
-  if (isCircle) {
-    editGraphic.attributes.isCircle = true;
-    editGraphic.attributes.drawGeometryType = "circle";
-    editGraphic.attributes.shapeType = "circle";
-    editGraphic.attributes.shape = "circle";
-  }
-
-  // Assign symbol so edit handles appear
-  if (isCircle || editGraphic.geometry?.type === "polygon") {
-    editGraphic.symbol = {
-      type: "simple-fill",
-      style: "solid",
-      color: [0, 120, 255, 0.2],
-      outline: {
-        type: "simple-line",
-        color: [0, 120, 255, 1],
-        width: 2,
-        style: "solid",
-      },
-    } as any;
-  } else if (editGraphic.geometry?.type === "polyline") {
-    editGraphic.symbol = {
-      type: "simple-line",
-      color: [0, 120, 255, 1],
-      width: 3,
-      style: "solid",
-    } as any;
-  } else {
-    editGraphic.symbol = {
-      type: "simple-marker",
-      style: "circle",
-      size: 18,
-      color: [0, 120, 255, 1],
-      outline: {
-        type: "simple-line",
-        color: [255, 255, 255, 1],
-        width: 2,
-      },
-    } as any;
-  }
-
-  editGraphic.popupTemplate = null as any;
-
-  // Move to sketchLayer
-  this.sketchLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.add(editGraphic);
-
-  const tool = isCircle ? "transform" : this.resolveUpdateTool(editGraphic);
-
-  const updateOptions: any = isCircle
-    ? {
-        tool: "transform",
-        enableRotation: false,
-        enableScaling: true,
-        preserveAspectRatio: true,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      }
-    : {
-        tool,
-        enableRotation: this.enableUserEditRotating,
-        enableScaling: this.enableUserEditScaling,
-        preserveAspectRatio: this.enableUserEditUniformScaling,
-        enableMoveAllGraphics: false,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      };
-
-  console.log("[arc-geojson-layer] activateGraphicsEditor: calling SVM.update with options:", updateOptions);
-
-  // ✅ KEY FIX: Wait until sketchLayer confirms graphic is present
-  // before calling update() — replaces unreliable nativeSetTimeout approach
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      handle?.remove?.();
-      reject(new Error("[arc-geojson-layer] Timed out waiting for graphic in sketchLayer"));
-    }, 3000);
-
-    // Check if already present (synchronous add)
-    if (this.sketchLayer!.graphics.includes(editGraphic)) {
-      clearTimeout(timeout);
-      resolve();
-      return;
-    }
-
-    // Otherwise wait for the change event
-    const handle = this.sketchLayer!.graphics.on("change", (event: any) => {
-      const wasAdded = (event.added ?? []).some((g: any) => g === editGraphic);
-      if (wasAdded) {
-        clearTimeout(timeout);
-        handle.remove();
-        resolve();
-      }
-    });
+  // ✅ Only test against our layers — skip everything else
+  const hitResult = await this.view.hitTest(event, {
+    include: [this.featureLayer, this.sketchLayer].filter(Boolean)
   });
 
-  try {
-    await this.graphicsEditor.update([editGraphic], updateOptions);
-    console.log("[arc-geojson-layer] activateGraphicsEditor: SVM.update started successfully");
-  } catch (err: any) {
-    console.error("[arc-geojson-layer] activateGraphicsEditor: SVM.update failed", err);
-    // Rollback — put graphic back in featureLayer
-    this.sketchLayer?.graphics?.remove(editGraphic);
-    this.featureLayer?.graphics?.add(sourceGraphic);
-    this._editorOpen = false;
-    this.enableInfoPopupWindow(true);
+  const allResults = hitResult.results ?? [];
+  console.log("[up-geojson-layer] click: hitTest results:", allResults.length);
+
+  // Deduplicate by feature ID
+  const seen = new Set<string>();
+  const uniqueResults = allResults.filter((r: any) => {
+    const attrs = r.graphic?.attributes ?? {};
+    const id = String(
+      attrs.OBJECTID ?? attrs._featureIndex ??
+      attrs[this.uniqueIdPropertyName] ?? Math.random()
+    );
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  console.log("[up-geojson-layer] click: thisLayerResults:", uniqueResults.length);
+
+  if (uniqueResults.length === 0) {
+    this.closePopup();
+    return;
   }
+
+  const graphic = uniqueResults[0].graphic;
+  // ... rest of handler
 }
