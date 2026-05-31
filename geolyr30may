@@ -1,172 +1,291 @@
-private buildPopupTemplate(graphic: Graphic): PopupTemplate | null {
-  console.log("[up-geojson-layer] buildPopupTemplate called", {
-    hasInfoTemplate: !!this.infoTemplate,
-    infoTemplateKeys: this.infoTemplate ? Object.keys(this.infoTemplate) : [],
-    attributes: graphic?.attributes,
-  });
+public async startDrawing(drawGeometryType: string): Promise<void> {
+  await this.componentOnReady();
 
-  if (!this.infoTemplate || !graphic) {
-    console.warn("[up-geojson-layer] buildPopupTemplate: no infoTemplate or graphic");
-    return null;
+  this.featureLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.removeAll();
+  this.blockGeoJsonUpdate = true;
+  this.geojson = { type: "FeatureCollection", features: [] };
+  this.blockGeoJsonUpdate = false;
+
+  const normalizedType = String(
+    drawGeometryType ?? ""
+  ).toLowerCase();
+
+  await this.createEditor();
+
+  if (!this.graphicsEditor) {
+    console.error(
+      "[arc-geojson-layer] startDrawing: no graphicsEditor"
+    );
+    return;
   }
 
-  const attributes = graphic.attributes ?? {};
+  this._currentDrawGeometryType = normalizedType;
+  this.inDrawingMode = true;
+  this._isStartingDraw = true;
+  this._editorOpen = false;
+  this._lastCreatedByDrawing = true;
+  this._suppressPopupUntil = Date.now() + 1500;
+  this._activeVisibleType = normalizedType;
+  this.filterGraphicsByActiveType(normalizedType);
+  this.enableInfoPopupWindow(false);
+  this.closePopup();
 
-  // ── Token resolver (for plain string templates only) ──────────
-  const resolveTokens = (str: string): string => {
-    if (!str || typeof str !== "string") return str;
-    return str
-      .replace(/\$\{([^}]+)\}/g, (_, k) => {
-        const v = attributes[k.trim()];
-        return v == null ? "" : String(v);
-      });
+  try { this.graphicsEditor.cancel(); } catch { }
+
+  const sketchTool = this.normalizeSketchTool(normalizedType);
+
+  // Use native setTimeout to escape Angular zone
+  const win = window as any;
+  const nativeSetTimeout =
+    win.__zone_symbol__setTimeout ?? setTimeout;
+
+  await new Promise<void>((resolve) => {
+    nativeSetTimeout(() => {
+      try {
+        this.graphicsEditor!.create(sketchTool as any);
+        console.log(
+          "[arc-geojson-layer] startDrawing: create called for tool:", sketchTool
+        );
+      } catch (err) {
+        console.error(
+          "[arc-geojson-layer] startDrawing: create failed", err
+        );
+      }
+      resolve();
+    }, 0);
+  });
+}
+
+
+
+
+private async createEditor(): Promise<void> {
+  if (!this.view || !this.sketchLayer) return;
+  if (this.graphicsEditor) return;
+
+  // Run outside Angular zone to prevent change detection
+  // overhead on every SVM event
+  const createSVM = () => {
+    try {
+      this.graphicsEditor = new SketchViewModel({
+        view: this.view,
+        layer: this.sketchLayer,
+        defaultUpdateOptions: {
+          tool: "reshape",
+          multipleSelectionEnabled: false,
+          toggleToolOnClick: false,
+        } as any,
+        // Disable features that trigger Angular CD
+        updateOnGraphicClick: false,
+      } as any);
+
+      console.log(
+        "[arc-geojson-layer] createEditor: SVM created"
+      );
+    } catch (err) {
+      console.error(
+        "[arc-geojson-layer] createEditor: failed", err
+      );
+      this.graphicsEditor = undefined;
+      return;
+    }
+
+    this.bindEditorEvents();
   };
 
-  const tmpl: any =
-    typeof this.infoTemplate === "string"
-      ? (() => { try { return JSON.parse(this.infoTemplate as string); } catch { return { content: this.infoTemplate }; } })()
-      : this.infoTemplate;
+  // Use Promise to escape zone.js microtask queue
+  await new Promise<void>((resolve) => {
+    // setTimeout 0 runs outside Angular's current
+    // change detection cycle
+    const win = window as any;
+    const nativeSetTimeout =
+      win.__zone_symbol__setTimeout ?? setTimeout;
+    nativeSetTimeout(() => {
+      createSVM();
+      resolve();
+    }, 0);
+  });
+}
 
-  // ── Title ──────────────────────────────────────────────────────
-  const resolveTitle = (): string => {
-    const rawTitle =
-      tmpl?.title ?? tmpl?.Title ?? tmpl?.listTitle ??
-      tmpl?.listItem ?? tmpl?.heading ?? tmpl?.header ??
-      tmpl?.name ?? null;
-    console.log("[up-geojson-layer] buildPopupTemplate: rawTitle:", rawTitle);
-    if (rawTitle == null || rawTitle === undefined) return "Details";
-    if (typeof rawTitle === "function")
-      return String(rawTitle.call(tmpl, graphic) ?? "");
-    return resolveTokens(String(rawTitle));
-  };
+private async activateGraphicsEditor(
+  graphic: Graphic
+): Promise<void> {
+  if (!this.isUserEditEnabled() || !graphic?.geometry) return;
+
+  console.log(
+    "[arc-geojson-layer] activateGraphicsEditor: starting"
+  );
+
+  this.closePopup();
+  this._suppressPopupUntil = Date.now() + 2000;
+
+  if (!this.graphicsEditor) {
+    await this.createEditor();
+  }
+  if (!this.graphicsEditor) {
+    console.error(
+      "[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor"
+    );
+    return;
+  }
+
+  // Cancel if busy
+  try {
+    const state = (this.graphicsEditor as any).state;
+    console.log(
+      "[arc-geojson-layer] activateGraphicsEditor: SVM state:", state
+    );
+    if (state === "active") {
+      this.graphicsEditor.cancel();
+      // Use native setTimeout to avoid zone.js delay
+      const win = window as any;
+      const nativeSetTimeout =
+        win.__zone_symbol__setTimeout ?? setTimeout;
+      await new Promise<void>((r) =>
+        nativeSetTimeout(r, 50)
+      );
+    }
+  } catch { }
+
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this.enableInfoPopupWindow(false);
+
+  // Find source graphic in featureLayer
+  const id =
+    graphic.attributes?.OBJECTID ??
+    graphic.attributes?._featureIndex ??
+    graphic.attributes?.[this.uniqueIdPropertyName] ??
+    0;
+
+  const sourceGraphic =
+    this.featureLayer?.graphics?.find((g: Graphic) => {
+      const gid =
+        g.attributes?.OBJECTID ??
+        g.attributes?._featureIndex ??
+        0;
+      return String(gid) === String(id);
+    }) ?? graphic;
+
+  console.log(
+    "[arc-geojson-layer] activateGraphicsEditor: sourceGraphic found:", !!sourceGraphic
+  );
 
   try {
-    // ── Content ────────────────────────────────────────────────
-    const rawContent =
-      tmpl?.content ?? tmpl?.Content ?? tmpl?.details ??
-      tmpl?.body ?? tmpl?.description ?? tmpl?.template ?? null;
+    this.featureLayer?.graphics?.remove(sourceGraphic);
+  } catch { }
 
-    console.log("[up-geojson-layer] buildPopupTemplate: rawContent:", rawContent,
-      "typeof:", typeof rawContent);
+  const editGraphic = sourceGraphic.clone();
+  if (!editGraphic.attributes) editGraphic.attributes = {};
 
-    // No content key at all — skip popup
-    if (rawContent === null || rawContent === undefined) {
-      console.warn("[up-geojson-layer] buildPopupTemplate: no content key in infoTemplate — skipping popup");
-      return null;
-    }
+  const isCircle = this.isCircleGraphic(editGraphic);
 
-    let resolvedContent: any = null;
-
-    if (typeof rawContent === "function") {
-      // ✅ Function gets graphic directly — DO NOT run resolveTokens on result
-      // The function (InfoTemplateBuilderService) already interpolates its own values
-      const result = rawContent.call(tmpl, graphic);
-      console.log("[up-geojson-layer] buildPopupTemplate: content function result:",
-        result, "typeof:", typeof result);
-
-      if (typeof result === "string" && result.trim()) {
-        // ✅ KEY FIX: use result directly, no resolveTokens pass
-        resolvedContent = result;
-        console.log("[up-geojson-layer] buildPopupTemplate: content is string:", resolvedContent);
-      } else if (result instanceof HTMLElement || result instanceof Element) {
-        resolvedContent = result;
-        console.log("[up-geojson-layer] buildPopupTemplate: content is HTMLElement");
-      } else if (result !== null && result !== undefined && typeof result === "object") {
-        // Object returned from function — build fieldInfos from its keys
-        // Do NOT fall through to fieldInfos from graphic.attributes
-        console.log("[up-geojson-layer] buildPopupTemplate: content function returned object, keys:",
-          Object.keys(result));
-
-        const SKIP_CONTENT = new Set(["OBJECTID", "_featureIndex", "__isTemporaryDrawing",
-          "__labelFor", "_parentFeatureCollection"]);
-        const entries = Object.entries(result).filter(([k, v]) =>
-          !k.startsWith("_") && !SKIP_CONTENT.has(k) &&
-          v !== null && v !== undefined && String(v).trim() !== ""
-        );
-        console.log("[up-geojson-layer] buildPopupTemplate: object entries to display:", entries);
-
-        if (entries.length === 0) {
-          console.warn("[up-geojson-layer] buildPopupTemplate: content object has no valid entries — skipping");
-          return null;
-        }
-
-        const fieldInfos = entries.map(([k]) => ({
-          fieldName: k, label: k, visible: true,
-        }));
-
-        // Add matching values to graphic attributes so ArcGIS fieldInfos can find them
-        entries.forEach(([k, v]) => {
-          if (!(k in attributes)) { graphic.attributes[k] = v; }
-        });
-
-        console.log("[up-geojson-layer] buildPopupTemplate: fieldInfos from content object:", fieldInfos);
-
-        return new PopupTemplate({
-          title: resolveTitle(),
-          content: [{ type: "fields", fieldInfos }] as any,
-          actions: [] as any,
-        });
-      } else {
-        console.warn("[up-geojson-layer] buildPopupTemplate: content function returned null/undefined — skipping");
-        return null;
-      }
-
-    } else if (typeof rawContent === "string" && rawContent.trim()) {
-      resolvedContent = resolveTokens(rawContent);
-      console.log("[up-geojson-layer] buildPopupTemplate: content string resolved:", resolvedContent);
-
-    } else if (Array.isArray(rawContent) && rawContent.length > 0) {
-      resolvedContent = rawContent;
-      console.log("[up-geojson-layer] buildPopupTemplate: content is array");
-
-    } else if (typeof rawContent === "object" && rawContent !== null) {
-      resolvedContent = rawContent;
-      console.log("[up-geojson-layer] buildPopupTemplate: content is object");
-    }
-
-    if (!resolvedContent) {
-      console.warn("[up-geojson-layer] buildPopupTemplate: resolvedContent is empty — skipping");
-      return null;
-    }
-
-    // ── Build PopupTemplate with resolved content ──────────────
-    let popupTemplate: PopupTemplate;
-
-    if (typeof resolvedContent === "string") {
-      console.log("[up-geojson-layer] buildPopupTemplate: using string content");
-      popupTemplate = new PopupTemplate({
-        title: resolveTitle(),
-        content: resolvedContent,
-        actions: [] as any,
-      });
-    } else if (resolvedContent instanceof HTMLElement || resolvedContent instanceof Element) {
-      console.log("[up-geojson-layer] buildPopupTemplate: using HTMLElement content");
-      popupTemplate = new PopupTemplate({
-        title: resolveTitle(),
-        content: () => resolvedContent,
-        actions: [] as any,
-      } as any);
-    } else if (Array.isArray(resolvedContent) && resolvedContent.length > 0) {
-      console.log("[up-geojson-layer] buildPopupTemplate: using array content");
-      popupTemplate = new PopupTemplate({
-        title: resolveTitle(),
-        content: resolvedContent,
-        actions: [] as any,
-      });
-    } else {
-      console.log("[up-geojson-layer] buildPopupTemplate: using object content");
-      popupTemplate = new PopupTemplate({
-        title: resolveTitle(),
-        content: resolvedContent,
-        actions: [] as any,
-      });
-    }
-
-    console.log("[up-geojson-layer] buildPopupTemplate: final template:", popupTemplate);
-    return popupTemplate;
-
-  } catch (error) {
-    console.error("[up-geojson-layer] buildPopupTemplate failed:", error);
-    return null;
+  if (isCircle) {
+    editGraphic.attributes.isCircle = true;
+    editGraphic.attributes.drawGeometryType = "circle";
+    editGraphic.attributes.shapeType = "circle";
+    editGraphic.attributes.shape = "circle";
   }
+
+  // Assign symbol
+  if (isCircle || editGraphic.geometry?.type === "polygon") {
+    editGraphic.symbol = {
+      type: "simple-fill",
+      style: "solid",
+      color: [0, 120, 255, 0.2],
+      outline: {
+        type: "simple-line",
+        color: [0, 120, 255, 1],
+        width: 2,
+        style: "solid",
+      },
+    } as any;
+  } else if (editGraphic.geometry?.type === "polyline") {
+    editGraphic.symbol = {
+      type: "simple-line",
+      color: [0, 120, 255, 1],
+      width: 3,
+      style: "solid",
+    } as any;
+  } else {
+    editGraphic.symbol = {
+      type: "simple-marker",
+      style: "circle",
+      size: 18,
+      color: [0, 120, 255, 1],
+      outline: {
+        type: "simple-line",
+        color: [255, 255, 255, 1],
+        width: 2,
+      },
+    } as any;
+  }
+
+  editGraphic.popupTemplate = null as any;
+  this.sketchLayer?.graphics?.removeAll();
+  this.sketchLayer?.graphics?.add(editGraphic);
+
+  const updateOptions: any = isCircle
+    ? {
+        tool: "transform",
+        enableRotation: false,
+        enableScaling: true,
+        preserveAspectRatio: true,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      }
+    : {
+        tool: this.resolveUpdateTool(editGraphic),
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      };
+
+  console.log(
+    "[arc-geojson-layer] activateGraphicsEditor: calling SVM.update with options:", updateOptions
+  );
+
+  // Run SVM update outside Angular zone using native Promise
+  // and native setTimeout to avoid zone.js wrapping
+  const win = window as any;
+  const nativeSetTimeout =
+    win.__zone_symbol__setTimeout ?? setTimeout;
+  const nativePromise =
+    win.__zone_symbol__Promise ?? Promise;
+
+  await new nativePromise<void>(
+    (resolve: () => void, reject: (err: any) => void) => {
+      nativeSetTimeout(async () => {
+        try {
+          await this.graphicsEditor!.update(
+            [editGraphic],
+            updateOptions
+          );
+          console.log(
+            "[arc-geojson-layer] activateGraphicsEditor: SVM.update started successfully"
+          );
+          resolve();
+        } catch (err: any) {
+          console.error(
+            "[arc-geojson-layer] activateGraphicsEditor: SVM.update failed", err
+          );
+          reject(err);
+        }
+      }, 0);
+    }
+  ).catch((err: any) => {
+    console.error(
+      "[arc-geojson-layer] activateGraphicsEditor: failed", err
+    );
+    try {
+      this.sketchLayer?.graphics?.remove(editGraphic);
+    } catch { }
+    this.featureLayer?.graphics?.add(sourceGraphic);
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+  });
 }
