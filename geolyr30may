@@ -1,121 +1,7 @@
-public async startDrawing(drawGeometryType: string): Promise<void> {
-  await this.componentOnReady();
-
-  this.featureLayer?.graphics?.removeAll();
-  this.sketchLayer?.graphics?.removeAll();
-  this.blockGeoJsonUpdate = true;
-  this.geojson = { type: "FeatureCollection", features: [] };
-  this.blockGeoJsonUpdate = false;
-
-  const normalizedType = String(
-    drawGeometryType ?? ""
-  ).toLowerCase();
-
-  await this.createEditor();
-
-  if (!this.graphicsEditor) {
-    console.error(
-      "[arc-geojson-layer] startDrawing: no graphicsEditor"
-    );
+private async activateGraphicsEditor(graphic: Graphic): Promise<void> {
+  if (!this.isUserEditEnabled() || !graphic?.geometry) {
     return;
   }
-
-  this._currentDrawGeometryType = normalizedType;
-  this.inDrawingMode = true;
-  this._isStartingDraw = true;
-  this._editorOpen = false;
-  this._lastCreatedByDrawing = true;
-  this._suppressPopupUntil = Date.now() + 1500;
-  this._activeVisibleType = normalizedType;
-  this.filterGraphicsByActiveType(normalizedType);
-  this.enableInfoPopupWindow(false);
-  this.closePopup();
-
-  try { this.graphicsEditor.cancel(); } catch { }
-
-  const sketchTool = this.normalizeSketchTool(normalizedType);
-
-  // Use native setTimeout to escape Angular zone
-  const win = window as any;
-  const nativeSetTimeout =
-    win.__zone_symbol__setTimeout ?? setTimeout;
-
-  await new Promise<void>((resolve) => {
-    nativeSetTimeout(() => {
-      try {
-        this.graphicsEditor!.create(sketchTool as any);
-        console.log(
-          "[arc-geojson-layer] startDrawing: create called for tool:", sketchTool
-        );
-      } catch (err) {
-        console.error(
-          "[arc-geojson-layer] startDrawing: create failed", err
-        );
-      }
-      resolve();
-    }, 0);
-  });
-}
-
-
-
-
-private async createEditor(): Promise<void> {
-  if (!this.view || !this.sketchLayer) return;
-  if (this.graphicsEditor) return;
-
-  // Run outside Angular zone to prevent change detection
-  // overhead on every SVM event
-  const createSVM = () => {
-    try {
-      this.graphicsEditor = new SketchViewModel({
-        view: this.view,
-        layer: this.sketchLayer,
-        defaultUpdateOptions: {
-          tool: "reshape",
-          multipleSelectionEnabled: false,
-          toggleToolOnClick: false,
-        } as any,
-        // Disable features that trigger Angular CD
-        updateOnGraphicClick: false,
-      } as any);
-
-      console.log(
-        "[arc-geojson-layer] createEditor: SVM created"
-      );
-    } catch (err) {
-      console.error(
-        "[arc-geojson-layer] createEditor: failed", err
-      );
-      this.graphicsEditor = undefined;
-      return;
-    }
-
-    this.bindEditorEvents();
-  };
-
-  // Use Promise to escape zone.js microtask queue
-  await new Promise<void>((resolve) => {
-    // setTimeout 0 runs outside Angular's current
-    // change detection cycle
-    const win = window as any;
-    const nativeSetTimeout =
-      win.__zone_symbol__setTimeout ?? setTimeout;
-    nativeSetTimeout(() => {
-      createSVM();
-      resolve();
-    }, 0);
-  });
-}
-
-private async activateGraphicsEditor(
-  graphic: Graphic
-): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) return;
-
-  console.log(
-    "[arc-geojson-layer] activateGraphicsEditor: starting"
-  );
 
   this.closePopup();
   this._suppressPopupUntil = Date.now() + 2000;
@@ -123,28 +9,18 @@ private async activateGraphicsEditor(
   if (!this.graphicsEditor) {
     await this.createEditor();
   }
+
   if (!this.graphicsEditor) {
-    console.error(
-      "[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor"
-    );
+    console.error("[arc-geojson-layer] activateGraphicsEditor: no graphicsEditor");
     return;
   }
 
-  // Cancel if busy
+  // Cancel if SVM is busy
   try {
     const state = (this.graphicsEditor as any).state;
-    console.log(
-      "[arc-geojson-layer] activateGraphicsEditor: SVM state:", state
-    );
     if (state === "active") {
       this.graphicsEditor.cancel();
-      // Use native setTimeout to avoid zone.js delay
-      const win = window as any;
-      const nativeSetTimeout =
-        win.__zone_symbol__setTimeout ?? setTimeout;
-      await new Promise<void>((r) =>
-        nativeSetTimeout(r, 50)
-      );
+      await new Promise((r) => setTimeout(r, 100));
     }
   } catch { }
 
@@ -153,7 +29,7 @@ private async activateGraphicsEditor(
   this._isStartingDraw = false;
   this.enableInfoPopupWindow(false);
 
-  // Find source graphic in featureLayer
+  // Find source graphic in featureLayer by ID
   const id =
     graphic.attributes?.OBJECTID ??
     graphic.attributes?._featureIndex ??
@@ -163,20 +39,16 @@ private async activateGraphicsEditor(
   const sourceGraphic =
     this.featureLayer?.graphics?.find((g: Graphic) => {
       const gid =
-        g.attributes?.OBJECTID ??
-        g.attributes?._featureIndex ??
-        0;
+        g.attributes?.OBJECTID ?? g.attributes?._featureIndex ?? 0;
       return String(gid) === String(id);
     }) ?? graphic;
 
-  console.log(
-    "[arc-geojson-layer] activateGraphicsEditor: sourceGraphic found:", !!sourceGraphic
-  );
-
+  // Remove from featureLayer so it doesn't render double
   try {
     this.featureLayer?.graphics?.remove(sourceGraphic);
   } catch { }
 
+  // Clone for sketchLayer
   const editGraphic = sourceGraphic.clone();
   if (!editGraphic.attributes) editGraphic.attributes = {};
 
@@ -189,7 +61,7 @@ private async activateGraphicsEditor(
     editGraphic.attributes.shape = "circle";
   }
 
-  // Assign symbol
+  // Assign symbol so edit handles appear
   if (isCircle || editGraphic.geometry?.type === "polygon") {
     editGraphic.symbol = {
       type: "simple-fill",
@@ -224,8 +96,12 @@ private async activateGraphicsEditor(
   }
 
   editGraphic.popupTemplate = null as any;
+
+  // Move to sketchLayer
   this.sketchLayer?.graphics?.removeAll();
   this.sketchLayer?.graphics?.add(editGraphic);
+
+  const tool = isCircle ? "transform" : this.resolveUpdateTool(editGraphic);
 
   const updateOptions: any = isCircle
     ? {
@@ -237,55 +113,52 @@ private async activateGraphicsEditor(
         toggleToolOnClick: false,
       }
     : {
-        tool: this.resolveUpdateTool(editGraphic),
+        tool,
         enableRotation: this.enableUserEditRotating,
         enableScaling: this.enableUserEditScaling,
         preserveAspectRatio: this.enableUserEditUniformScaling,
+        enableMoveAllGraphics: false,
         multipleSelectionEnabled: false,
         toggleToolOnClick: false,
       };
 
-  console.log(
-    "[arc-geojson-layer] activateGraphicsEditor: calling SVM.update with options:", updateOptions
-  );
+  console.log("[arc-geojson-layer] activateGraphicsEditor: calling SVM.update with options:", updateOptions);
 
-  // Run SVM update outside Angular zone using native Promise
-  // and native setTimeout to avoid zone.js wrapping
-  const win = window as any;
-  const nativeSetTimeout =
-    win.__zone_symbol__setTimeout ?? setTimeout;
-  const nativePromise =
-    win.__zone_symbol__Promise ?? Promise;
+  // ✅ KEY FIX: Wait until sketchLayer confirms graphic is present
+  // before calling update() — replaces unreliable nativeSetTimeout approach
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      handle?.remove?.();
+      reject(new Error("[arc-geojson-layer] Timed out waiting for graphic in sketchLayer"));
+    }, 3000);
 
-  await new nativePromise<void>(
-    (resolve: () => void, reject: (err: any) => void) => {
-      nativeSetTimeout(async () => {
-        try {
-          await this.graphicsEditor!.update(
-            [editGraphic],
-            updateOptions
-          );
-          console.log(
-            "[arc-geojson-layer] activateGraphicsEditor: SVM.update started successfully"
-          );
-          resolve();
-        } catch (err: any) {
-          console.error(
-            "[arc-geojson-layer] activateGraphicsEditor: SVM.update failed", err
-          );
-          reject(err);
-        }
-      }, 0);
+    // Check if already present (synchronous add)
+    if (this.sketchLayer!.graphics.includes(editGraphic)) {
+      clearTimeout(timeout);
+      resolve();
+      return;
     }
-  ).catch((err: any) => {
-    console.error(
-      "[arc-geojson-layer] activateGraphicsEditor: failed", err
-    );
-    try {
-      this.sketchLayer?.graphics?.remove(editGraphic);
-    } catch { }
+
+    // Otherwise wait for the change event
+    const handle = this.sketchLayer!.graphics.on("change", (event: any) => {
+      const wasAdded = (event.added ?? []).some((g: any) => g === editGraphic);
+      if (wasAdded) {
+        clearTimeout(timeout);
+        handle.remove();
+        resolve();
+      }
+    });
+  });
+
+  try {
+    await this.graphicsEditor.update([editGraphic], updateOptions);
+    console.log("[arc-geojson-layer] activateGraphicsEditor: SVM.update started successfully");
+  } catch (err: any) {
+    console.error("[arc-geojson-layer] activateGraphicsEditor: SVM.update failed", err);
+    // Rollback — put graphic back in featureLayer
+    this.sketchLayer?.graphics?.remove(editGraphic);
     this.featureLayer?.graphics?.add(sourceGraphic);
     this._editorOpen = false;
     this.enableInfoPopupWindow(true);
-  });
+  }
 }
