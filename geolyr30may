@@ -1,144 +1,44 @@
-private async showGraphicPopup(
-  graphic: Graphic,
-  mapPoint?: any
-): Promise<void> {
-  // ✅ Guard — prevent multiple simultaneous popup opens
-  if (this._isOpeningPopup) {
-    console.warn("[up-geojson-layer] showGraphicPopup: already opening, skipped");
-    return;
-  }
-
-  if (!this.view || !graphic) return;
+const clickHandle = (view as any).on("click", async (evt: any) => {
+  // ✅ Guard flags — return early
+  if (this._isDoubleClick) return;
   if (this.inDrawingMode) return;
-  if (this._editorOpen) return;
+  if (this._isStartingDraw) return;
   if (Date.now() < this._suppressPopupUntil) return;
 
-  console.log("[up-geojson-layer] showGraphicPopup: starting");
-
-  const template = this.buildPopupTemplate(graphic);
-
-  if (!template) {
-    console.warn("[up-geojson-layer] showGraphicPopup: no template, skipping");
-    return;
-  }
-
-  // Build popup graphic with template
-  const popupGraphic = new Graphic({
-    geometry: graphic.geometry,
-    attributes: { ...(graphic.attributes ?? {}) },
-    popupTemplate: template,
-    symbol: graphic.symbol,
-  });
-
-  const location =
-    mapPoint ??
-    this.getPopupPoint(graphic.geometry) ??
-    undefined;
-
   try {
-    const popup = this.view?.popup;
-    if (!popup) return;
+    const hitResult = await this.view.hitTest(evt, {
+      include: [this.featureLayer, this.sketchLayer].filter(Boolean)
+    });
 
-    popup.autoOpenEnabled = false;
-    popup.highlightEnabled = false;
-    try { popup.actions?.removeAll?.(); } catch { }
+    const allResults = hitResult.results ?? [];
+    console.log("[up-geojson-layer] click: hitTest results:", allResults.length);
 
-    // ✅ Set BOTH flags BEFORE opening
-    this._isOpeningPopup = true;
-    this._popupOpen = true;
-
-    if (typeof (this.view as any).openPopup === "function") {
-      console.log("[up-geojson-layer] showGraphicPopup: using view.openPopup()");
-      (this.view as any).openPopup({
-        features: [popupGraphic],
-        location,
-        updateLocationEnabled: false,
-      });
-    } else {
-      popup.features = [popupGraphic];
-      popup.location = location;
-      (popup as any).open = true;
-      popup.visible = true;
+    if (allResults.length === 0) {
+      // ✅ Empty space click — close popup and RETURN
+      this.closePopup();
+      return; // ← MUST return here
     }
 
-    // ✅ Clear zoom action after ArcGIS settles
-    setTimeout(() => {
-      try { popup.actions?.removeAll?.(); } catch { }
-    }, 50);
+    const graphic = allResults[0].graphic;
 
-    // ✅ Release opening guard after ArcGIS fully settles
-    // 500ms is enough for ArcGIS internal flicker to complete
-    setTimeout(() => {
-      this._isOpeningPopup = false;
-      console.log("[up-geojson-layer] showGraphicPopup: _isOpeningPopup released");
-    }, 500);
+    // ✅ Edit mode — RETURN after activating
+    if (this.enableUserEdit && !this._editorOpen) {
+      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+        await this.removeFromGeoJSON(graphic);
+        return; // ← MUST return here
+      }
+      await this.activateGraphicsEditor(graphic);
+      return; // ← MUST return here
+    }
 
-    console.log("[up-geojson-layer] showGraphicPopup: popup opened");
+    // ✅ Popup mode — RETURN after showing
+    if (!this.enableUserEdit) {
+      await this.showGraphicPopup(graphic, evt.mapPoint);
+      return; // ← MUST return here
+    }
 
   } catch (err) {
-    console.error("[up-geojson-layer] showGraphicPopup failed:", err);
-    this._popupOpen = false;
+    console.error("[up-geojson-layer] click handler failed:", err);
     this._isOpeningPopup = false;
   }
-}
-
-public closePopup(): void {
-  console.log("[up-geojson-layer] closePopup called", {
-    popupOpen: this._popupOpen,
-    isOpeningPopup: this._isOpeningPopup,
-  });
-
-  // ✅ KEY FIX — never close while popup is opening
-  // This stops the blink caused by ArcGIS internal flicker
-  if (this._isOpeningPopup) {
-    console.warn("[up-geojson-layer] closePopup: skipped — popup is opening");
-    return;
-  }
-
-  this._popupOpen = false;
-
-  try {
-    const popup: any = this.view?.popup;
-    if (popup) {
-      try {
-        if (typeof popup.close === "function") {
-          popup.close();
-        } else {
-          popup.open = false;
-        }
-      } catch { }
-      try { popup.visible = false; } catch { }
-      try { popup.features = []; } catch { }
-    }
-  } catch { }
-
-  try { this._popupHighlightHandle?.remove?.(); } catch { }
-  this._popupHighlightHandle = null;
-
-  console.log("[up-geojson-layer] closePopup: done");
-}
-
-
-private setupPopupCloseWatcher(): void {
-  try {
-    this._popupVisibleWatchHandle?.remove?.();
-  } catch { }
-
-  if (!this.view?.popup) return;
-
-  this._popupVisibleWatchHandle = reactiveUtils.watch(
-    () => (this.view as any)?.popup?.visible,
-    (visible: boolean) => {
-      // ✅ Ignore flicker during open sequence
-      if (this._isOpeningPopup) return;
-
-      // ✅ Only act if we think popup is open but ArcGIS closed it
-      if (!visible && this._popupOpen) {
-        console.log("[up-geojson-layer] popup closed externally");
-        this._popupOpen = false;
-        this._popupHighlightHandle?.remove?.();
-        this._popupHighlightHandle = null;
-      }
-    }
-  );
-}
+});
