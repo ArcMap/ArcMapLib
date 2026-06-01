@@ -1,30 +1,10 @@
-const dblClickHandle = (view as any).on("double-click", async (evt: any) => {
-  evt.stopPropagation();
-  if (!this.enableUserEdit) return;
-  if (this.inDrawingMode) return;
-
-  // ✅ Set flag BEFORE hitTest so single click ignores itself
-  this._isDoubleClick = true;
-
-  const hitResult = await this.view.hitTest(evt, {
-    include: [this.featureLayer, this.sketchLayer].filter(Boolean)
-  });
-  const hit = hitResult.results?.[0];
-  if (!hit) {
-    this._isDoubleClick = false;
-    return;
-  }
-
-  // Cancel existing transform first
-  if (this._editorOpen) {
-    this.graphicsEditor?.cancel();
-    await new Promise(r => setTimeout(r, 80));
-  }
-
-  await this.activateGraphicsEditor(hit.graphic, "reshape");
-
-  // ✅ Reset flag after short delay
-  setTimeout(() => {
-    this._isDoubleClick = false;
-  }, 500);
-});
+// Mock reactiveUtils
+jest.mock('@arcgis/core/core/reactiveUtils', () => ({
+  __esModule: true,
+  default: {},
+  watch: jest.fn(),
+  when: jest.fn(),
+  whenOnce: jest.fn(),
+  once: jest.fn(),
+  on: jest.fn(),
+}));
