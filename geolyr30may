@@ -1,179 +1,144 @@
-private async activateGraphicsEditor(
+private async showGraphicPopup(
   graphic: Graphic,
-  forceTool?: "reshape"
+  mapPoint?: any
 ): Promise<void> {
-  if (!this.isUserEditEnabled() || !graphic?.geometry) return;
-
-  console.log("[up-geojson-layer] activateGraphicsEditor: called", {
-    geometryType: graphic.geometry?.type,
-    attributes: graphic.attributes,
-    forceTool,
-  });
-
-  // ✅ Step 1 — Clear stale graphics from sketchLayer immediately
-  this.sketchLayer?.graphics?.removeAll();
-
-  // ✅ Step 2 — Cancel SVM if already active
-  try {
-    const state = (this.graphicsEditor as any)?.state;
-    if (state === "active") {
-      this.graphicsEditor?.cancel();
-      await new Promise(r => setTimeout(r, 80));
-    }
-  } catch { }
-
-  // ✅ Step 3 — Set state flags
-  this._editorOpen = true;
-  this.inDrawingMode = false;
-  this._isStartingDraw = false;
-  this._isDoubleClick = false;
-  this._suppressPopupUntil = Date.now() + 2000;
-  this.enableInfoPopupWindow(false);
-  this.closePopup();
-
-  // ✅ Step 4 — Find source graphic in featureLayer by direct reference first
-  // then fall back to ID match
-  const sourceGraphic =
-    this.featureLayer?.graphics?.find((g: Graphic) => g === graphic) ??
-    (() => {
-      const id =
-        graphic.attributes?.OBJECTID ??
-        graphic.attributes?._featureIndex ??
-        graphic.attributes?.[this.uniqueIdPropertyName] ??
-        null;
-      if (id === null) return graphic;
-      return (
-        this.featureLayer?.graphics?.find((g: Graphic) => {
-          const gid =
-            g.attributes?.OBJECTID ??
-            g.attributes?._featureIndex ??
-            g.attributes?.[this.uniqueIdPropertyName];
-          return String(gid) === String(id);
-        }) ?? graphic
-      );
-    })();
-
-  // ✅ Step 5 — Remove from featureLayer so it doesn't double-render
-  try {
-    this.featureLayer?.graphics?.remove(sourceGraphic);
-  } catch { }
-
-  // ✅ Step 6 — Build fresh Graphic with no layer reference
-  // Do NOT use sourceGraphic.clone() — clone carries FeatureLayer
-  // reference and causes AbortError when layer is rebuilt
-  const freshGeometry = sourceGraphic.geometry?.clone();
-  if (!freshGeometry) {
-    // Rollback
-    this.featureLayer?.graphics?.add(sourceGraphic);
-    this._editorOpen = false;
-    this.enableInfoPopupWindow(true);
+  // ✅ Guard — prevent multiple simultaneous popup opens
+  if (this._isOpeningPopup) {
+    console.warn("[up-geojson-layer] showGraphicPopup: already opening, skipped");
     return;
   }
 
-  const editGraphic = new Graphic({
-    geometry: freshGeometry,
-    attributes: { ...(sourceGraphic.attributes ?? {}) },
-  });
-  editGraphic.popupTemplate = null as any;
+  if (!this.view || !graphic) return;
+  if (this.inDrawingMode) return;
+  if (this._editorOpen) return;
+  if (Date.now() < this._suppressPopupUntil) return;
 
-  // ✅ Step 7 — Assign correct symbol based on geometry type
-  const isCircle = this.isCircleGraphic(editGraphic);
+  console.log("[up-geojson-layer] showGraphicPopup: starting");
 
-  if (isCircle || editGraphic.geometry?.type === "polygon") {
-    editGraphic.symbol = {
-      type: "simple-fill",
-      style: "solid",
-      color: [0, 120, 255, 0.2],
-      outline: {
-        type: "simple-line",
-        color: [0, 120, 255, 1],
-        width: 2,
-        style: "solid",
-      },
-    } as any;
-  } else if (editGraphic.geometry?.type === "polyline") {
-    editGraphic.symbol = {
-      type: "simple-line",
-      color: [0, 120, 255, 1],
-      width: 3,
-      style: "solid",
-    } as any;
-  } else {
-    editGraphic.symbol = {
-      type: "simple-marker",
-      style: "circle",
-      size: 18,
-      color: [0, 120, 255, 1],
-      outline: {
-        type: "simple-line",
-        color: [255, 255, 255, 1],
-        width: 2,
-      },
-    } as any;
+  const template = this.buildPopupTemplate(graphic);
+
+  if (!template) {
+    console.warn("[up-geojson-layer] showGraphicPopup: no template, skipping");
+    return;
   }
 
-  // ✅ Step 8 — Add to sketchLayer
-  this.sketchLayer?.graphics?.add(editGraphic);
+  // Build popup graphic with template
+  const popupGraphic = new Graphic({
+    geometry: graphic.geometry,
+    attributes: { ...(graphic.attributes ?? {}) },
+    popupTemplate: template,
+    symbol: graphic.symbol,
+  });
 
-  // ✅ Step 9 — Build updateOptions
-  // Circles always use transform
-  // forceTool only applies to non-circles
-  const tool = isCircle ? "transform" : (forceTool ?? undefined);
+  const location =
+    mapPoint ??
+    this.getPopupPoint(graphic.geometry) ??
+    undefined;
 
-  const updateOptions: any = isCircle
-    ? {
-        tool: "transform",
-        enableRotation: false,
-        enableScaling: true,
-        preserveAspectRatio: true,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: false,
-      }
-    : {
-        ...(tool ? { tool } : {}),
-        enableRotation: this.enableUserEditRotating,
-        enableScaling: this.enableUserEditScaling,
-        preserveAspectRatio: this.enableUserEditUniformScaling,
-        enableMoveAllGraphics: false,
-        multipleSelectionEnabled: false,
-        toggleToolOnClick: true, // ← single click=transform, click again=reshape
-      };
+  try {
+    const popup = this.view?.popup;
+    if (!popup) return;
 
-  console.log("[up-geojson-layer] activateGraphicsEditor: calling SVM.update", updateOptions);
+    popup.autoOpenEnabled = false;
+    popup.highlightEnabled = false;
+    try { popup.actions?.removeAll?.(); } catch { }
 
-  // ✅ Step 10 — Wait until sketchLayer confirms graphic present
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      handle?.remove?.();
-      reject(new Error("[up-geojson-layer] Timed out waiting for graphic in sketchLayer"));
-    }, 3000);
+    // ✅ Set BOTH flags BEFORE opening
+    this._isOpeningPopup = true;
+    this._popupOpen = true;
 
-    if (this.sketchLayer!.graphics.includes(editGraphic)) {
-      clearTimeout(timeout);
-      resolve();
-      return;
+    if (typeof (this.view as any).openPopup === "function") {
+      console.log("[up-geojson-layer] showGraphicPopup: using view.openPopup()");
+      (this.view as any).openPopup({
+        features: [popupGraphic],
+        location,
+        updateLocationEnabled: false,
+      });
+    } else {
+      popup.features = [popupGraphic];
+      popup.location = location;
+      (popup as any).open = true;
+      popup.visible = true;
     }
 
-    const handle = this.sketchLayer!.graphics.on("change", (event: any) => {
-      const wasAdded = (event.added ?? []).some((g: any) => g === editGraphic);
-      if (wasAdded) {
-        clearTimeout(timeout);
-        handle.remove();
-        resolve();
-      }
-    });
+    // ✅ Clear zoom action after ArcGIS settles
+    setTimeout(() => {
+      try { popup.actions?.removeAll?.(); } catch { }
+    }, 50);
+
+    // ✅ Release opening guard after ArcGIS fully settles
+    // 500ms is enough for ArcGIS internal flicker to complete
+    setTimeout(() => {
+      this._isOpeningPopup = false;
+      console.log("[up-geojson-layer] showGraphicPopup: _isOpeningPopup released");
+    }, 500);
+
+    console.log("[up-geojson-layer] showGraphicPopup: popup opened");
+
+  } catch (err) {
+    console.error("[up-geojson-layer] showGraphicPopup failed:", err);
+    this._popupOpen = false;
+    this._isOpeningPopup = false;
+  }
+}
+
+public closePopup(): void {
+  console.log("[up-geojson-layer] closePopup called", {
+    popupOpen: this._popupOpen,
+    isOpeningPopup: this._isOpeningPopup,
   });
 
-  // ✅ Step 11 — Call SVM update
-  try {
-    await this.graphicsEditor.update([editGraphic], updateOptions);
-    console.log("[up-geojson-layer] activateGraphicsEditor: SVM.update started successfully");
-  } catch (err: any) {
-    console.error("[up-geojson-layer] activateGraphicsEditor: SVM.update failed", err);
-    // Rollback — put graphic back in featureLayer
-    this.sketchLayer?.graphics?.remove(editGraphic);
-    this.featureLayer?.graphics?.add(sourceGraphic);
-    this._editorOpen = false;
-    this.enableInfoPopupWindow(true);
+  // ✅ KEY FIX — never close while popup is opening
+  // This stops the blink caused by ArcGIS internal flicker
+  if (this._isOpeningPopup) {
+    console.warn("[up-geojson-layer] closePopup: skipped — popup is opening");
+    return;
   }
+
+  this._popupOpen = false;
+
+  try {
+    const popup: any = this.view?.popup;
+    if (popup) {
+      try {
+        if (typeof popup.close === "function") {
+          popup.close();
+        } else {
+          popup.open = false;
+        }
+      } catch { }
+      try { popup.visible = false; } catch { }
+      try { popup.features = []; } catch { }
+    }
+  } catch { }
+
+  try { this._popupHighlightHandle?.remove?.(); } catch { }
+  this._popupHighlightHandle = null;
+
+  console.log("[up-geojson-layer] closePopup: done");
+}
+
+
+private setupPopupCloseWatcher(): void {
+  try {
+    this._popupVisibleWatchHandle?.remove?.();
+  } catch { }
+
+  if (!this.view?.popup) return;
+
+  this._popupVisibleWatchHandle = reactiveUtils.watch(
+    () => (this.view as any)?.popup?.visible,
+    (visible: boolean) => {
+      // ✅ Ignore flicker during open sequence
+      if (this._isOpeningPopup) return;
+
+      // ✅ Only act if we think popup is open but ArcGIS closed it
+      if (!visible && this._popupOpen) {
+        console.log("[up-geojson-layer] popup closed externally");
+        this._popupOpen = false;
+        this._popupHighlightHandle?.remove?.();
+        this._popupHighlightHandle = null;
+      }
+    }
+  );
 }
