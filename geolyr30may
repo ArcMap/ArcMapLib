@@ -1,6 +1,26 @@
-// ✅ Disable ArcGIS auto popup globally — prevent duplicate popups
-if (this.view?.popup) {
-  (this.view as any).popup.autoOpenEnabled = false;
-  (this.view as any).popup.highlightEnabled = false;
-  (this.view as any).popup.dockEnabled = false;
+// Image 4 area — lines 1530-1554, replace both if blocks with:
+
+if (
+  this.enableUserEdit &&
+  !this._editorOpen &&
+  !this.inDrawingMode
+) {
+  // ✅ Edit mode — activate editor only
+  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
+    this.removeFromGeoJSON(topGraphic);
+    this.graphicsEditor?.cancel();
+    return;
+  }
+  await this.activateGraphicsEditor(topGraphic);
+  return; // ← MUST return, do not fall through to popup
+
+} else if (
+  !this._editorOpen &&
+  !this.inDrawingMode &&
+  !this._isStartingDraw &&
+  !this.shouldSuppressPopup()
+) {
+  // ✅ View-only mode — show popup only
+  this.showGraphicPopup(topGraphic, evt.mapPoint, thisLayerGraphics);
+  return;
 }
