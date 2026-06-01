@@ -1,10 +1,179 @@
-// Mock reactiveUtils
-jest.mock('@arcgis/core/core/reactiveUtils', () => ({
-  __esModule: true,
-  default: {},
-  watch: jest.fn(),
-  when: jest.fn(),
-  whenOnce: jest.fn(),
-  once: jest.fn(),
-  on: jest.fn(),
-}));
+private async activateGraphicsEditor(
+  graphic: Graphic,
+  forceTool?: "reshape"
+): Promise<void> {
+  if (!this.isUserEditEnabled() || !graphic?.geometry) return;
+
+  console.log("[up-geojson-layer] activateGraphicsEditor: called", {
+    geometryType: graphic.geometry?.type,
+    attributes: graphic.attributes,
+    forceTool,
+  });
+
+  // ✅ Step 1 — Clear stale graphics from sketchLayer immediately
+  this.sketchLayer?.graphics?.removeAll();
+
+  // ✅ Step 2 — Cancel SVM if already active
+  try {
+    const state = (this.graphicsEditor as any)?.state;
+    if (state === "active") {
+      this.graphicsEditor?.cancel();
+      await new Promise(r => setTimeout(r, 80));
+    }
+  } catch { }
+
+  // ✅ Step 3 — Set state flags
+  this._editorOpen = true;
+  this.inDrawingMode = false;
+  this._isStartingDraw = false;
+  this._isDoubleClick = false;
+  this._suppressPopupUntil = Date.now() + 2000;
+  this.enableInfoPopupWindow(false);
+  this.closePopup();
+
+  // ✅ Step 4 — Find source graphic in featureLayer by direct reference first
+  // then fall back to ID match
+  const sourceGraphic =
+    this.featureLayer?.graphics?.find((g: Graphic) => g === graphic) ??
+    (() => {
+      const id =
+        graphic.attributes?.OBJECTID ??
+        graphic.attributes?._featureIndex ??
+        graphic.attributes?.[this.uniqueIdPropertyName] ??
+        null;
+      if (id === null) return graphic;
+      return (
+        this.featureLayer?.graphics?.find((g: Graphic) => {
+          const gid =
+            g.attributes?.OBJECTID ??
+            g.attributes?._featureIndex ??
+            g.attributes?.[this.uniqueIdPropertyName];
+          return String(gid) === String(id);
+        }) ?? graphic
+      );
+    })();
+
+  // ✅ Step 5 — Remove from featureLayer so it doesn't double-render
+  try {
+    this.featureLayer?.graphics?.remove(sourceGraphic);
+  } catch { }
+
+  // ✅ Step 6 — Build fresh Graphic with no layer reference
+  // Do NOT use sourceGraphic.clone() — clone carries FeatureLayer
+  // reference and causes AbortError when layer is rebuilt
+  const freshGeometry = sourceGraphic.geometry?.clone();
+  if (!freshGeometry) {
+    // Rollback
+    this.featureLayer?.graphics?.add(sourceGraphic);
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+    return;
+  }
+
+  const editGraphic = new Graphic({
+    geometry: freshGeometry,
+    attributes: { ...(sourceGraphic.attributes ?? {}) },
+  });
+  editGraphic.popupTemplate = null as any;
+
+  // ✅ Step 7 — Assign correct symbol based on geometry type
+  const isCircle = this.isCircleGraphic(editGraphic);
+
+  if (isCircle || editGraphic.geometry?.type === "polygon") {
+    editGraphic.symbol = {
+      type: "simple-fill",
+      style: "solid",
+      color: [0, 120, 255, 0.2],
+      outline: {
+        type: "simple-line",
+        color: [0, 120, 255, 1],
+        width: 2,
+        style: "solid",
+      },
+    } as any;
+  } else if (editGraphic.geometry?.type === "polyline") {
+    editGraphic.symbol = {
+      type: "simple-line",
+      color: [0, 120, 255, 1],
+      width: 3,
+      style: "solid",
+    } as any;
+  } else {
+    editGraphic.symbol = {
+      type: "simple-marker",
+      style: "circle",
+      size: 18,
+      color: [0, 120, 255, 1],
+      outline: {
+        type: "simple-line",
+        color: [255, 255, 255, 1],
+        width: 2,
+      },
+    } as any;
+  }
+
+  // ✅ Step 8 — Add to sketchLayer
+  this.sketchLayer?.graphics?.add(editGraphic);
+
+  // ✅ Step 9 — Build updateOptions
+  // Circles always use transform
+  // forceTool only applies to non-circles
+  const tool = isCircle ? "transform" : (forceTool ?? undefined);
+
+  const updateOptions: any = isCircle
+    ? {
+        tool: "transform",
+        enableRotation: false,
+        enableScaling: true,
+        preserveAspectRatio: true,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: false,
+      }
+    : {
+        ...(tool ? { tool } : {}),
+        enableRotation: this.enableUserEditRotating,
+        enableScaling: this.enableUserEditScaling,
+        preserveAspectRatio: this.enableUserEditUniformScaling,
+        enableMoveAllGraphics: false,
+        multipleSelectionEnabled: false,
+        toggleToolOnClick: true, // ← single click=transform, click again=reshape
+      };
+
+  console.log("[up-geojson-layer] activateGraphicsEditor: calling SVM.update", updateOptions);
+
+  // ✅ Step 10 — Wait until sketchLayer confirms graphic present
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      handle?.remove?.();
+      reject(new Error("[up-geojson-layer] Timed out waiting for graphic in sketchLayer"));
+    }, 3000);
+
+    if (this.sketchLayer!.graphics.includes(editGraphic)) {
+      clearTimeout(timeout);
+      resolve();
+      return;
+    }
+
+    const handle = this.sketchLayer!.graphics.on("change", (event: any) => {
+      const wasAdded = (event.added ?? []).some((g: any) => g === editGraphic);
+      if (wasAdded) {
+        clearTimeout(timeout);
+        handle.remove();
+        resolve();
+      }
+    });
+  });
+
+  // ✅ Step 11 — Call SVM update
+  try {
+    await this.graphicsEditor.update([editGraphic], updateOptions);
+    console.log("[up-geojson-layer] activateGraphicsEditor: SVM.update started successfully");
+  } catch (err: any) {
+    console.error("[up-geojson-layer] activateGraphicsEditor: SVM.update failed", err);
+    // Rollback — put graphic back in featureLayer
+    this.sketchLayer?.graphics?.remove(editGraphic);
+    this.featureLayer?.graphics?.add(sourceGraphic);
+    this._editorOpen = false;
+    this.enableInfoPopupWindow(true);
+  }
+}
