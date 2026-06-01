@@ -1,26 +1,98 @@
-// Image 4 area — lines 1530-1554, replace both if blocks with:
+// ── Add these variables at the top of bindViewEvents ──────────────
+let isHovered = false;
+let pointerMoveThrottle: any = null;
+let lastHoveredGraphic: Graphic | null = null;
+const viewContainer = (view as any).container as HTMLElement;
 
-if (
-  this.enableUserEdit &&
-  !this._editorOpen &&
-  !this.inDrawingMode
-) {
-  // ✅ Edit mode — activate editor only
-  if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-    this.removeFromGeoJSON(topGraphic);
-    this.graphicsEditor?.cancel();
-    return;
-  }
-  await this.activateGraphicsEditor(topGraphic);
-  return; // ← MUST return, do not fall through to popup
+// ── POINTER-MOVE — mouse over / mouse out ──────────────────────────
+const pointerMoveHandle = (view as any).on("pointer-move", (evt: any) => {
+  if (pointerMoveThrottle) return;
 
-} else if (
-  !this._editorOpen &&
-  !this.inDrawingMode &&
-  !this._isStartingDraw &&
-  !this.shouldSuppressPopup()
-) {
-  // ✅ View-only mode — show popup only
-  this.showGraphicPopup(topGraphic, evt.mapPoint, thisLayerGraphics);
-  return;
+  pointerMoveThrottle = setTimeout(async () => {
+    pointerMoveThrottle = null;
+
+    // Skip during drawing or editing
+    if (this.inDrawingMode || this._editorOpen) {
+      if (viewContainer) viewContainer.style.cursor = "default";
+      return;
+    }
+
+    try {
+      const hitResult = await (view as any).hitTest(evt, {
+        include: [this.featureLayer].filter(Boolean)
+      });
+
+      const hit = hitResult.results?.find(
+        (r: any) => r.graphic?.layer === this.featureLayer
+      );
+
+      if (hit) {
+        const graphic = hit.graphic as Graphic;
+
+        if (!isHovered) {
+          isHovered = true;
+          lastHoveredGraphic = graphic;
+
+          // ✅ Set pointer cursor
+          if (viewContainer) viewContainer.style.cursor = "pointer";
+
+          // ✅ Emit layerMouseOver
+          this.emitLayerEvent(
+            "layerMouseOver",
+            this.graphicToGeoJsonFeature(graphic),
+            graphic,
+            {
+              event: {
+                coordinates: {
+                  latitude: evt.mapPoint?.latitude ?? 0,
+                  longitude: evt.mapPoint?.longitude ?? 0,
+                },
+                attributes: graphic.attributes ?? {},
+              },
+            }
+          );
+        }
+
+      } else if (!hit && isHovered) {
+        isHovered = false;
+
+        // ✅ Reset cursor
+        if (viewContainer) viewContainer.style.cursor = "default";
+
+        // ✅ Emit layerMouseOut
+        this.emitLayerEvent(
+          "layerMouseOut",
+          lastHoveredGraphic
+            ? this.graphicToGeoJsonFeature(lastHoveredGraphic)
+            : null,
+          lastHoveredGraphic ?? undefined,
+          {
+            event: {
+              coordinates: {},
+              attributes: lastHoveredGraphic?.attributes ?? {},
+            },
+          }
+        );
+
+        lastHoveredGraphic = null;
+      }
+    } catch { }
+  }, 80); // ← 80ms throttle — fast enough to feel responsive
+});
+
+this.eventHandles.push(pointerMoveHandle);
+
+
+
+
+
+private cleanupViewEvents(): void {
+  this.eventHandles.forEach((h: any) => { try { h?.remove?.(); } catch { } });
+  this.eventHandles = [];
+
+  // ✅ Always reset cursor on cleanup
+  try {
+    const container = (this.view as any)?.container as HTMLElement;
+    if (container) container.style.cursor = "default";
+  } catch { }
 }
