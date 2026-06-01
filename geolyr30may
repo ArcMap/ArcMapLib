@@ -1,44 +1,6 @@
-const clickHandle = (view as any).on("click", async (evt: any) => {
-  // ✅ Guard flags — return early
-  if (this._isDoubleClick) return;
-  if (this.inDrawingMode) return;
-  if (this._isStartingDraw) return;
-  if (Date.now() < this._suppressPopupUntil) return;
-
-  try {
-    const hitResult = await this.view.hitTest(evt, {
-      include: [this.featureLayer, this.sketchLayer].filter(Boolean)
-    });
-
-    const allResults = hitResult.results ?? [];
-    console.log("[up-geojson-layer] click: hitTest results:", allResults.length);
-
-    if (allResults.length === 0) {
-      // ✅ Empty space click — close popup and RETURN
-      this.closePopup();
-      return; // ← MUST return here
-    }
-
-    const graphic = allResults[0].graphic;
-
-    // ✅ Edit mode — RETURN after activating
-    if (this.enableUserEdit && !this._editorOpen) {
-      if (evt.native?.ctrlKey && this.enableUserEditRemove) {
-        await this.removeFromGeoJSON(graphic);
-        return; // ← MUST return here
-      }
-      await this.activateGraphicsEditor(graphic);
-      return; // ← MUST return here
-    }
-
-    // ✅ Popup mode — RETURN after showing
-    if (!this.enableUserEdit) {
-      await this.showGraphicPopup(graphic, evt.mapPoint);
-      return; // ← MUST return here
-    }
-
-  } catch (err) {
-    console.error("[up-geojson-layer] click handler failed:", err);
-    this._isOpeningPopup = false;
-  }
-});
+// ✅ Disable ArcGIS auto popup globally — prevent duplicate popups
+if (this.view?.popup) {
+  (this.view as any).popup.autoOpenEnabled = false;
+  (this.view as any).popup.highlightEnabled = false;
+  (this.view as any).popup.dockEnabled = false;
+}
