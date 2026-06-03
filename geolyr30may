@@ -16,7 +16,6 @@ static getColorFromClass(
   }
 
   try {
-    // ✅ Create SVG element — needed for stroke/fill CSS properties
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
     const rect = document.createElementNS(ns, "rect");
@@ -25,23 +24,35 @@ static getColorFromClass(
     svg.style.visibility = "hidden";
     svg.style.pointerEvents = "none";
 
-    // ✅ Append to host element so ::ng-deep styles are in scope
     const target = hostElement ?? document.body;
     target.appendChild(svg);
     svg.appendChild(rect);
 
-    const computed = getComputedStyle(rect);
+    const rectComputed = getComputedStyle(rect);
+    const svgComputed = getComputedStyle(svg);
 
-    const fillStr = computed.getPropertyValue("fill").trim();
-    const strokeStr = computed.getPropertyValue("stroke").trim();
-    const opacityStr = computed.getPropertyValue("opacity").trim();
-    const fillOpacityStr = computed.getPropertyValue("fill-opacity").trim();
+    const fillStr = rectComputed.getPropertyValue("fill").trim();
+    const strokeStr = rectComputed.getPropertyValue("stroke").trim();
+    const opacityStr =
+      rectComputed.getPropertyValue("opacity").trim() ||
+      rectComputed.getPropertyValue("fill-opacity").trim() ||
+      svgComputed.getPropertyValue("opacity").trim() ||
+      "";
+    const fillOpacityStr = rectComputed
+      .getPropertyValue("fill-opacity").trim();
+
+    console.log("[getColorFromClass] className:", className);
+    console.log("[getColorFromClass] fillStr:", fillStr);
+    console.log("[getColorFromClass] strokeStr:", strokeStr);
+    console.log("[getColorFromClass] opacityStr:", opacityStr);
+    console.log("[getColorFromClass] fillOpacityStr:", fillOpacityStr);
 
     target.removeChild(svg);
 
     // ── Parse fill ─────────────────────────────────────────
     let fillRgb = [0, 120, 255];
-    if (fillStr && fillStr !== "none" && fillStr !== "rgba(0, 0, 0, 0)") {
+    if (fillStr && fillStr !== "none" &&
+      fillStr !== "rgba(0, 0, 0, 0)") {
       const m = fillStr.match(/\d+(\.\d+)?/g);
       if (m && m.length >= 3) {
         fillRgb = [+m[0], +m[1], +m[2]];
@@ -55,9 +66,12 @@ static getColorFromClass(
       }
     }
 
+    console.log("[getColorFromClass] fillRgb:", fillRgb);
+
     // ── Parse stroke ───────────────────────────────────────
-    let strokeRgb = fillRgb; // default stroke = fill color
-    if (strokeStr && strokeStr !== "none" && strokeStr !== "rgba(0, 0, 0, 0)") {
+    let strokeRgb = fillRgb;
+    if (strokeStr && strokeStr !== "none" &&
+      strokeStr !== "rgba(0, 0, 0, 0)") {
       const m = strokeStr.match(/\d+(\.\d+)?/g);
       if (m && m.length >= 3) {
         strokeRgb = [+m[0], +m[1], +m[2]];
@@ -71,20 +85,23 @@ static getColorFromClass(
       }
     }
 
+    console.log("[getColorFromClass] strokeRgb:", strokeRgb);
+
     // ── Parse opacity ──────────────────────────────────────
-    // Priority: fill-opacity > opacity > default 1
     let opacity = defaultOpacity;
     if (fillOpacityStr && fillOpacityStr !== "") {
       opacity = parseFloat(fillOpacityStr);
     } else if (opacityStr && opacityStr !== "") {
       opacity = parseFloat(opacityStr);
     }
-    // Clamp between 0 and 1
     opacity = Math.min(1, Math.max(0, isNaN(opacity) ? 1 : opacity));
 
+    console.log("[getColorFromClass] opacity:", opacity);
+
     // ✅ Bake opacity into fill alpha
-    // opacity: 0.25 → alpha: 64 (0.25 * 255)
     const fillAlpha = Math.round(opacity * 255);
+
+    console.log("[getColorFromClass] fillAlpha:", fillAlpha);
 
     const fill = JsonUtils.normalizeColor(
       [fillRgb[0], fillRgb[1], fillRgb[2], fillAlpha],
@@ -92,13 +109,17 @@ static getColorFromClass(
     );
 
     const stroke = JsonUtils.normalizeColor(
-      [strokeRgb[0], strokeRgb[1], strokeRgb[2], 255], // stroke always full opacity
+      [strokeRgb[0], strokeRgb[1], strokeRgb[2], 255],
       defaultStroke
     );
 
+    console.log("[getColorFromClass] final fill:", fill);
+    console.log("[getColorFromClass] final stroke:", stroke);
+
     return { fill, stroke, opacity };
 
-  } catch {
+  } catch (e) {
+    console.error("[getColorFromClass] error:", e);
     return {
       fill: defaultFill,
       stroke: defaultStroke,
