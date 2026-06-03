@@ -1,98 +1,19 @@
-// ── Add these variables at the top of bindViewEvents ──────────────
-let isHovered = false;
-let pointerMoveThrottle: any = null;
-let lastHoveredGraphic: Graphic | null = null;
-const viewContainer = (view as any).container as HTMLElement;
-
-// ── POINTER-MOVE — mouse over / mouse out ──────────────────────────
-const pointerMoveHandle = (view as any).on("pointer-move", (evt: any) => {
-  if (pointerMoveThrottle) return;
-
-  pointerMoveThrottle = setTimeout(async () => {
-    pointerMoveThrottle = null;
-
-    // Skip during drawing or editing
-    if (this.inDrawingMode || this._editorOpen) {
-      if (viewContainer) viewContainer.style.cursor = "default";
-      return;
-    }
-
-    try {
-      const hitResult = await (view as any).hitTest(evt, {
-        include: [this.featureLayer].filter(Boolean)
-      });
-
-      const hit = hitResult.results?.find(
-        (r: any) => r.graphic?.layer === this.featureLayer
-      );
-
-      if (hit) {
-        const graphic = hit.graphic as Graphic;
-
-        if (!isHovered) {
-          isHovered = true;
-          lastHoveredGraphic = graphic;
-
-          // ✅ Set pointer cursor
-          if (viewContainer) viewContainer.style.cursor = "pointer";
-
-          // ✅ Emit layerMouseOver
-          this.emitLayerEvent(
-            "layerMouseOver",
-            this.graphicToGeoJsonFeature(graphic),
-            graphic,
-            {
-              event: {
-                coordinates: {
-                  latitude: evt.mapPoint?.latitude ?? 0,
-                  longitude: evt.mapPoint?.longitude ?? 0,
-                },
-                attributes: graphic.attributes ?? {},
-              },
-            }
-          );
-        }
-
-      } else if (!hit && isHovered) {
-        isHovered = false;
-
-        // ✅ Reset cursor
-        if (viewContainer) viewContainer.style.cursor = "default";
-
-        // ✅ Emit layerMouseOut
-        this.emitLayerEvent(
-          "layerMouseOut",
-          lastHoveredGraphic
-            ? this.graphicToGeoJsonFeature(lastHoveredGraphic)
-            : null,
-          lastHoveredGraphic ?? undefined,
-          {
-            event: {
-              coordinates: {},
-              attributes: lastHoveredGraphic?.attributes ?? {},
-            },
-          }
-        );
-
-        lastHoveredGraphic = null;
-      }
-    } catch { }
-  }, 80); // ← 80ms throttle — fast enough to feel responsive
-});
-
-this.eventHandles.push(pointerMoveHandle);
-
-
-
-
-
-private cleanupViewEvents(): void {
-  this.eventHandles.forEach((h: any) => { try { h?.remove?.(); } catch { } });
-  this.eventHandles = [];
-
-  // ✅ Always reset cursor on cleanup
+// In updated() — react to layerClass changes
+if (changedProps.has('layerClass') && this.featureLayer) {
+  // ✅ Set on the featureLayer's internal container
   try {
-    const container = (this.view as any)?.container as HTMLElement;
-    if (container) container.style.cursor = "default";
+    (this.featureLayer as any).className = this.layerClass;
   } catch { }
+
+  // ✅ Also reapply symbols using CSS color
+  const color = JsonUtils.getColorFromClass(this.layerClass);
+  this.featureLayer?.graphics?.forEach((g: Graphic) => {
+    g.symbol = this.getDefaultSymbolForGeometry(g.geometry) as any;
+  });
 }
+
+
+
+const baseColor = this.layerClass
+  ? JsonUtils.getColorFromClass(this.layerClass)
+  : [0, 120, 255, 255];
