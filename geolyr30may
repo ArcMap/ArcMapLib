@@ -10,12 +10,16 @@ static getColorFromClass(className: string): number[] {
 
     const computed = getComputedStyle(el);
 
-    // Try multiple CSS properties in order
+    // ✅ Try SVG properties first (stroke, fill)
+    // then fallback to standard CSS properties
+    const strokeStr = computed.getPropertyValue("stroke").trim();
+    const fillStr = computed.getPropertyValue("fill").trim();
     const colorStr =
       computed.getPropertyValue("--layer-color").trim() ||
+      (fillStr && fillStr !== "none" && fillStr !== "rgba(0, 0, 0, 0)" ? fillStr : "") ||
+      (strokeStr && strokeStr !== "none" ? strokeStr : "") ||
       computed.backgroundColor ||
       computed.color ||
-      computed.borderColor ||
       "";
 
     document.body.removeChild(el);
@@ -24,16 +28,63 @@ static getColorFromClass(className: string): number[] {
       return fallback;
     }
 
-    // ✅ Parse rgb string into array
     const m = colorStr.match(/\d+(\.\d+)?/g);
     if (!m || m.length < 3) return fallback;
 
     const raw = [+m[0], +m[1], +m[2], m[3] ? +m[3] : 1];
-
-    // ✅ Use existing normalizeColor instead of manual conversion
     return JsonUtils.normalizeColor(raw, fallback);
 
   } catch {
     return fallback;
   }
 }
+
+
+static getStrokeFromClass(className: string): number[] {
+  const fallback = [0, 120, 255, 255];
+  if (!className) return fallback;
+
+  try {
+    const el = document.createElement("div");
+    el.className = className;
+    el.style.display = "none";
+    document.body.appendChild(el);
+
+    const computed = getComputedStyle(el);
+    const strokeStr = computed.getPropertyValue("stroke").trim();
+    document.body.removeChild(el);
+
+    if (!strokeStr || strokeStr === "none") return fallback;
+
+    const m = strokeStr.match(/\d+(\.\d+)?/g);
+    if (!m || m.length < 3) return fallback;
+
+    const raw = [+m[0], +m[1], +m[2], m[3] ? +m[3] : 1];
+    return JsonUtils.normalizeColor(raw, fallback);
+
+  } catch {
+    return fallback;
+  }
+}
+
+
+const [r, g, b] = this.layerClass
+  ? JsonUtils.getColorFromClass(this.layerClass)   // fill color
+  : [0, 120, 255, 255];
+
+const [sr, sg, sb] = this.layerClass
+  ? JsonUtils.getStrokeFromClass(this.layerClass)  // stroke color
+  : [0, 120, 255, 255];
+
+// Polygon
+return {
+  type: "simple-fill",
+  style: "solid",
+  color: [r, g, b, 0.15],
+  outline: {
+    type: "simple-line",
+    style: "solid",
+    color: [sr, sg, sb, 0.4],  // ✅ uses stroke color
+    width: 0.5,
+  },
+};
