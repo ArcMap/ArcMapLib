@@ -69,3 +69,32 @@ private getDefaultSymbolForGeometry(geometry: any): any {
 
   return null;
 }
+
+
+
+static getColorFromClass(className: string): number[] {
+  if (!className) return [0, 120, 255, 1];
+  try {
+    const el = document.createElement("div");
+    el.className = className;
+    el.style.display = "none";
+    document.body.appendChild(el);
+
+    // ✅ Get CSS color string e.g. "rgb(255, 50, 50)"
+    const colorString = getComputedStyle(el).color;
+    document.body.removeChild(el);
+
+    // ✅ Parse rgb(r, g, b) into array
+    const m = colorString.match(/\d+/g);
+    if (!m || m.length < 3) return [0, 120, 255, 1];
+
+    const raw = [+m[0], +m[1], +m[2], m[3] ? +m[3] : 255];
+
+    // ✅ Pass through existing normalizeColor — reuse existing logic
+    return JsonUtils.normalizeColor(raw, [0, 120, 255, 1]);
+
+  } catch {
+    return [0, 120, 255, 1];
+  }
+}
+
