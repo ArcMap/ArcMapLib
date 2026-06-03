@@ -1,17 +1,20 @@
+// ── json-utils.ts ─────────────────────────────────────────────────
 static getColorFromClass(
   className: string,
   hostElement?: HTMLElement
-): { fill: number[]; stroke: number[]; opacity: number } {
+): { fill: number[]; stroke: number[]; opacity: number; strokeWidth: number } {
 
   const defaultFill = [0, 120, 255, 255];
   const defaultStroke = [0, 120, 255, 255];
   const defaultOpacity = 1;
+  const defaultStrokeWidth = 2;
 
   if (!className) {
     return {
       fill: defaultFill,
       stroke: defaultStroke,
       opacity: defaultOpacity,
+      strokeWidth: defaultStrokeWidth,
     };
   }
 
@@ -34,6 +37,8 @@ static getColorFromClass(
 
     const fillStr = rectComputed.getPropertyValue("fill").trim();
     const strokeStr = rectComputed.getPropertyValue("stroke").trim();
+    const strokeWidthStr = rectComputed
+      .getPropertyValue("stroke-width").trim();
     const opacityStr =
       rectComputed.getPropertyValue("opacity").trim() ||
       svgComputed.getPropertyValue("opacity").trim() ||
@@ -44,66 +49,65 @@ static getColorFromClass(
     console.log("[getColorFromClass] className:", className);
     console.log("[getColorFromClass] fillStr:", fillStr);
     console.log("[getColorFromClass] strokeStr:", strokeStr);
+    console.log("[getColorFromClass] strokeWidthStr:", strokeWidthStr);
     console.log("[getColorFromClass] opacityStr:", opacityStr);
     console.log("[getColorFromClass] fillOpacityStr:", fillOpacityStr);
 
     target.removeChild(svg);
 
-    // ── Parse fill ─────────────────────────────────────────
-    let fillRgb = [0, 120, 255];
-    if (fillStr && fillStr !== "none" &&
-      fillStr !== "rgba(0, 0, 0, 0)") {
-      const m = fillStr.match(/\d+(\.\d+)?/g);
-      if (m && m.length >= 3) {
-        fillRgb = [+m[0], +m[1], +m[2]];
-      } else if (fillStr.startsWith("#")) {
-        const hex = fillStr.replace("#", "");
-        fillRgb = [
+    // ── Helper to parse color string ───────────────────────
+    const parseColorStr = (str: string): number[] | null => {
+      if (!str || str === "none" || str === "rgba(0, 0, 0, 0)") {
+        return null;
+      }
+      if (str.startsWith("#")) {
+        const hex = str.replace("#", "");
+        return [
           parseInt(hex.substring(0, 2), 16),
           parseInt(hex.substring(2, 4), 16),
           parseInt(hex.substring(4, 6), 16),
         ];
       }
-    }
+      const m = str.match(/\d+(\.\d+)?/g);
+      if (m && m.length >= 3) {
+        return [+m[0], +m[1], +m[2]];
+      }
+      return null;
+    };
+
+    // ── Parse fill and stroke ──────────────────────────────
+    const parsedFill = parseColorStr(fillStr);
+    const parsedStroke = parseColorStr(strokeStr);
+
+    // ✅ If fill is none — use stroke as primary color
+    // If both present — fill is primary, stroke is border
+    // If only stroke — use stroke for both
+    const fillRgb = parsedFill ?? parsedStroke ?? [0, 120, 255];
+    const strokeRgb = parsedStroke ?? parsedFill ?? [0, 120, 255];
 
     console.log("[getColorFromClass] fillRgb:", fillRgb);
-
-    // ── Parse stroke ───────────────────────────────────────
-    let strokeRgb = fillRgb;
-    if (strokeStr && strokeStr !== "none" &&
-      strokeStr !== "rgba(0, 0, 0, 0)") {
-      const m = strokeStr.match(/\d+(\.\d+)?/g);
-      if (m && m.length >= 3) {
-        strokeRgb = [+m[0], +m[1], +m[2]];
-      } else if (strokeStr.startsWith("#")) {
-        const hex = strokeStr.replace("#", "");
-        strokeRgb = [
-          parseInt(hex.substring(0, 2), 16),
-          parseInt(hex.substring(2, 4), 16),
-          parseInt(hex.substring(4, 6), 16),
-        ];
-      }
-    }
-
     console.log("[getColorFromClass] strokeRgb:", strokeRgb);
+
+    // ── Parse stroke width ─────────────────────────────────
+    const strokeWidth = parseFloat(strokeWidthStr) || defaultStrokeWidth;
+    console.log("[getColorFromClass] strokeWidth:", strokeWidth);
 
     // ── Parse opacity ──────────────────────────────────────
     // ✅ KEY FIX — fillOpacityStr is always "1" by SVG default
-    // so we must prefer opacityStr when it is explicitly set
-    // and not equal to 1
+    // prefer opacityStr when explicitly set and not equal to 1
     let opacity = defaultOpacity;
 
     const fillOpacityVal = parseFloat(fillOpacityStr);
     const opacityVal = parseFloat(opacityStr);
 
     if (!isNaN(opacityVal) && opacityVal !== 1) {
-      // ✅ explicit opacity set — use it
+      // explicit opacity set — use it
       opacity = opacityVal;
     } else if (!isNaN(fillOpacityVal) && fillOpacityVal !== 1) {
-      // ✅ explicit fill-opacity set and not default — use it
+      // explicit fill-opacity set and not default — use it
       opacity = fillOpacityVal;
     } else if (!isNaN(opacityVal)) {
-      // ✅ fallback — use opacity even if 1
+      // fallback — use opacity even if 1
       opacity = opacityVal;
     }
 
@@ -114,7 +118,6 @@ static getColorFromClass(
 
     // ✅ Bake opacity into fill alpha
     const fillAlpha = Math.round(opacity * 255);
-
     console.log("[getColorFromClass] fillAlpha:", fillAlpha);
 
     const fill = JsonUtils.normalizeColor(
@@ -122,6 +125,7 @@ static getColorFromClass(
       defaultFill
     );
 
+    // ✅ Stroke always full opacity
     const stroke = JsonUtils.normalizeColor(
       [strokeRgb[0], strokeRgb[1], strokeRgb[2], 255],
       defaultStroke
@@ -130,7 +134,7 @@ static getColorFromClass(
     console.log("[getColorFromClass] final fill:", fill);
     console.log("[getColorFromClass] final stroke:", stroke);
 
-    return { fill, stroke, opacity };
+    return { fill, stroke, opacity, strokeWidth };
 
   } catch (e) {
     console.error("[getColorFromClass] error:", e);
@@ -138,6 +142,75 @@ static getColorFromClass(
       fill: defaultFill,
       stroke: defaultStroke,
       opacity: defaultOpacity,
+      strokeWidth: defaultStrokeWidth,
     };
   }
+}
+
+
+
+// ── geojson-layer.ts ──────────────────────────────────────────────
+private getDefaultSymbolForGeometry(geometry: any): any {
+  if (!geometry) return null;
+
+  // ✅ Get fill, stroke, opacity, strokeWidth from layerClass
+  const {
+    fill,
+    stroke,
+    opacity,
+    strokeWidth,
+  } = this.layerClass
+    ? JsonUtils.getColorFromClass(this.layerClass, this)
+    : {
+        fill: [0, 120, 255, 255],
+        stroke: [0, 120, 255, 255],
+        opacity: 1,
+        strokeWidth: 2,
+      };
+
+  const [r, g, b] = fill;
+  const [sr, sg, sb] = stroke;
+
+  const geometryType = String(
+    (geometry as any).type ?? ""
+  ).toLowerCase();
+
+  // ── Point ──────────────────────────────────────────────────
+  if (geometryType === "point" || geometryType === "multipoint") {
+    return {
+      type: "simple-marker",
+      style: "circle",
+      size: 18,
+      color: [r, g, b, opacity],
+      outline: {
+        type: "simple-line",
+        color: [sr, sg, sb, 1],
+        width: 1,
+        style: "solid",
+      },
+    };
+  }
+
+  // ── Polyline ───────────────────────────────────────────────
+  if (geometryType === "polyline") {
+    return {
+      type: "simple-line",
+      style: "solid",
+      color: [r, g, b, opacity],  // ✅ uses stroke color when fill:none
+      width: strokeWidth,          // ✅ uses stroke-width from CSS
+    };
+  }
+
+  // ── Polygon / Circle / Extent ──────────────────────────────
+  return {
+    type: "simple-fill",
+    style: "solid",
+    color: fill,                   // ✅ fill with opacity baked in
+    outline: {
+      type: "simple-line",
+      style: "solid",
+      color: [sr, sg, sb, 1],      // ✅ stroke color full opacity
+      width: strokeWidth,           // ✅ stroke-width from CSS
+    },
+  };
 }
