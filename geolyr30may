@@ -1,12 +1,15 @@
-/* ✅ Target calcite button scale via CSS custom properties */
-::ng-deep arcgis-zoom calcite-button {
-  --calcite-button-padding-y: 4px !important;
-  --calcite-button-padding-x: 4px !important;
-}
-
-/* ✅ Target the zoom buttons directly */
-::ng-deep arcgis-zoom .zoom-in,
-::ng-deep arcgis-zoom .zoom-out {
+::ng-deep arcgis-zoom calcite-button.zoom-in,
+::ng-deep arcgis-zoom calcite-button.zoom-out {
+  --calcite-button-padding-block: 2px !important;
+  --calcite-button-padding-inline: 2px !important;
   width: 24px !important;
   height: 24px !important;
+  min-height: 24px !important;
+}
+
+/* ✅ Reduce icon size */
+::ng-deep arcgis-zoom calcite-button.zoom-in::part(icon),
+::ng-deep arcgis-zoom calcite-button.zoom-out::part(icon) {
+  width: 12px !important;
+  height: 12px !important;
 }
