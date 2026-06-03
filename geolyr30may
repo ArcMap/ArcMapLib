@@ -1,100 +1,39 @@
 static getColorFromClass(className: string): number[] {
-  if (!className) return [0, 120, 255, 255];
-  try {
-    const el = document.createElement("div");
-    el.className = className;
-    el.style.display = "none";
-    document.body.appendChild(el);
-    const color = getComputedStyle(el).color;
-    document.body.removeChild(el);
-    const m = color.match(/\d+/g);
-    if (!m || m.length < 3) return [0, 120, 255, 255];
-    return [+m[0], +m[1], +m[2], m[3] ? +m[3] * 255 : 255];
-  } catch {
-    return [0, 120, 255, 255];
-  }
-}
+  const fallback = [0, 120, 255, 255];
+  if (!className) return fallback;
 
-
-
-private getDefaultSymbolForGeometry(geometry: any): any {
-  if (!geometry) return null;
-
-  // ✅ Use layerClass CSS color if provided, else default blue
-  const baseColor = this.layerClass
-    ? JsonUtils.getColorFromClass(this.layerClass)
-    : [0, 120, 255, 255];
-
-  const [r, g, b, a = 255] = baseColor;
-
-  const geometryType = String((geometry as any).type ?? "").toLowerCase();
-
-  if (geometryType === "point" || geometryType === "multipoint") {
-    return {
-      type: "simple-marker",
-      style: "circle",
-      size: 10,
-      color: [r, g, b, a],
-      outline: {
-        type: "simple-line",
-        color: [r, g, b, 255],
-        width: 1,
-        style: "solid",
-      },
-    };
-  }
-
-  if (geometryType === "polyline") {
-    return {
-      type: "simple-line",
-      color: [r, g, b, 255],
-      width: 2,
-      style: "solid",
-    };
-  }
-
-  if (geometryType === "polygon" || geometryType === "extent") {
-    return {
-      type: "simple-fill",
-      style: "solid",
-      color: [r, g, b, 80],   // ← 80 opacity for fill
-      outline: {
-        type: "simple-line",
-        color: [r, g, b, 255], // ← full opacity for border
-        width: 2,
-        style: "solid",
-      },
-    };
-  }
-
-  return null;
-}
-
-
-
-static getColorFromClass(className: string): number[] {
-  if (!className) return [0, 120, 255, 1];
   try {
     const el = document.createElement("div");
     el.className = className;
     el.style.display = "none";
     document.body.appendChild(el);
 
-    // ✅ Get CSS color string e.g. "rgb(255, 50, 50)"
-    const colorString = getComputedStyle(el).color;
+    const computed = getComputedStyle(el);
+
+    // Try multiple CSS properties in order
+    const colorStr =
+      computed.getPropertyValue("--layer-color").trim() ||
+      computed.backgroundColor ||
+      computed.color ||
+      computed.borderColor ||
+      "";
+
     document.body.removeChild(el);
 
-    // ✅ Parse rgb(r, g, b) into array
-    const m = colorString.match(/\d+/g);
-    if (!m || m.length < 3) return [0, 120, 255, 1];
+    if (!colorStr || colorStr === "rgba(0, 0, 0, 0)" || colorStr === "transparent") {
+      return fallback;
+    }
 
-    const raw = [+m[0], +m[1], +m[2], m[3] ? +m[3] : 255];
+    // ✅ Parse rgb string into array
+    const m = colorStr.match(/\d+(\.\d+)?/g);
+    if (!m || m.length < 3) return fallback;
 
-    // ✅ Pass through existing normalizeColor — reuse existing logic
-    return JsonUtils.normalizeColor(raw, [0, 120, 255, 1]);
+    const raw = [+m[0], +m[1], +m[2], m[3] ? +m[3] : 1];
+
+    // ✅ Use existing normalizeColor instead of manual conversion
+    return JsonUtils.normalizeColor(raw, fallback);
 
   } catch {
-    return [0, 120, 255, 1];
+    return fallback;
   }
 }
-
