@@ -1,22 +1,12 @@
-/* ✅ Reduce zoom widget button size */
-::ng-deep arcgis-zoom .esri-widget--button {
+/* ✅ Target calcite button scale via CSS custom properties */
+::ng-deep arcgis-zoom calcite-button {
+  --calcite-button-padding-y: 4px !important;
+  --calcite-button-padding-x: 4px !important;
+}
+
+/* ✅ Target the zoom buttons directly */
+::ng-deep arcgis-zoom .zoom-in,
+::ng-deep arcgis-zoom .zoom-out {
   width: 24px !important;
   height: 24px !important;
-  min-width: 24px !important;
-  min-height: 24px !important;
-}
-
-/* ✅ Reduce icon size inside buttons */
-::ng-deep arcgis-zoom .esri-icon {
-  font-size: 12px !important;
-}
-
-/* ✅ Reduce gap between zoom in and zoom out */
-::ng-deep arcgis-zoom .esri-zoom {
-  gap: 2px !important;
-}
-
-/* ✅ Reduce overall widget padding */
-::ng-deep arcgis-zoom .esri-component {
-  padding: 0 !important;
 }
