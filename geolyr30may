@@ -1,19 +1,71 @@
-// In updated() — react to layerClass changes
-if (changedProps.has('layerClass') && this.featureLayer) {
-  // ✅ Set on the featureLayer's internal container
+static getColorFromClass(className: string): number[] {
+  if (!className) return [0, 120, 255, 255];
   try {
-    (this.featureLayer as any).className = this.layerClass;
-  } catch { }
-
-  // ✅ Also reapply symbols using CSS color
-  const color = JsonUtils.getColorFromClass(this.layerClass);
-  this.featureLayer?.graphics?.forEach((g: Graphic) => {
-    g.symbol = this.getDefaultSymbolForGeometry(g.geometry) as any;
-  });
+    const el = document.createElement("div");
+    el.className = className;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const color = getComputedStyle(el).color;
+    document.body.removeChild(el);
+    const m = color.match(/\d+/g);
+    if (!m || m.length < 3) return [0, 120, 255, 255];
+    return [+m[0], +m[1], +m[2], m[3] ? +m[3] * 255 : 255];
+  } catch {
+    return [0, 120, 255, 255];
+  }
 }
 
 
 
-const baseColor = this.layerClass
-  ? JsonUtils.getColorFromClass(this.layerClass)
-  : [0, 120, 255, 255];
+private getDefaultSymbolForGeometry(geometry: any): any {
+  if (!geometry) return null;
+
+  // ✅ Use layerClass CSS color if provided, else default blue
+  const baseColor = this.layerClass
+    ? JsonUtils.getColorFromClass(this.layerClass)
+    : [0, 120, 255, 255];
+
+  const [r, g, b, a = 255] = baseColor;
+
+  const geometryType = String((geometry as any).type ?? "").toLowerCase();
+
+  if (geometryType === "point" || geometryType === "multipoint") {
+    return {
+      type: "simple-marker",
+      style: "circle",
+      size: 10,
+      color: [r, g, b, a],
+      outline: {
+        type: "simple-line",
+        color: [r, g, b, 255],
+        width: 1,
+        style: "solid",
+      },
+    };
+  }
+
+  if (geometryType === "polyline") {
+    return {
+      type: "simple-line",
+      color: [r, g, b, 255],
+      width: 2,
+      style: "solid",
+    };
+  }
+
+  if (geometryType === "polygon" || geometryType === "extent") {
+    return {
+      type: "simple-fill",
+      style: "solid",
+      color: [r, g, b, 80],   // ← 80 opacity for fill
+      outline: {
+        type: "simple-line",
+        color: [r, g, b, 255], // ← full opacity for border
+        width: 2,
+        style: "solid",
+      },
+    };
+  }
+
+  return null;
+}
