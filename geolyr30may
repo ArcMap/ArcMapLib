@@ -1,15 +1,85 @@
-::ng-deep arcgis-zoom calcite-button.zoom-in,
-::ng-deep arcgis-zoom calcite-button.zoom-out {
-  --calcite-button-padding-block: 2px !important;
-  --calcite-button-padding-inline: 2px !important;
-  width: 24px !important;
-  height: 24px !important;
-  min-height: 24px !important;
-}
+import { Component, AfterViewInit } from '@angular/core';
 
-/* ✅ Reduce icon size */
-::ng-deep arcgis-zoom calcite-button.zoom-in::part(icon),
-::ng-deep arcgis-zoom calcite-button.zoom-out::part(icon) {
-  width: 12px !important;
-  height: 12px !important;
+@Component({...})
+export class OverviewMapComponent implements AfterViewInit {
+
+  ngAfterViewInit(): void {
+    this.customizeZoomButtons();
+  }
+
+  private customizeZoomButtons(): void {
+    let attempts = 0;
+
+    const tryApply = () => {
+      attempts++;
+
+      // ✅ Reach through arc-map shadow DOM
+      const arcMap = document.querySelector('arc-map');
+      if (!arcMap) {
+        if (attempts < 10) setTimeout(tryApply, 300);
+        return;
+      }
+
+      const arcMapShadow = (arcMap as any).shadowRoot;
+      if (!arcMapShadow) {
+        if (attempts < 10) setTimeout(tryApply, 300);
+        return;
+      }
+
+      const arcgisZoom = arcMapShadow.querySelector('arcgis-zoom');
+      if (!arcgisZoom) {
+        if (attempts < 10) setTimeout(tryApply, 300);
+        return;
+      }
+
+      const zoomShadow = (arcgisZoom as any).shadowRoot;
+      if (!zoomShadow) {
+        if (attempts < 10) setTimeout(tryApply, 300);
+        return;
+      }
+
+      // ✅ Inject CSS into arcgis-zoom shadow root
+      const style = document.createElement('style');
+      style.id = 'custom-zoom-style';
+      style.textContent = `
+        .arcgis-button {
+          gap: 2px;
+        }
+        calcite-button {
+          width: 40px !important;
+          height: 40px !important;
+        }
+      `;
+      zoomShadow.appendChild(style);
+
+      // ✅ Inject CSS into each calcite-button shadow root
+      const buttons = zoomShadow.querySelectorAll('calcite-button');
+      buttons?.forEach((btn: any) => {
+        if (!btn.shadowRoot) return;
+        const btnStyle = document.createElement('style');
+        btnStyle.textContent = `
+          :host {
+            width: 40px !important;
+            height: 40px !important;
+            min-width: 40px !important;
+            min-height: 40px !important;
+          }
+          .button {
+            width: 40px !important;
+            height: 40px !important;
+            padding: 12px !important;
+          }
+          .calcite-button--icon {
+            width: 20px !important;
+            height: 20px !important;
+          }
+        `;
+        btn.shadowRoot.appendChild(btnStyle);
+      });
+
+      console.log('Zoom buttons customized');
+    };
+
+    setTimeout(tryApply, 1000);
+  }
 }
