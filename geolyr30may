@@ -1,12 +1,45 @@
-// ✅ Legacy way — uses arc-map's addLayer which preserves DOM order
-const arcMap = this.closest('arc-map') as any;
-if (arcMap?.addLayer) {
-  await arcMap.addLayer(this.featureLayer, this);
-  await arcMap.addLayer(this.labelLayer, this);
-  await arcMap.addLayer(this.sketchLayer, this);
-} else {
-  // Fallback
-  map.add(this.featureLayer, map.layers.length);
-  map.add(this.labelLayer, map.layers.length);
-  map.add(this.sketchLayer, map.layers.length);
+private async createLayer(initialGeoJson: any): Promise<void> {
+  // ... existing layer creation code ...
+
+  const map = this.view.map;
+
+  // ✅ Get all subsequent sibling layer IDs first
+  const siblings = this.getSubsequentSiblings();
+  
+  if (siblings.length > 0) {
+    // ✅ Find first sibling already in map
+    const firstSiblingIndex = siblings
+      .map(s => map.layers
+        .findIndex((l: any) => l.id?.includes(s.id))
+      )
+      .filter(i => i !== -1);
+
+    if (firstSiblingIndex.length > 0) {
+      const insertAt = Math.min(...firstSiblingIndex);
+      map.add(this.featureLayer, insertAt);
+      map.add(this.labelLayer, insertAt + 1);
+      map.add(this.sketchLayer, insertAt + 2);
+    } else {
+      map.add(this.featureLayer, map.layers.length);
+      map.add(this.labelLayer, map.layers.length);
+      map.add(this.sketchLayer, map.layers.length);
+    }
+  } else {
+    map.add(this.featureLayer, map.layers.length);
+    map.add(this.labelLayer, map.layers.length);
+    map.add(this.sketchLayer, map.layers.length);
+  }
+}
+
+private getSubsequentSiblings(): HTMLElement[] {
+  const siblings: HTMLElement[] = [];
+  let next = this.nextElementSibling as HTMLElement;
+  while (next) {
+    if (next.tagName?.toLowerCase()
+      .includes('geojson-layer')) {
+      siblings.push(next);
+    }
+    next = next.nextElementSibling as HTMLElement;
+  }
+  return siblings;
 }
