@@ -1,34 +1,7 @@
-// ✅ Use sibling-based ordering
-const siblings = this.getSubsequentSiblings();
-
-if (siblings.length > 0) {
-  const firstSiblingIndex = siblings
-    .map(s => map.layers
-      .findIndex((l: any) => l.id?.includes(s.id))
-    )
-    .filter(i => i !== -1);
-
-  if (firstSiblingIndex.length > 0) {
-    const insertAt = Math.min(...firstSiblingIndex);
-    map.add(this.featureLayer, insertAt);
-  } else {
-    map.add(this.featureLayer, map.layers.length);
-  }
-} else {
-  map.add(this.featureLayer, map.layers.length);
-}
-
-private getSubsequentSiblings(): HTMLElement[] {
-  const siblings: HTMLElement[] = [];
-  let next = this.nextElementSibling as HTMLElement;
-  while (next) {
-    if (
-      next.tagName?.toLowerCase().includes('geojson-layer') ||
-      next.tagName?.toLowerCase().includes('esri-feature-layer')
-    ) {
-      siblings.push(next);
-    }
-    next = next.nextElementSibling as HTMLElement;
-  }
-  return siblings;
-}
+external: [
+  /^@arcgis\/core/,
+  /^@arcgis\/map-components/,
+  /^@esri\/calcite-components/,
+  /^lit/,
+  /^@lit/,
+]
