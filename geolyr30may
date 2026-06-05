@@ -1,85 +1,12 @@
-import { Component, AfterViewInit } from '@angular/core';
-
-@Component({...})
-export class OverviewMapComponent implements AfterViewInit {
-
-  ngAfterViewInit(): void {
-    this.customizeZoomButtons();
-  }
-
-  private customizeZoomButtons(): void {
-    let attempts = 0;
-
-    const tryApply = () => {
-      attempts++;
-
-      // ✅ Reach through arc-map shadow DOM
-      const arcMap = document.querySelector('arc-map');
-      if (!arcMap) {
-        if (attempts < 10) setTimeout(tryApply, 300);
-        return;
-      }
-
-      const arcMapShadow = (arcMap as any).shadowRoot;
-      if (!arcMapShadow) {
-        if (attempts < 10) setTimeout(tryApply, 300);
-        return;
-      }
-
-      const arcgisZoom = arcMapShadow.querySelector('arcgis-zoom');
-      if (!arcgisZoom) {
-        if (attempts < 10) setTimeout(tryApply, 300);
-        return;
-      }
-
-      const zoomShadow = (arcgisZoom as any).shadowRoot;
-      if (!zoomShadow) {
-        if (attempts < 10) setTimeout(tryApply, 300);
-        return;
-      }
-
-      // ✅ Inject CSS into arcgis-zoom shadow root
-      const style = document.createElement('style');
-      style.id = 'custom-zoom-style';
-      style.textContent = `
-        .arcgis-button {
-          gap: 2px;
-        }
-        calcite-button {
-          width: 40px !important;
-          height: 40px !important;
-        }
-      `;
-      zoomShadow.appendChild(style);
-
-      // ✅ Inject CSS into each calcite-button shadow root
-      const buttons = zoomShadow.querySelectorAll('calcite-button');
-      buttons?.forEach((btn: any) => {
-        if (!btn.shadowRoot) return;
-        const btnStyle = document.createElement('style');
-        btnStyle.textContent = `
-          :host {
-            width: 40px !important;
-            height: 40px !important;
-            min-width: 40px !important;
-            min-height: 40px !important;
-          }
-          .button {
-            width: 40px !important;
-            height: 40px !important;
-            padding: 12px !important;
-          }
-          .calcite-button--icon {
-            width: 20px !important;
-            height: 20px !important;
-          }
-        `;
-        btn.shadowRoot.appendChild(btnStyle);
-      });
-
-      console.log('Zoom buttons customized');
-    };
-
-    setTimeout(tryApply, 1000);
-  }
+// ✅ Legacy way — uses arc-map's addLayer which preserves DOM order
+const arcMap = this.closest('arc-map') as any;
+if (arcMap?.addLayer) {
+  await arcMap.addLayer(this.featureLayer, this);
+  await arcMap.addLayer(this.labelLayer, this);
+  await arcMap.addLayer(this.sketchLayer, this);
+} else {
+  // Fallback
+  map.add(this.featureLayer, map.layers.length);
+  map.add(this.labelLayer, map.layers.length);
+  map.add(this.sketchLayer, map.layers.length);
 }
