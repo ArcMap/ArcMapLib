@@ -1,81 +1,24 @@
-import { spawn } from 'child_process';
-import { createServer } from 'http';
-import { readFileSync, existsSync, statSync } from 'fs'; // ✅ add statSync
-import { join, extname } from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+createServer((req, res) => {
+  const urlPath = req.url.split('?')[0];
+  const filePath = join(ROOT, urlPath);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const ROOT = join(__dirname, '..');
+  // ✅ Add this debug log
+  console.log('REQ:', urlPath);
+  console.log('FILE:', filePath);
+  console.log('EXISTS:', isFile(filePath));
 
-const OPTIONS = { stdio: 'inherit', shell: true };
 
-const mimeTypes = {
-  '.js': 'application/javascript',
-  '.mjs': 'application/javascript',
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.wasm': 'application/wasm',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ttf': 'font/ttf',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
 
-function isFile(filePath) {
-  try {
-    // ✅ Check it's a file not a directory
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
+<script type="importmap">
+{
+  "imports": {
+    "@arcgis/core/": "/node_modules/@arcgis/core/",
+    "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
+    "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
+    "lit": "/node_modules/lit/index.js",
+    "lit/": "/node_modules/lit/",
+    "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
+    "@lit/reactive-element/": "/node_modules/@lit/reactive-element/"
   }
 }
-
-function startServer() {
-  createServer((req, res) => {
-    const urlPath = req.url.split('?')[0];
-    const filePath = join(ROOT, urlPath);
-
-    const ext = extname(filePath);
-    const contentType = mimeTypes[ext]
-      || 'application/octet-stream';
-
-    try {
-      if (isFile(filePath)) {
-        // ✅ Serve the actual file
-        const content = readFileSync(filePath);
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.end(content);
-      } else {
-        // ✅ Fallback to index.html
-        const index = readFileSync(
-          join(ROOT, 'index.html')
-        );
-        res.writeHead(200, {
-          'Content-Type': 'text/html',
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.end(index);
-      }
-    } catch (err) {
-      res.writeHead(404);
-      res.end('Not found: ' + urlPath);
-    }
-  }).listen(3333, () => {
-    console.log('✅ Server: http://localhost:3333');
-    console.log('ROOT:', ROOT);
-  });
-}
-
-function serve() {
-  spawn("npm run build.watch", OPTIONS);
-  startServer();
-}
-
-serve();
+</script>
