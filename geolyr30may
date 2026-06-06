@@ -1,26 +1,15 @@
-(window as any).upMapDebug = {
-  map: this.map,
-  view: this.view,
-  element: this,
-};
+window.upMapDebug.map.layers.toArray().filter(l =>
+  String(l.id).toLowerCase().includes("polygon layer")
+)
 
 
-
-console.log(
-  window.upMapDebug.map.layers.toArray().map((l, i) => ({
-    index: i,
-    id: l.id,
-    type: l.type,
-    visible: l.visible
-  }))
-);
-
-
-
-console.log(
-  window.upMapDebug.view.allLayerViews.toArray().map((lv, i) => ({
-    index: i,
-    layerId: lv.layer?.id,
-    type: lv.layer?.type
-  }))
-);
+window.upMapDebug.map.layers.toArray().filter(l =>
+  String(l.id).toLowerCase().includes("polygon layer")
+).map(l => ({
+  id: l.id,
+  type: l.type,
+  opacity: l.opacity,
+  blendMode: l.blendMode,
+  effect: l.effect,
+  visible: l.visible
+}))
