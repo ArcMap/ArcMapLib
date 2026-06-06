@@ -1,5 +1,17 @@
-public add(layer: Layer, element?: Element): void {
-  if (!this.map || !layer) {
+public addLayerByElement(newLayer: any, element: Element): void {
+  if (!this.map || !newLayer) {
+    return;
+  }
+
+  this.map.add(newLayer);
+
+  queueMicrotask(() => {
+    this.applyDomLayerOrder();
+  });
+}
+
+private applyDomLayerOrder(): void {
+  if (!this.map?.layers) {
     return;
   }
 
@@ -7,27 +19,36 @@ public add(layer: Layer, element?: Element): void {
     this.querySelectorAll(
       "up-esri-feature-layer, up-geojson-layer, up-image-service-layer, up-tiled-map-service-layer, up-wms-layer"
     )
-  ) as Element[];
+  ) as HTMLElement[];
 
-  const domIndex = element ? layerElements.indexOf(element) : -1;
+  layerElements.forEach((element: any, domIndex: number) => {
+    const layerId =
+      element.featureLayer?.id ??
+      element.layer?.id ??
+      element.graphicsLayer?.id ??
+      element.mapLayer?.id;
 
-  let mapIndex = this.map.layers.length;
+    if (!layerId) {
+      return;
+    }
 
-  if (domIndex !== -1) {
-    mapIndex = domIndex;
-  }
+    const layer = this.map.layers.find((item: any) => item.id === layerId);
 
-  this.map.add(layer, mapIndex);
+    if (!layer) {
+      return;
+    }
 
-  console.log("[arc-map] add layer by DOM order", {
-    domIndex,
-    mapIndex,
-    layerId: layer.id,
-    layerType: layer.type,
-    order: this.map.layers.toArray().map((l: any, index: number) => ({
-      index,
-      id: l.id,
-      type: l.type,
-    })),
+    // HTML top = map bottom, HTML bottom = map top
+    this.map.reorder(layer, domIndex);
   });
+
+  console.log(
+    "[arc-map] final layer order",
+    this.map.layers.toArray().map((layer: any, index: number) => ({
+      index,
+      id: layer.id,
+      type: layer.type,
+      title: layer.title,
+    }))
+  );
 }
