@@ -1,10 +1,15 @@
-<!-- ✅ Load map-components to register arcgis-* elements -->
-<script type="module">
-  import '@arcgis/map-components/dist/components/arcgis-map.js';
-  import '@arcgis/map-components/dist/components/arcgis-zoom.js';
-  import '@arcgis/map-components/dist/components/arcgis-measurement.js';
-  import '@arcgis/map-components/dist/components/arcgis-expand.js';
+<script type="importmap">
+{
+  "imports": {
+    "@arcgis/core/": "/node_modules/@arcgis/core/",
+    "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
+    "@arcgis/map-components": "/node_modules/@arcgis/map-components/dist/index.js",
+    "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
+    "@esri/calcite-components": "/node_modules/@esri/calcite-components/dist/index.js",
+    "lit": "/node_modules/lit/index.js",
+    "lit/": "/node_modules/lit/",
+    "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
+    "@lit/reactive-element/": "/node_modules/@lit/reactive-element/"
+  }
+}
 </script>
-
-<!-- ✅ Then your library -->
-<script type="module" src="./dist/index.js"></script>
