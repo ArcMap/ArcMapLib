@@ -1,15 +1,7 @@
-window.upMapDebug.map.layers.toArray().filter(l =>
-  String(l.id).toLowerCase().includes("polygon layer")
-)
+window.upMapDebug.map.layers
+  .toArray()
+  .find(l => String(l.id).includes("Polygon Layer") && l.id.includes("graphics"))
+  .graphics
+  .toArray()
+  .map(g => g.symbol)
 
-
-window.upMapDebug.map.layers.toArray().filter(l =>
-  String(l.id).toLowerCase().includes("polygon layer")
-).map(l => ({
-  id: l.id,
-  type: l.type,
-  opacity: l.opacity,
-  blendMode: l.blendMode,
-  effect: l.effect,
-  visible: l.visible
-}))
