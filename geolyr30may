@@ -1,14 +1,12 @@
 import { spawn } from 'child_process';
 import { createServer } from 'http';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs'; // ✅ add statSync
 import { join, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-// ✅ Project root is one level UP from scripts/
 const ROOT = join(__dirname, '..');
 
 const OPTIONS = { stdio: 'inherit', shell: true };
@@ -27,20 +25,27 @@ const mimeTypes = {
   '.woff2': 'font/woff2',
 };
 
+function isFile(filePath) {
+  try {
+    // ✅ Check it's a file not a directory
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function startServer() {
   createServer((req, res) => {
     const urlPath = req.url.split('?')[0];
-
-    // ✅ Resolve from ROOT not __dirname
-    let filePath = join(ROOT, urlPath);
+    const filePath = join(ROOT, urlPath);
 
     const ext = extname(filePath);
     const contentType = mimeTypes[ext]
       || 'application/octet-stream';
 
     try {
-      if (existsSync(filePath) && 
-          !filePath.endsWith('/')) {
+      if (isFile(filePath)) {
+        // ✅ Serve the actual file
         const content = readFileSync(filePath);
         res.writeHead(200, {
           'Content-Type': contentType,
@@ -48,7 +53,7 @@ function startServer() {
         });
         res.end(content);
       } else {
-        // ✅ Fallback to index.html from ROOT
+        // ✅ Fallback to index.html
         const index = readFileSync(
           join(ROOT, 'index.html')
         );
@@ -64,6 +69,7 @@ function startServer() {
     }
   }).listen(3333, () => {
     console.log('✅ Server: http://localhost:3333');
+    console.log('ROOT:', ROOT);
   });
 }
 
