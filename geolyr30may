@@ -1,49 +1,8 @@
-public forceGeoJsonLayersOnTop(): void {
-  if (!this.map?.layers || !this.view) {
-    return;
-  }
-
-  const run = () => {
-    const layers = this.map.layers.toArray();
-
-    const geoJsonLayers = layers.filter((layer: any) => {
-      const id = String(layer.id ?? "").toLowerCase();
-
-      return (
-        id.includes("geojson") ||
-        id.includes("polygon layer") ||
-        id.includes("polyline layer") ||
-        id.includes("point layer")
-      );
-    });
-
-    geoJsonLayers.forEach((layer: any) => {
-      this.map.reorder(layer, this.map.layers.length - 1);
-    });
-
-    this.view.requestRender?.();
-
-    console.log(
-      "[up-map] forced geojson on top",
-      this.map.layers.toArray().map((layer: any, index: number) => ({
-        index,
-        id: layer.id,
-        type: layer.type,
-      }))
-    );
-  };
-
-  run();
-
-  setTimeout(run, 100);
-  setTimeout(run, 500);
-  setTimeout(run, 1000);
-}
-
-
-
-this.ancestorMap.addLayerByElement(feature, this);
-
-feature.when(() => {
-  this.ancestorMap.forceGeoJsonLayersOnTop?.();
-});
+console.log(
+  this.map.layers.toArray().map((l: any, i: number) => ({
+    index: i,
+    id: l.id,
+    type: l.type,
+    visible: l.visible
+  }))
+);
