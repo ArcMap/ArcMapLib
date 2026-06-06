@@ -1,56 +1,29 @@
-createServer((req, res) => {
-  const urlPath = req.url.split('?')[0];
+function resolvePath(filePath) {
+  // 1. Exact path
+  if (isFile(filePath)) return filePath;
 
-  // ✅ Always serve index.html for root /
-  if (urlPath === '/' || urlPath === '') {
-    try {
-      const index = readFileSync(join(ROOT, 'index.html'));
-      res.writeHead(200, {
-        'Content-Type': 'text/html',
-        'Access-Control-Allow-Origin': '*',
-      });
-      res.end(index);
-      return;
-    } catch {
-      res.writeHead(404);
-      res.end('index.html not found');
-      return;
-    }
-  }
+  // 2. Add .js extension
+  if (isFile(filePath + '.js')) return filePath + '.js';
 
-  const rawPath = join(ROOT, urlPath);
-  const resolvedPath = resolvePath(rawPath);
+  // 3. index.js inside directory
+  const indexPath = join(filePath, 'index.js');
+  if (isFile(indexPath)) return indexPath;
 
-  if (resolvedPath) {
-    const ext = extname(resolvedPath);
-    const contentType = mimeTypes[ext]
-      || 'application/javascript';
+  // 4. dist/index.js
+  const distIndexPath = join(filePath, 'dist', 'index.js');
+  if (isFile(distIndexPath)) return distIndexPath;
 
-    try {
-      const content = readFileSync(resolvedPath);
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Access-Control-Allow-Origin': '*',
-      });
-      res.end(content);
-    } catch (err) {
-      res.writeHead(500);
-      res.end('Error: ' + err.message);
-    }
-  } else {
-    // ✅ Fallback to index.html
-    try {
-      const index = readFileSync(join(ROOT, 'index.html'));
-      res.writeHead(200, {
-        'Content-Type': 'text/html',
-        'Access-Control-Allow-Origin': '*',
-      });
-      res.end(index);
-    } catch {
-      res.writeHead(404);
-      res.end('Not found: ' + urlPath);
-    }
-  }
-}).listen(3333, () => {
-  console.log('✅ Server: http://localhost:3333');
-});
+  // ✅ 5. For arcgis-map-components folders
+  // Each component folder contains [name]/[name].js
+  const name = filePath.split(/[/\\]/).pop();
+
+  // Try [folder]/[name].js
+  const sameName = join(filePath, name + '.js');
+  if (isFile(sameName)) return sameName;
+
+  // Try [folder]/[name]/[name].js
+  const nestedSame = join(filePath, name, name + '.js');
+  if (isFile(nestedSame)) return nestedSame;
+
+  return null;
+}
