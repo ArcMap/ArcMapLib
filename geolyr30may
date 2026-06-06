@@ -1,27 +1,52 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <!-- ✅ Step 1 — importmap FIRST -->
-  <script type="importmap">
-  {
-    "imports": {
-      "lit": "/node_modules/lit/index.js",
-      "lit/": "/node_modules/lit/",
-      "lit/decorators.js": "/node_modules/lit/decorators.js",
-      "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
-      "@lit/reactive-element/": "/node_modules/@lit/reactive-element/",
-      "@arcgis/core/": "/node_modules/@arcgis/core/",
-      "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
-      "@esri/calcite-components/": "/node_modules/@esri/calcite-components/"
-    }
-  }
-  </script>
+// rollup.config.js
+import nodeResolve from '@rollup/plugin-node-resolve';
+import typescript from '@rollup/plugin-typescript';
+import replace from '@rollup/plugin-replace';
 
-  <!-- ✅ Step 2 — THEN load your library -->
-  <script type="module" src="./dist/index.js"></script>
+const isProd = process.env.BUILD === 'prod';
 
-</head>
-<body>
+export default {
+  input: 'src/index.ts',
   
-</body>
-</html>
+  external: isProd
+    ? [
+        // ✅ Production — everything external
+        /^@arcgis\/core/,
+        /^@arcgis\/map-components/,
+        /^@esri\/calcite-components/,
+        'lit',
+        /^lit\//,
+        /^@lit\//,
+      ]
+    : [
+        // ✅ Dev — only arcgis external (loaded via CDN)
+        /^@arcgis\/core/,
+        /^@arcgis\/map-components/,
+        /^@esri\/calcite-components/,
+      ],
+
+  plugins: [
+    nodeResolve(),
+    typescript(),
+    replace({
+      'process.env.NODE_ENV': JSON.stringify('development'),
+      preventAssignment: true,
+    }),
+  ],
+
+  output: {
+    dir: isProd ? 'dist' : 'dist-dev',
+    format: 'es',
+    preserveModules: isProd,
+  }
+};
+
+
+
+
+
+"scripts": {
+  "build": "BUILD=prod rollup -c",
+  "build:dev": "rollup -c",
+  "dev": "rollup -c -w"
+}
