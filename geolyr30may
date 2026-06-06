@@ -1,24 +1,43 @@
 createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
-  const filePath = join(ROOT, urlPath);
+  let filePath = join(ROOT, urlPath);
 
-  // ✅ Add this debug log
+  // ✅ Try adding .js extension if file not found
+  if (!isFile(filePath) && !extname(filePath)) {
+    if (isFile(filePath + '.js')) {
+      filePath = filePath + '.js';
+    }
+  }
+
   console.log('REQ:', urlPath);
   console.log('FILE:', filePath);
   console.log('EXISTS:', isFile(filePath));
 
+  const ext = extname(filePath);
+  const contentType = mimeTypes[ext]
+    || 'application/octet-stream';
 
-
-<script type="importmap">
-{
-  "imports": {
-    "@arcgis/core/": "/node_modules/@arcgis/core/",
-    "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
-    "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
-    "lit": "/node_modules/lit/index.js",
-    "lit/": "/node_modules/lit/",
-    "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
-    "@lit/reactive-element/": "/node_modules/@lit/reactive-element/"
+  try {
+    if (isFile(filePath)) {
+      const content = readFileSync(filePath);
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(content);
+    } else {
+      // Fallback to index.html
+      const index = readFileSync(join(ROOT, 'index.html'));
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(index);
+    }
+  } catch (err) {
+    res.writeHead(404);
+    res.end('Not found: ' + urlPath);
   }
-}
-</script>
+}).listen(3333, () => {
+  console.log('✅ Server: http://localhost:3333');
+});
