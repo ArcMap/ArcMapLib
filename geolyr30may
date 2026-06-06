@@ -11,3 +11,17 @@ polygonLayer.graphics.forEach(g => {
 });
 
 polygonLayer.refresh?.();
+
+
+
+
+window.upMapDebug.map.layers
+  .toArray()
+  .find(l =>
+    l.id.includes("Polygon Layer") &&
+    l.id.includes("graphics")
+  )
+  .graphics
+  .getItemAt(0)
+  .symbol
+  .color
