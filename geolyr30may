@@ -1,7 +1,9 @@
-window.upMapDebug.view.allLayerViews
-  .toArray()
-  .map((lv, i) => ({
-    index: i,
-    id: lv.layer?.id,
-    type: lv.layer?.type
-  }))
+const polygonLayer = window.upMapDebug.map.layers.toArray().find(
+  l => l.id.includes("Polygon Layer") && l.id.includes("-graphics")
+);
+
+polygonLayer.graphics.forEach(g => {
+  const symbol = g.symbol.clone();
+  symbol.color.a = 1;
+  g.symbol = symbol;
+});
