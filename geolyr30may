@@ -1,24 +1,46 @@
-if (subsequentLayerIndexes.length > 0) {
-  const firstLayerIndexAfter = Math.min(...subsequentLayerIndexes);
-  this.map.add(newLayer, firstLayerIndexAfter);
-} else {
-  this.map.add(newLayer);
+private getLayerIndexFromDomOrder(element: HTMLElement): number {
+  const layerElements = Array.from(
+    this.querySelectorAll(
+      "up-esri-feature-layer, up-geojson-layer, up-image-service-layer, up-tiled-map-service-layer, up-wms-layer"
+    )
+  ) as HTMLElement[];
+
+  const domIndex = layerElements.indexOf(element);
+
+  if (domIndex === -1) {
+    return this.map?.layers?.length ?? 0;
+  }
+
+  // Reverse DOM order:
+  // first element -> bottom
+  // last element -> top
+  return layerElements.length - domIndex - 1;
 }
 
-console.log("[arc-map] layer order after add", this.map.layers.toArray().map((layer: any, index: number) => ({
-  index,
-  id: layer.id,
-  type: layer.type,
-  title: layer.title,
-})));
 
-queueMicrotask(() => {
-  this.reorderGeoJsonLayersToTop();
+public addLayerByDomOrder(layer: Layer, element: HTMLElement): void {
+  const layerIndex = this.getLayerIndexFromDomOrder(element);
+  this.map.add(layer, layerIndex);
+}
 
-  console.log("[arc-map] layer order after reorder", this.map.layers.toArray().map((layer: any, index: number) => ({
-    index,
-    id: layer.id,
-    type: layer.type,
-    title: layer.title,
-  })));
-});
+
+
+
+const subsequentLayerIds = await Promise.all(layerIdPromises);
+
+const subsequentLayerIndices = subsequentLayerIds
+  .map((layerId) =>
+    this.map.layers.findIndex((layer) => layer.id === layerId)
+  )
+  .filter((layerIndex) => layerIndex !== -1);
+
+// Reverse DOM order:
+// First HTML element => Bottom layer
+// Last HTML element => Top layer
+if (subsequentLayerIndices.length > 0) {
+  const highestLayerIndex = Math.max(...subsequentLayerIndices);
+
+  this.map.add(newLayer, highestLayerIndex + 1);
+} else {
+  this.map.add(newLayer, this.map.layers.length);
+}
