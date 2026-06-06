@@ -1,16 +1,3 @@
-<!-- ✅ Explicitly load map-components to register arcgis-* elements -->
-<script type="module">
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-map/arcgis-map.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-zoom/arcgis-zoom.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-legend/arcgis-legend.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-layer-list/arcgis-layer-list.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-basemap-gallery/arcgis-basemap-gallery.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-measurement/arcgis-measurement.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-area-measurement-2d/arcgis-area-measurement-2d.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-distance-measurement-2d/arcgis-distance-measurement-2d.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-coordinate-conversion/arcgis-coordinate-conversion.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-expand/arcgis-expand.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-scale-bar/arcgis-scale-bar.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-locate/arcgis-locate.js';
-  import '/node_modules/@arcgis/map-components/dist/components/arcgis-home/arcgis-home.js';
-</script>
+"@arcgis/lumina": "/node_modules/@arcgis/lumina/dist/index.js",
+"@arcgis/lumina/controllers/accessor": "/node_modules/@arcgis/lumina/dist/controllers/accessor/index.js",
+"@arcgis/lumina/": "/node_modules/@arcgis/lumina/dist/"
