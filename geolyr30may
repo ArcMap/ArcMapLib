@@ -1,3 +1,29 @@
-"@arcgis/lumina": "/node_modules/@arcgis/lumina/dist/index.js",
-"@arcgis/lumina/controllers/accessor": "/node_modules/@arcgis/lumina/dist/controllers/accessor/index.js",
-"@arcgis/lumina/": "/node_modules/@arcgis/lumina/dist/"
+private reorderGraphicsLayersToTop(): void {
+  if (!this.map?.layers) {
+    return;
+  }
+
+  const layers = this.map.layers.toArray();
+
+  const graphicsLayers = layers.filter((layer: any) =>
+    layer?.id?.includes("geojson") ||
+    layer?.id?.includes("graphics") ||
+    layer?.id?.includes("label") ||
+    layer?.id?.includes("sketch")
+  );
+
+  graphicsLayers.forEach((layer: any) => {
+    this.map.reorder(layer, this.map.layers.length - 1);
+  });
+}
+
+
+
+if (subsequentLayerIndexes.length > 0) {
+  const firstLayerIndexAfter = Math.min(...subsequentLayerIndexes);
+  this.map.add(newLayer, firstLayerIndexAfter);
+} else {
+  this.map.add(newLayer);
+}
+
+this.reorderGraphicsLayersToTop();
