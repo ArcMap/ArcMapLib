@@ -8,6 +8,9 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ✅ Project root is one level UP from scripts/
+const ROOT = join(__dirname, '..');
+
 const OPTIONS = { stdio: 'inherit', shell: true };
 
 const mimeTypes = {
@@ -26,18 +29,18 @@ const mimeTypes = {
 
 function startServer() {
   createServer((req, res) => {
-    // ✅ Strip query string
     const urlPath = req.url.split('?')[0];
 
-    // ✅ Resolve file path from project root
-    const filePath = join(__dirname, urlPath);
+    // ✅ Resolve from ROOT not __dirname
+    let filePath = join(ROOT, urlPath);
 
     const ext = extname(filePath);
     const contentType = mimeTypes[ext]
       || 'application/octet-stream';
 
     try {
-      if (existsSync(filePath)) {
+      if (existsSync(filePath) && 
+          !filePath.endsWith('/')) {
         const content = readFileSync(filePath);
         res.writeHead(200, {
           'Content-Type': contentType,
@@ -45,9 +48,9 @@ function startServer() {
         });
         res.end(content);
       } else {
-        // ✅ Fallback to index.html
+        // ✅ Fallback to index.html from ROOT
         const index = readFileSync(
-          join(__dirname, 'index.html')
+          join(ROOT, 'index.html')
         );
         res.writeHead(200, {
           'Content-Type': 'text/html',
