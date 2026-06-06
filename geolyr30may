@@ -1,46 +1,33 @@
-private getLayerIndexFromDomOrder(element: HTMLElement): number {
+public add(layer: Layer, element?: Element): void {
+  if (!this.map || !layer) {
+    return;
+  }
+
   const layerElements = Array.from(
     this.querySelectorAll(
       "up-esri-feature-layer, up-geojson-layer, up-image-service-layer, up-tiled-map-service-layer, up-wms-layer"
     )
-  ) as HTMLElement[];
+  ) as Element[];
 
-  const domIndex = layerElements.indexOf(element);
+  const domIndex = element ? layerElements.indexOf(element) : -1;
 
-  if (domIndex === -1) {
-    return this.map?.layers?.length ?? 0;
+  let mapIndex = this.map.layers.length;
+
+  if (domIndex !== -1) {
+    mapIndex = domIndex;
   }
 
-  // Reverse DOM order:
-  // first element -> bottom
-  // last element -> top
-  return layerElements.length - domIndex - 1;
-}
+  this.map.add(layer, mapIndex);
 
-
-public addLayerByDomOrder(layer: Layer, element: HTMLElement): void {
-  const layerIndex = this.getLayerIndexFromDomOrder(element);
-  this.map.add(layer, layerIndex);
-}
-
-
-
-
-const subsequentLayerIds = await Promise.all(layerIdPromises);
-
-const subsequentLayerIndices = subsequentLayerIds
-  .map((layerId) =>
-    this.map.layers.findIndex((layer) => layer.id === layerId)
-  )
-  .filter((layerIndex) => layerIndex !== -1);
-
-// Reverse DOM order:
-// First HTML element => Bottom layer
-// Last HTML element => Top layer
-if (subsequentLayerIndices.length > 0) {
-  const highestLayerIndex = Math.max(...subsequentLayerIndices);
-
-  this.map.add(newLayer, highestLayerIndex + 1);
-} else {
-  this.map.add(newLayer, this.map.layers.length);
+  console.log("[arc-map] add layer by DOM order", {
+    domIndex,
+    mapIndex,
+    layerId: layer.id,
+    layerType: layer.type,
+    order: this.map.layers.toArray().map((l: any, index: number) => ({
+      index,
+      id: l.id,
+      type: l.type,
+    })),
+  });
 }
