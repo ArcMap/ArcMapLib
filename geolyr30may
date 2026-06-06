@@ -1,24 +1,3 @@
-private reorderGraphicsLayersToTop(): void {
-  if (!this.map?.layers) {
-    return;
-  }
-
-  const layers = this.map.layers.toArray();
-
-  const graphicsLayers = layers.filter((layer: any) =>
-    layer?.id?.includes("geojson") ||
-    layer?.id?.includes("graphics") ||
-    layer?.id?.includes("label") ||
-    layer?.id?.includes("sketch")
-  );
-
-  graphicsLayers.forEach((layer: any) => {
-    this.map.reorder(layer, this.map.layers.length - 1);
-  });
-}
-
-
-
 if (subsequentLayerIndexes.length > 0) {
   const firstLayerIndexAfter = Math.min(...subsequentLayerIndexes);
   this.map.add(newLayer, firstLayerIndexAfter);
@@ -26,4 +5,20 @@ if (subsequentLayerIndexes.length > 0) {
   this.map.add(newLayer);
 }
 
-this.reorderGraphicsLayersToTop();
+console.log("[arc-map] layer order after add", this.map.layers.toArray().map((layer: any, index: number) => ({
+  index,
+  id: layer.id,
+  type: layer.type,
+  title: layer.title,
+})));
+
+queueMicrotask(() => {
+  this.reorderGeoJsonLayersToTop();
+
+  console.log("[arc-map] layer order after reorder", this.map.layers.toArray().map((layer: any, index: number) => ({
+    index,
+    id: layer.id,
+    type: layer.type,
+    title: layer.title,
+  })));
+});
