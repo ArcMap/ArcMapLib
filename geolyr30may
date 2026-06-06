@@ -1,27 +1,7 @@
-const polygonLayer =
-  window.upMapDebug.map.layers
-    .toArray()
-    .find(l =>
-      l.id.includes("Polygon Layer") &&
-      l.id.includes("graphics")
-    );
-
-polygonLayer.graphics.forEach(g => {
-  g.symbol.color.a = 1;
-});
-
-polygonLayer.refresh?.();
-
-
-
-
-window.upMapDebug.map.layers
+window.upMapDebug.view.allLayerViews
   .toArray()
-  .find(l =>
-    l.id.includes("Polygon Layer") &&
-    l.id.includes("graphics")
-  )
-  .graphics
-  .getItemAt(0)
-  .symbol
-  .color
+  .map((lv, i) => ({
+    index: i,
+    id: lv.layer?.id,
+    type: lv.layer?.type
+  }))
