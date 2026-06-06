@@ -1,20 +1,56 @@
-{
-    "imports": {
-      "@arcgis/core/": "/node_modules/@arcgis/core/",
-      "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
-      "@arcgis/map-components": "/node_modules/@arcgis/map-components/dist/index.js",
-      "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
-      "@esri/calcite-components": "/node_modules/@esri/calcite-components/dist/index.js",
-      "lit": "/node_modules/lit/index.js",
-      "lit/": "/node_modules/lit/",
-      "lit/decorators.js": "/node_modules/lit/decorators.js",
-      "lit/html.js": "/node_modules/lit/html.js",
-      "lit/directives/": "/node_modules/lit/directives/",
-      "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
-      "@lit/reactive-element/": "/node_modules/@lit/reactive-element/",
-      "lit-element/lit-element.js": "/node_modules/lit-element/lit-element.js",
-      "lit-html": "/node_modules/lit-html/lit-html.js",
-      "lit-html/": "/node_modules/lit-html/"
+createServer((req, res) => {
+  const urlPath = req.url.split('?')[0];
+
+  // ✅ Always serve index.html for root /
+  if (urlPath === '/' || urlPath === '') {
+    try {
+      const index = readFileSync(join(ROOT, 'index.html'));
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(index);
+      return;
+    } catch {
+      res.writeHead(404);
+      res.end('index.html not found');
+      return;
     }
   }
-  </script>
+
+  const rawPath = join(ROOT, urlPath);
+  const resolvedPath = resolvePath(rawPath);
+
+  if (resolvedPath) {
+    const ext = extname(resolvedPath);
+    const contentType = mimeTypes[ext]
+      || 'application/javascript';
+
+    try {
+      const content = readFileSync(resolvedPath);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(content);
+    } catch (err) {
+      res.writeHead(500);
+      res.end('Error: ' + err.message);
+    }
+  } else {
+    // ✅ Fallback to index.html
+    try {
+      const index = readFileSync(join(ROOT, 'index.html'));
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(index);
+    } catch {
+      res.writeHead(404);
+      res.end('Not found: ' + urlPath);
+    }
+  }
+}).listen(3333, () => {
+  console.log('✅ Server: http://localhost:3333');
+});
