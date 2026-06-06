@@ -1,43 +1,49 @@
-public applyDomLayerOrder(): void {
-  if (!this.map?.layers) {
+public forceGeoJsonLayersOnTop(): void {
+  if (!this.map?.layers || !this.view) {
     return;
   }
 
-  const allLayers = this.map.layers.toArray();
+  const run = () => {
+    const layers = this.map.layers.toArray();
 
-  const esriLayers = allLayers.filter((layer: any) =>
-    String(layer.id ?? "").toLowerCase().includes("esri") ||
-    String(layer.id ?? "").toLowerCase().includes("feature_layer")
-  );
+    const geoJsonLayers = layers.filter((layer: any) => {
+      const id = String(layer.id ?? "").toLowerCase();
 
-  const geoJsonLayers = allLayers.filter((layer: any) =>
-    String(layer.id ?? "").toLowerCase().includes("geojson") ||
-    String(layer.id ?? "").toLowerCase().includes("polygon") ||
-    String(layer.id ?? "").toLowerCase().includes("polyline") ||
-    String(layer.id ?? "").toLowerCase().includes("point")
-  );
+      return (
+        id.includes("geojson") ||
+        id.includes("polygon layer") ||
+        id.includes("polyline layer") ||
+        id.includes("point layer")
+      );
+    });
 
-  esriLayers.forEach((layer: any, index: number) => {
-    this.map.reorder(layer, index);
-  });
+    geoJsonLayers.forEach((layer: any) => {
+      this.map.reorder(layer, this.map.layers.length - 1);
+    });
 
-  geoJsonLayers.forEach((layer: any) => {
-    this.map.reorder(layer, this.map.layers.length - 1);
-  });
+    this.view.requestRender?.();
 
-  console.log("[up-map] final enforced layer order", this.map.layers.toArray().map((layer: any, index: number) => ({
-    index,
-    id: layer.id,
-    type: layer.type,
-  })));
+    console.log(
+      "[up-map] forced geojson on top",
+      this.map.layers.toArray().map((layer: any, index: number) => ({
+        index,
+        id: layer.id,
+        type: layer.type,
+      }))
+    );
+  };
+
+  run();
+
+  setTimeout(run, 100);
+  setTimeout(run, 500);
+  setTimeout(run, 1000);
 }
 
 
 
-
+this.ancestorMap.addLayerByElement(feature, this);
 
 feature.when(() => {
-  queueMicrotask(() => {
-    this.ancestorMap.applyDomLayerOrder?.();
-  });
+  this.ancestorMap.forceGeoJsonLayersOnTop?.();
 });
