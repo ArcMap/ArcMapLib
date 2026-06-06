@@ -1,54 +1,43 @@
-public addLayerByElement(newLayer: any, element: Element): void {
-  if (!this.map || !newLayer) {
-    return;
-  }
-
-  this.map.add(newLayer);
-
-  queueMicrotask(() => {
-    this.applyDomLayerOrder();
-  });
-}
-
-private applyDomLayerOrder(): void {
+public applyDomLayerOrder(): void {
   if (!this.map?.layers) {
     return;
   }
 
-  const layerElements = Array.from(
-    this.querySelectorAll(
-      "up-esri-feature-layer, up-geojson-layer, up-image-service-layer, up-tiled-map-service-layer, up-wms-layer"
-    )
-  ) as HTMLElement[];
+  const allLayers = this.map.layers.toArray();
 
-  layerElements.forEach((element: any, domIndex: number) => {
-    const layerId =
-      element.featureLayer?.id ??
-      element.layer?.id ??
-      element.graphicsLayer?.id ??
-      element.mapLayer?.id;
+  const esriLayers = allLayers.filter((layer: any) =>
+    String(layer.id ?? "").toLowerCase().includes("esri") ||
+    String(layer.id ?? "").toLowerCase().includes("feature_layer")
+  );
 
-    if (!layerId) {
-      return;
-    }
+  const geoJsonLayers = allLayers.filter((layer: any) =>
+    String(layer.id ?? "").toLowerCase().includes("geojson") ||
+    String(layer.id ?? "").toLowerCase().includes("polygon") ||
+    String(layer.id ?? "").toLowerCase().includes("polyline") ||
+    String(layer.id ?? "").toLowerCase().includes("point")
+  );
 
-    const layer = this.map.layers.find((item: any) => item.id === layerId);
-
-    if (!layer) {
-      return;
-    }
-
-    // HTML top = map bottom, HTML bottom = map top
-    this.map.reorder(layer, domIndex);
+  esriLayers.forEach((layer: any, index: number) => {
+    this.map.reorder(layer, index);
   });
 
-  console.log(
-    "[arc-map] final layer order",
-    this.map.layers.toArray().map((layer: any, index: number) => ({
-      index,
-      id: layer.id,
-      type: layer.type,
-      title: layer.title,
-    }))
-  );
+  geoJsonLayers.forEach((layer: any) => {
+    this.map.reorder(layer, this.map.layers.length - 1);
+  });
+
+  console.log("[up-map] final enforced layer order", this.map.layers.toArray().map((layer: any, index: number) => ({
+    index,
+    id: layer.id,
+    type: layer.type,
+  })));
 }
+
+
+
+
+
+feature.when(() => {
+  queueMicrotask(() => {
+    this.ancestorMap.applyDomLayerOrder?.();
+  });
+});
