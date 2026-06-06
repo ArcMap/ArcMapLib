@@ -1,8 +1,26 @@
+(window as any).upMapDebug = {
+  map: this.map,
+  view: this.view,
+  element: this,
+};
+
+
+
 console.log(
-  this.map.layers.toArray().map((l: any, i: number) => ({
+  window.upMapDebug.map.layers.toArray().map((l, i) => ({
     index: i,
     id: l.id,
     type: l.type,
     visible: l.visible
+  }))
+);
+
+
+
+console.log(
+  window.upMapDebug.view.allLayerViews.toArray().map((lv, i) => ({
+    index: i,
+    layerId: lv.layer?.id,
+    type: lv.layer?.type
   }))
 );
