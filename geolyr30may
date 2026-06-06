@@ -1,119 +1,20 @@
-import { spawn } from 'child_process';
-import { createServer } from 'http';
-import { readFileSync, statSync } from 'fs';
-import { join, extname } from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// ✅ Project root — one level up from scripts/
-const ROOT = join(__dirname, '..');
-
-const OPTIONS = { stdio: 'inherit', shell: true };
-
-const mimeTypes = {
-  '.js': 'application/javascript',
-  '.mjs': 'application/javascript',
-  '.cjs': 'application/javascript',
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.wasm': 'application/wasm',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ttf': 'font/ttf',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.eot': 'application/vnd.ms-fontobject',
-  '.map': 'application/json',
-};
-
-function isFile(filePath) {
-  try {
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-// ✅ Try multiple path resolutions
-function resolvePath(filePath) {
-  // 1. Exact path
-  if (isFile(filePath)) return filePath;
-
-  // 2. Add .js extension
-  if (isFile(filePath + '.js')) return filePath + '.js';
-
-  // 3. index.js inside directory
-  const indexPath = join(filePath, 'index.js');
-  if (isFile(indexPath)) return indexPath;
-
-  // 4. dist/index.js inside directory
-  const distIndexPath = join(filePath, 'dist', 'index.js');
-  if (isFile(distIndexPath)) return distIndexPath;
-
-  // 5. dist/components/[name].js
-  const distCompPath = join(filePath, 'dist', 'components',
-    filePath.split('/').pop() + '.js');
-  if (isFile(distCompPath)) return distCompPath;
-
-  return null;
-}
-
-function startServer() {
-  createServer((req, res) => {
-    const urlPath = req.url.split('?')[0];
-    const rawPath = join(ROOT, urlPath);
-
-    const resolvedPath = resolvePath(rawPath);
-
-    if (resolvedPath) {
-      const ext = extname(resolvedPath);
-      const contentType = mimeTypes[ext]
-        || 'application/javascript';
-
-      try {
-        const content = readFileSync(resolvedPath);
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': '*',
-        });
-        res.end(content);
-      } catch (err) {
-        res.writeHead(500);
-        res.end('Error reading file: ' + resolvedPath);
-      }
-    } else {
-      // ✅ Fallback to index.html for SPA routing
-      try {
-        const index = readFileSync(
-          join(ROOT, 'index.html')
-        );
-        res.writeHead(200, {
-          'Content-Type': 'text/html',
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.end(index);
-      } catch {
-        res.writeHead(404);
-        res.end('Not found: ' + urlPath);
-      }
+{
+    "imports": {
+      "@arcgis/core/": "/node_modules/@arcgis/core/",
+      "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
+      "@arcgis/map-components": "/node_modules/@arcgis/map-components/dist/index.js",
+      "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
+      "@esri/calcite-components": "/node_modules/@esri/calcite-components/dist/index.js",
+      "lit": "/node_modules/lit/index.js",
+      "lit/": "/node_modules/lit/",
+      "lit/decorators.js": "/node_modules/lit/decorators.js",
+      "lit/html.js": "/node_modules/lit/html.js",
+      "lit/directives/": "/node_modules/lit/directives/",
+      "@lit/reactive-element": "/node_modules/@lit/reactive-element/reactive-element.js",
+      "@lit/reactive-element/": "/node_modules/@lit/reactive-element/",
+      "lit-element/lit-element.js": "/node_modules/lit-element/lit-element.js",
+      "lit-html": "/node_modules/lit-html/lit-html.js",
+      "lit-html/": "/node_modules/lit-html/"
     }
-  }).listen(3333, () => {
-    console.log('✅ Server running: http://localhost:3333');
-    console.log('✅ ROOT:', ROOT);
-  });
-}
-
-function serve() {
-  spawn("npm run build.watch", OPTIONS);
-  startServer();
-}
-
-serve();
+  }
+  </script>
