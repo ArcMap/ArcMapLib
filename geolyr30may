@@ -2,68 +2,71 @@ import { spawn } from 'child_process';
 import { createServer } from 'http';
 import { readFileSync, existsSync } from 'fs';
 import { join, extname } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const OPTIONS = { stdio: 'inherit', shell: true };
 
-// ✅ Simple static file server
-function startServer() {
-  const mimeTypes = {
-    '.js': 'application/javascript',
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.wasm': 'application/wasm',
-  };
+const mimeTypes = {
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ttf': 'font/ttf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
 
+function startServer() {
   createServer((req, res) => {
-    // ✅ Serve node_modules
-    let filePath = '.' + req.url.split('?')[0];
-    
-    if (!existsSync(filePath)) {
-      filePath = './index.html';
-    }
+    // ✅ Strip query string
+    const urlPath = req.url.split('?')[0];
+
+    // ✅ Resolve file path from project root
+    const filePath = join(__dirname, urlPath);
 
     const ext = extname(filePath);
-    const contentType = mimeTypes[ext] 
+    const contentType = mimeTypes[ext]
       || 'application/octet-stream';
 
     try {
-      const content = readFileSync(filePath);
-      res.writeHead(200, { 
-        'Content-Type': contentType,
-        'Access-Control-Allow-Origin': '*',
-      });
-      res.end(content);
-    } catch {
+      if (existsSync(filePath)) {
+        const content = readFileSync(filePath);
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(content);
+      } else {
+        // ✅ Fallback to index.html
+        const index = readFileSync(
+          join(__dirname, 'index.html')
+        );
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(index);
+      }
+    } catch (err) {
       res.writeHead(404);
-      res.end('Not found');
+      res.end('Not found: ' + urlPath);
     }
   }).listen(3333, () => {
-    console.log('Server: http://localhost:3333');
+    console.log('✅ Server: http://localhost:3333');
   });
 }
 
 function serve() {
   spawn("npm run build.watch", OPTIONS);
-  // ✅ Replace npm run server with our server
   startServer();
 }
 
 serve();
-
-
-
-
-<script type="importmap">
-{
-  "imports": {
-    "@arcgis/core/": "/node_modules/@arcgis/core/",
-    "@arcgis/map-components/": "/node_modules/@arcgis/map-components/",
-    "@esri/calcite-components/": "/node_modules/@esri/calcite-components/",
-    "lit": "/node_modules/lit/index.js",
-    "lit/": "/node_modules/lit/"
-  }
-}
-</script>
-
-<script type="module" src="./dist/index.js"></script>
