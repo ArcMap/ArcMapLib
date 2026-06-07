@@ -1,9 +1,60 @@
-const polygonLayer = window.upMapDebug.map.layers.toArray().find(
-  l => l.id.includes("Polygon Layer") && l.id.includes("-graphics")
-);
+private showGraphicPopup(
+  graphic: Graphic,
+  mapPoint: Point,
+  graphics: Graphic[],
+): void {
+  if (
+    this._editorOpen ||
+    this.inDrawingMode ||
+    this._isStartingDraw ||
+    this.shouldSuppressPopup()
+  ) {
+    return;
+  }
+  const popup: any = this.view?.popup;
+  if (!popup) return;
 
-polygonLayer.graphics.forEach(g => {
-  const symbol = g.symbol.clone();
-  symbol.color.a = 1;
-  g.symbol = symbol;
-});
+  const popupGraphics = (graphics ?? []).filter(
+    (g) => g?.geometry && g?.layer === this.featureLayer,
+  );
+  if (popupGraphics.length === 0) return;
+
+  // Ensure each feature carries its template.
+  let builtAny = false;
+  for (const g of popupGraphics) {
+    if (!g.popupTemplate) {
+      const t = this.buildPopupTemplate(g);
+      if (t) g.popupTemplate = t;
+    }
+    if (g.popupTemplate) builtAny = true;
+  }
+  if (!builtAny) return;
+
+  const location =
+    mapPoint ?? UpGeojsonLayer.getPopupPoint(graphic.geometry) ?? undefined;
+  if (!location) return;
+
+  popup.autoOpenEnabled = false;
+
+  // ONE atomic call. Replaces any open popup. No guard, no stationary wait, no timers.
+  (this.view as any).openPopup({
+    features: popupGraphics,
+    location,
+    updateLocationEnabled: false,
+  });
+
+  this._popupOpen = true;
+}
+
+
+
+public closePopup(): void {
+  this._popupOpen = false;
+  try {
+    (this.view as any)?.closePopup?.();   // 5.0 pair of openPopup()
+  } catch {}
+  try {
+    this._popupHighlightHandle?.remove?.();
+  } catch {}
+  this._popupHighlightHandle = null;
+}
