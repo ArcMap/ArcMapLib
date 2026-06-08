@@ -1,54 +1,37 @@
 private updateEllipsisTooltips(): void {
   requestAnimationFrame(() => {
-    const textElements = document.querySelectorAll(
-      '.autocomplete-ellipsis-text'
-    );
+    document
+      .querySelectorAll('.autocomplete-text-wrapper')
+      .forEach((wrapper) => {
 
-    textElements.forEach((element) => {
-      const textElement = element as HTMLElement;
-
-      const tooltipElement =
-        textElement.parentElement?.querySelector(
-          '.autocomplete-name-tooltip'
+        const textElement = wrapper.querySelector(
+          '.autocomplete-ellipsis-text'
         ) as HTMLElement | null;
 
-      if (!tooltipElement) {
-        return;
-      }
+        if (!textElement) {
+          return;
+        }
 
-      const hasEllipsis =
-        textElement.scrollWidth > textElement.clientWidth;
+        const hasEllipsis =
+          textElement.scrollWidth > textElement.clientWidth;
 
-      if (hasEllipsis) {
-        tooltipElement.removeAttribute('hidden');
-      } else {
-        tooltipElement.setAttribute('hidden', '');
-      }
-    });
+        wrapper.querySelectorAll(
+          '.autocomplete-name-tooltip'
+        ).forEach((tooltip) => tooltip.remove());
+
+        if (!hasEllipsis) {
+          return;
+        }
+
+        const tooltip = document.createElement('up-tooltip');
+
+        tooltip.className = 'autocomplete-name-tooltip';
+        tooltip.setAttribute('placement', 'top');
+        tooltip.setAttribute('show-arrow', '');
+
+        tooltip.innerHTML = textElement.dataset['tooltipText'] ?? '';
+
+        wrapper.appendChild(tooltip);
+      });
   });
 }
-
-
-
-<span
-  class="autocomplete-text-wrapper"
-  style="${this.getAutocompleteTextWrapperStyle()}"
->
-  <span
-    class="autocomplete-ellipsis-text"
-    data-tooltip-text="${displayText}"
-    style="${this.getAutocompleteTextStyle()}"
-  >
-    ${displayText}
-  </span>
-
-  <up-tooltip
-    class="autocomplete-name-tooltip"
-    popover="manual"
-    placement="top"
-    show-arrow
-    hidden
-  >
-    ${displayText}
-  </up-tooltip>
-</span>
