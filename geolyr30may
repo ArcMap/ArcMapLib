@@ -1,87 +1,22 @@
-renderFenceSetName(item: string): string {
-  const isGeofence = item?.includes('|1|');
-  const parts = isGeofence ? item.split('|1|') : [];
-  const meta = this.searchedAssetsMetadata[item];
-
-  const displayText = isG
-    ? meta?.id ?? parts[0] ?? ''
-    : meta?.id ?? item;
-
-  const typeLabel = isG ? 'G' : meta?.type ?? '';
-  const rawValueLabel = isG ? parts[1]?.split('|')[1] ?? '' : '';
-
-  const chipLabel = isG && rawValueLabel
-    ? `Fence Set: ${rawValueLabel}`
-    : typeLabel;
-
-  return `
-    <div style="${this.getAutocompleteItemStyle()}">
-      <span
-        class="autocomplete-ellipsis-text"
-        data-tooltip="${displayText}"
-        style="${this.getAutocompleteTextStyle()}"
-      >
-        ${displayText}
-      </span>
-
-      <span style="${this.getAutocompleteChipStyle()}">
-        ${chipLabel}
-      </span>
-    </div>
-  `;
-}
-
-
-
-private getAutocompleteItemStyle(): string {
-  return `
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    width: 100%;
-    align-items: center;
-    gap: 8px;
-  `;
-}
-
-private getAutocompleteTextStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `;
-}
-
-private getAutocompleteChipStyle(): string {
-  return `
-    font-weight: 400;
-    font-size: 12px;
-    line-height: 16px;
-    letter-spacing: 0.4px;
-    text-align: center;
-    color: #000;
-    background: #DCEEE0;
-    border-radius: 10px;
-    padding: 2px 10px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  `;
-}
-
-
 private updateEllipsisTooltips(): void {
   requestAnimationFrame(() => {
-    const elements = document.querySelectorAll('.autocomplete-ellipsis-text');
+    const tooltipElements = document.querySelectorAll('.autocomplete-name-tooltip');
 
-    elements.forEach((element) => {
-      const htmlElement = element as HTMLElement;
-      const tooltipText = htmlElement.dataset['tooltip'] ?? '';
+    tooltipElements.forEach((tooltipElement) => {
+      const textElement = tooltipElement.querySelector(
+        '.autocomplete-ellipsis-text'
+      ) as HTMLElement | null;
 
-      if (htmlElement.scrollWidth > htmlElement.clientWidth) {
-        htmlElement.setAttribute('title', tooltipText);
+      if (!textElement) {
+        return;
+      }
+
+      const isEllipsisVisible = textElement.scrollWidth > textElement.clientWidth;
+
+      if (isEllipsisVisible) {
+        tooltipElement.removeAttribute('disabled');
       } else {
-        htmlElement.removeAttribute('title');
+        tooltipElement.setAttribute('disabled', 'true');
       }
     });
   });
