@@ -1,38 +1,13 @@
-return `
-  <div
-    class="autocomplete-item"
-    style="${this.getAutocompleteItemStyle()}"
-  >
-    <span
-      class="autocomplete-text-wrapper"
-      data-item-key="${item}"
-      style="${this.getAutocompleteTextWrapperStyle()}"
-    >
-      <span
-        class="autocomplete-ellipsis-text"
-        style="${this.getAutocompleteTextStyle()}"
-      >
-        ${displayText}
-      </span>
-
-      ${
-        shouldShowTooltip
-          ? `
-            <tooltip
-              class="autocomplete-name-tooltip"
-              placement="top"
-              show-arrow
-              style="position:absolute;"
-            >
-              ${displayText}
-            </tooltip>
-          `
-          : ''
-      }
-    </span>
-
-    <span style="${this.getAutocompleteChipStyle()}">
-      ${chipLabel}
-    </span>
-  </div>
-`;
+{
+  "type": "simple",
+  "symbol": {
+    "type": "simple-marker",
+    "style": "circle",
+    "size": 12,
+    "color": [0, 122, 255, 1],
+    "outline": {
+      "color": [255, 255, 255, 1],
+      "width": 1
+    }
+  }
+}
