@@ -1,11 +1,89 @@
+
+
+  return `
+    <div style="${this.getAutocompleteItemStyle()}">
+      <span
+        class="autocomplete-text-wrapper"
+        style="${this.getAutocompleteTextWrapperStyle()}"
+      >
+        <span
+          class="autocomplete-ellipsis-text"
+          data-tooltip-text="${displayText}"
+          style="${this.getAutocompleteTextStyle()}"
+        >
+          ${displayText}
+        </span>
+
+        <up-tooltip
+          class="autocomplete-name-tooltip"
+          data-tooltip-text="${displayText}"
+          disabled
+        ></up-tooltip>
+      </span>
+
+      <span style="${this.getAutocompleteChipStyle()}">
+        ${chipLabel}
+      </span>
+    </div>
+  `;
+}
+
+
+
+
+private getAutocompleteItemStyle(): string {
+  return `
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+  `;
+}
+
+private getAutocompleteTextWrapperStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+  `;
+}
+
+private getAutocompleteTextStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `;
+}
+
+private getAutocompleteChipStyle(): string {
+  return `
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.4px;
+    text-align: center;
+    color: #000;
+    background: #DCEEE0;
+    border-radius: 10px;
+    padding: 2px 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  `;
+}
+
+
+
+
 private updateEllipsisTooltips(): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      const textWrappers = document.querySelectorAll(
-        '.autocomplete-text-wrapper'
-      );
+      const wrappers = document.querySelectorAll('.autocomplete-text-wrapper');
 
-      textWrappers.forEach((wrapperElement) => {
+      wrappers.forEach((wrapperElement) => {
         const textElement = wrapperElement.querySelector(
           '.autocomplete-ellipsis-text'
         ) as HTMLElement | null;
@@ -18,15 +96,26 @@ private updateEllipsisTooltips(): void {
           return;
         }
 
+        const tooltipText =
+          textElement.dataset['tooltipText'] ?? '';
+
         const isEllipsisVisible =
           textElement.scrollWidth > textElement.clientWidth;
 
         if (isEllipsisVisible) {
           tooltipElement.removeAttribute('disabled');
           (tooltipElement as any).disabled = false;
+
+          tooltipElement.innerHTML = `
+            <div class="multiline-tooltip">
+              ${tooltipText}
+            </div>
+          `;
         } else {
           tooltipElement.setAttribute('disabled', '');
           (tooltipElement as any).disabled = true;
+
+          tooltipElement.innerHTML = '';
         }
       });
     });
