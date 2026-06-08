@@ -1,7 +1,28 @@
-private getAutocompleteTextWrapperStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-  `;
+private updateEllipsisTooltips(): void {
+  requestAnimationFrame(() => {
+    const dropdownItems = document.querySelectorAll('.autocomplete-text-wrapper');
+
+    dropdownItems.forEach((dropdownItem) => {
+      const textElement = dropdownItem.querySelector(
+        '.autocomplete-ellipsis-text'
+      ) as HTMLElement | null;
+
+      const tooltipElement = dropdownItem.querySelector(
+        '.autocomplete-name-tooltip'
+      ) as HTMLElement | null;
+
+      if (!textElement || !tooltipElement) {
+        return;
+      }
+
+      const isEllipsisVisible =
+        textElement.scrollWidth > textElement.clientWidth;
+
+      if (isEllipsisVisible) {
+        tooltipElement.removeAttribute('disabled');
+      } else {
+        tooltipElement.setAttribute('disabled', 'true');
+      }
+    });
+  });
 }
