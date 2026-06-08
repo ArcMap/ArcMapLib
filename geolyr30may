@@ -1,28 +1,34 @@
 private updateEllipsisTooltips(): void {
   requestAnimationFrame(() => {
-    const dropdownItems = document.querySelectorAll('.autocomplete-text-wrapper');
+    requestAnimationFrame(() => {
+      const textWrappers = document.querySelectorAll(
+        '.autocomplete-text-wrapper'
+      );
 
-    dropdownItems.forEach((dropdownItem) => {
-      const textElement = dropdownItem.querySelector(
-        '.autocomplete-ellipsis-text'
-      ) as HTMLElement | null;
+      textWrappers.forEach((wrapperElement) => {
+        const textElement = wrapperElement.querySelector(
+          '.autocomplete-ellipsis-text'
+        ) as HTMLElement | null;
 
-      const tooltipElement = dropdownItem.querySelector(
-        '.autocomplete-name-tooltip'
-      ) as HTMLElement | null;
+        const tooltipElement = wrapperElement.querySelector(
+          'up-tooltip.autocomplete-name-tooltip'
+        ) as HTMLElement | null;
 
-      if (!textElement || !tooltipElement) {
-        return;
-      }
+        if (!textElement || !tooltipElement) {
+          return;
+        }
 
-      const isEllipsisVisible =
-        textElement.scrollWidth > textElement.clientWidth;
+        const isEllipsisVisible =
+          textElement.scrollWidth > textElement.clientWidth;
 
-      if (isEllipsisVisible) {
-        tooltipElement.removeAttribute('disabled');
-      } else {
-        tooltipElement.setAttribute('disabled', 'true');
-      }
+        if (isEllipsisVisible) {
+          tooltipElement.removeAttribute('disabled');
+          (tooltipElement as any).disabled = false;
+        } else {
+          tooltipElement.setAttribute('disabled', '');
+          (tooltipElement as any).disabled = true;
+        }
+      });
     });
   });
 }
