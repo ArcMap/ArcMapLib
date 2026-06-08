@@ -1,81 +1,38 @@
-private updateEllipsisTooltipMap(): void {
-  if (this.updatingEllipsisMap) {
-    return;
-  }
+return `
+  <div
+    class="autocomplete-item"
+    style="${this.getAutocompleteItemStyle()}"
+  >
+    <span
+      class="autocomplete-text-wrapper"
+      data-item-key="${item}"
+      style="${this.getAutocompleteTextWrapperStyle()}"
+    >
+      <span
+        class="autocomplete-ellipsis-text"
+        style="${this.getAutocompleteTextStyle()}"
+      >
+        ${displayText}
+      </span>
 
-  this.updatingEllipsisMap = true;
-
-  requestAnimationFrame(() => {
-    const wrappers = this.findAutocompleteTextWrappers();
-    const nextMap: { [key: string]: boolean } = {};
-
-    wrappers.forEach((wrapperElement) => {
-      const itemKey = wrapperElement.dataset['itemKey'];
-
-      const textElement = wrapperElement.querySelector(
-        '.autocomplete-ellipsis-text'
-      ) as HTMLElement | null;
-
-      if (!itemKey || !textElement) {
-        return;
+      ${
+        shouldShowTooltip
+          ? `
+            <up-tooltip
+              class="autocomplete-name-tooltip"
+              placement="top"
+              show-arrow
+              style="position:absolute;"
+            >
+              ${displayText}
+            </up-tooltip>
+          `
+          : ''
       }
+    </span>
 
-      nextMap[itemKey] =
-        textElement.scrollWidth > textElement.clientWidth;
-    });
-
-    const hasChanged =
-      JSON.stringify(this.ellipsisTooltipMap) !== JSON.stringify(nextMap);
-
-    this.ellipsisTooltipMap = nextMap;
-    this.updatingEllipsisMap = false;
-
-    if (hasChanged) {
-      this.searchedAssetsList = [...this.searchedAssetsList];
-
-      requestAnimationFrame(() => {
-        this.observeAutocompleteTextWidthChanges();
-      });
-    }
-  });
-}
-
-
-
-private findAutocompleteTextWrappers(): HTMLElement[] {
-  const wrappers: HTMLElement[] = [];
-
-  const collectFromRoot = (root: Document | ShadowRoot): void => {
-    root.querySelectorAll('.autocomplete-text-wrapper').forEach((element) => {
-      wrappers.push(element as HTMLElement);
-    });
-
-    root.querySelectorAll('*').forEach((element) => {
-      const shadowRoot = (element as HTMLElement).shadowRoot;
-
-      if (shadowRoot) {
-        collectFromRoot(shadowRoot);
-      }
-    });
-  };
-
-  collectFromRoot(document);
-
-  return wrappers;
-}
-
-
-
-private observeAutocompleteTextWidthChanges(): void {
-  this.resizeObserver?.disconnect();
-
-  this.resizeObserver = new ResizeObserver(() => {
-    this.updateEllipsisTooltipMap();
-  });
-
-  const wrappers = this.findAutocompleteTextWrappers();
-
-  wrappers.forEach((wrapperElement) => {
-    this.resizeObserver?.observe(wrapperElement);
-  });
-}
+    <span style="${this.getAutocompleteChipStyle()}">
+      ${chipLabel}
+    </span>
+  </div>
+`;
