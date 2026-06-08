@@ -1,29 +1,41 @@
 if (thisLayerResults.length === 0) {
-  // Fallback: query features within ~10px of the click (zoom-independent).
+  // featureLayer is a GraphicsLayer — find the nearest graphic in screen space.
   try {
-    const lv: any = await this.view.whenLayerView(this.featureLayer);
-    const tolPx = 10;
-    const buf = tolPx * this.view.resolution; // map units per pixel at this zoom
-    const mp = evt.mapPoint;
-    const area = new Extent({
-      xmin: mp.x - buf, ymin: mp.y - buf,
-      xmax: mp.x + buf, ymax: mp.y + buf,
-      spatialReference: mp.spatialReference,
-    });
-    const q = this.featureLayer.createQuery();
-    q.geometry = area;
-    q.spatialRelationship = "intersects";
-    q.returnGeometry = true;
-    q.outFields = ["*"];
-    const res = await lv.queryFeatures(q);
-    if (res?.features?.length) {
-      const g = res.features[0];
-      this.showGraphicPopup(g, mp, [g]);
+    const tolPx = 12;
+    const graphics = this.featureLayer.graphics?.toArray?.() ?? [];
+    let best: Graphic | null = null;
+    let bestDist = tolPx;
+
+    for (const g of graphics) {
+      const geom: any = g?.geometry;
+      if (!geom) continue;
+      // Use the point itself, or a polygon/circle's center, for the pixel test.
+      const pt =
+        geom.type === "point"
+          ? geom
+          : (geom.centroid ?? geom.extent?.center);
+      if (!pt) continue;
+
+      const sp = this.view.toScreen(pt);
+      if (!sp) continue;
+
+      const d = Math.hypot(sp.x - evt.x, sp.y - evt.y);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = g;
+      }
+    }
+
+    if (best) {
+      this.showGraphicPopup(best, evt.mapPoint, [best]);
       return;
     }
   } catch (e: any) {
-    if (e?.name !== "AbortError") console.warn("[up-geojson-layer] fallback query", e);
+    if (e?.name !== "AbortError") {
+      console.warn("[up-geojson-layer] fallback nearest-graphic search", e);
+    }
   }
+
   if (this._popupOpen) this.closePopup();
   return;
 }
