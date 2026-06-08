@@ -1,7 +1,131 @@
-<span
-  class="autocomplete-ellipsis-text"
-  data-tooltip-text="${displayText}"
-  style="${this.getAutocompleteTextStyle()}"
->
-  ${displayText}
-</span>
+
+
+  const shouldShowTooltip = this.ellipsisTooltipMap[item] === true;
+
+  return `
+    <div style="${this.getAutocompleteItemStyle()}">
+      <span
+        class="autocomplete-text-wrapper"
+        data-item-key="${item}"
+        style="${this.getAutocompleteTextWrapperStyle()}"
+      >
+        ${
+          shouldShowTooltip
+            ? `
+              <up-tooltip
+                class="autocomplete-name-tooltip"
+                placement="top"
+                show-arrow
+              >
+                <span
+                  class="autocomplete-ellipsis-text"
+                  style="${this.getAutocompleteTextStyle()}"
+                >
+                  ${displayText}
+                </span>
+
+                <div class="multiline-tooltip">
+                  ${displayText}
+                </div>
+              </up-tooltip>
+            `
+            : `
+              <span
+                class="autocomplete-ellipsis-text"
+                style="${this.getAutocompleteTextStyle()}"
+              >
+                ${displayText}
+              </span>
+            `
+        }
+      </span>
+
+      <span style="${this.getAutocompleteChipStyle()}">
+        ${chipLabel}
+      </span>
+    </div>
+  `;
+}
+
+private getAutocompleteItemStyle(): string {
+  return `
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+  `;
+}
+
+private getAutocompleteTextWrapperStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+  `;
+}
+
+private getAutocompleteTextStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `;
+}
+
+private getAutocompleteChipStyle(): string {
+  return `
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.4px;
+    text-align: center;
+    color: #000;
+    background: #DCEEE0;
+    border-radius: 10px;
+    padding: 2px 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  `;
+}
+
+private updateEllipsisTooltipMap(): void {
+  setTimeout(() => {
+    requestAnimationFrame(() => {
+      const autocompleteElement = document.querySelector(
+        'up-autocomplete'
+      ) as HTMLElement | null;
+
+      const root = autocompleteElement?.shadowRoot ?? document;
+
+      const wrappers = root.querySelectorAll(
+        '.autocomplete-text-wrapper'
+      );
+
+      const nextMap: { [key: string]: boolean } = {};
+
+      wrappers.forEach((wrapper) => {
+        const wrapperElement = wrapper as HTMLElement;
+
+        const itemKey = wrapperElement.dataset['itemKey'];
+
+        const textElement = wrapperElement.querySelector(
+          '.autocomplete-ellipsis-text'
+        ) as HTMLElement | null;
+
+        if (!itemKey || !textElement) {
+          return;
+        }
+
+        nextMap[itemKey] =
+          textElement.scrollWidth > textElement.clientWidth;
+      });
+
+      this.ellipsisTooltipMap = nextMap;
+
+      this.searchedAssetsList = [...this.searchedAssetsList];
+    });
+  }, 0);
+}
