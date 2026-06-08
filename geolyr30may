@@ -1,38 +1,8 @@
-return `
-  <div
-    class="autocomplete-item"
-    style="${this.getAutocompleteItemStyle()}"
-  >
-    <span
-      class="autocomplete-text-wrapper"
-      data-item-key="${item}"
-      style="${this.getAutocompleteTextWrapperStyle()}"
-    >
-      <span
-        class="autocomplete-ellipsis-text"
-        style="${this.getAutocompleteTextStyle()}"
-      >
-        ${displayText}
-      </span>
+::ng-deep up-result-list li.list-item {
+  width: 100% !important;
+}
 
-      ${
-        shouldShowTooltip
-          ? `
-            <tooltip
-              class="autocomplete-name-tooltip"
-              placement="top"
-              show-arrow
-              style="position:absolute;"
-            >
-              ${displayText}
-            </tooltip>
-          `
-          : ''
-      }
-    </span>
-
-    <span style="${this.getAutocompleteChipStyle()}">
-      ${chipLabel}
-    </span>
-  </div>
-`;
+::ng-deep up-result-list li.list-item > .autocomplete-item {
+  width: 100% !important;
+  flex: 1 1 100% !important;
+}
