@@ -1,72 +1,54 @@
+private updateEllipsisTooltips(): void {
+  requestAnimationFrame(() => {
+    const textElements = document.querySelectorAll(
+      '.autocomplete-ellipsis-text'
+    );
 
+    textElements.forEach((element) => {
+      const textElement = element as HTMLElement;
 
-  const shouldShowTooltip = displayText.length > 24;
+      const tooltipElement =
+        textElement.parentElement?.querySelector(
+          '.autocomplete-name-tooltip'
+        ) as HTMLElement | null;
 
-  return `
-    <div style="${this.getAutocompleteItemStyle()}">
-      <span
-        class="autocomplete-text-wrapper"
-        style="${this.getAutocompleteTextWrapperStyle()}"
-      >
-        ${
-          shouldShowTooltip
-            ? `
-              <up-tooltip>
-                <span
-                  class="autocomplete-ellipsis-text"
-                  style="${this.getAutocompleteTextStyle()}"
-                >
-                  ${displayText}
-                </span>
+      if (!tooltipElement) {
+        return;
+      }
 
-                <div class="multiline-tooltip">
-                  ${displayText}
-                </div>
-              </up-tooltip>
-            `
-            : `
-              <span
-                class="autocomplete-ellipsis-text"
-                style="${this.getAutocompleteTextStyle()}"
-              >
-                ${displayText}
-              </span>
-            `
-        }
-      </span>
+      const hasEllipsis =
+        textElement.scrollWidth > textElement.clientWidth;
 
-      <span style="${this.getAutocompleteChipStyle()}">
-        ${chipLabel}
-      </span>
-    </div>
-  `;
+      if (hasEllipsis) {
+        tooltipElement.removeAttribute('hidden');
+      } else {
+        tooltipElement.setAttribute('hidden', '');
+      }
+    });
+  });
 }
 
 
-private getAutocompleteItemStyle(): string {
-  return `
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    width: 100%;
-    align-items: center;
-    gap: 8px;
-  `;
-}
 
-private getAutocompleteTextWrapperStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-  `;
-}
+<span
+  class="autocomplete-text-wrapper"
+  style="${this.getAutocompleteTextWrapperStyle()}"
+>
+  <span
+    class="autocomplete-ellipsis-text"
+    data-tooltip-text="${displayText}"
+    style="${this.getAutocompleteTextStyle()}"
+  >
+    ${displayText}
+  </span>
 
-private getAutocompleteTextStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `;
-}
+  <up-tooltip
+    class="autocomplete-name-tooltip"
+    popover="manual"
+    placement="top"
+    show-arrow
+    hidden
+  >
+    ${displayText}
+  </up-tooltip>
+</span>
