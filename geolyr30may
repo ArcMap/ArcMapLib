@@ -1,4 +1,22 @@
+private ellipsisTooltipMap: { [key: string]: boolean } = {};
+private isUpdatingEllipsisTooltipMap = false;
 
+renderFenceSetName(item: string): string {
+  const isG = item?.includes('|1|');
+  const parts = isG ? item.split('|1|') : [];
+  const meta = this.searchedAssetsMetadata[item];
+
+  const displayText = isG
+    ? meta?.id ?? parts[0] ?? ''
+    : meta?.id ?? item;
+
+  const typeLabel = isG ? 'G' : meta?.type ?? '';
+  const rawValueLabel = isG ? parts[1]?.split('|')[1] ?? '' : '';
+
+  const chipLabel =
+    isGeofence && rawValueLabel
+      ? `Fence Set: ${rawValueLabel}`
+      : typeLabel;
 
   const shouldShowTooltip = this.ellipsisTooltipMap[item] === true;
 
@@ -12,7 +30,7 @@
         ${
           shouldShowTooltip
             ? `
-              <up-tooltip
+              <tooltip
                 class="autocomplete-name-tooltip"
                 placement="top"
                 show-arrow
@@ -27,7 +45,7 @@
                 <div class="multiline-tooltip">
                   ${displayText}
                 </div>
-              </up-tooltip>
+              </tooltip>
             `
             : `
               <span
@@ -47,68 +65,20 @@
   `;
 }
 
-private getAutocompleteItemStyle(): string {
-  return `
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    width: 100%;
-    align-items: center;
-    gap: 8px;
-  `;
-}
-
-private getAutocompleteTextWrapperStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-  `;
-}
-
-private getAutocompleteTextStyle(): string {
-  return `
-    min-width: 0;
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `;
-}
-
-private getAutocompleteChipStyle(): string {
-  return `
-    font-weight: 400;
-    font-size: 12px;
-    line-height: 16px;
-    letter-spacing: 0.4px;
-    text-align: center;
-    color: #000;
-    background: #DCEEE0;
-    border-radius: 10px;
-    padding: 2px 10px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  `;
-}
-
 private updateEllipsisTooltipMap(): void {
+  if (this.isUpdatingEllipsisTooltipMap) {
+    return;
+  }
+
+  this.isUpdatingEllipsisTooltipMap = true;
+
   setTimeout(() => {
     requestAnimationFrame(() => {
-      const autocompleteElement = document.querySelector(
-        'up-autocomplete'
-      ) as HTMLElement | null;
-
-      const root = autocompleteElement?.shadowRoot ?? document;
-
-      const wrappers = root.querySelectorAll(
-        '.autocomplete-text-wrapper'
-      );
+      const wrappers = this.findAutocompleteTextWrappers();
 
       const nextMap: { [key: string]: boolean } = {};
 
-      wrappers.forEach((wrapper) => {
-        const wrapperElement = wrapper as HTMLElement;
-
+      wrappers.forEach((wrapperElement) => {
         const itemKey = wrapperElement.dataset['itemKey'];
 
         const textElement = wrapperElement.querySelector(
@@ -123,9 +93,38 @@ private updateEllipsisTooltipMap(): void {
           textElement.scrollWidth > textElement.clientWidth;
       });
 
+      const hasChanged =
+        JSON.stringify(this.ellipsisTooltipMap) !== JSON.stringify(nextMap);
+
       this.ellipsisTooltipMap = nextMap;
 
-      this.searchedAssetsList = [...this.searchedAssetsList];
+      this.isUpdatingEllipsisTooltipMap = false;
+
+      if (hasChanged) {
+        this.searchedAssetsList = [...this.searchedAssetsList];
+      }
     });
   }, 0);
+}
+
+private findAutocompleteTextWrappers(): HTMLElement[] {
+  const wrappers: HTMLElement[] = [];
+
+  const collectFromRoot = (root: Document | ShadowRoot): void => {
+    root.querySelectorAll('.autocomplete-text-wrapper').forEach((element) => {
+      wrappers.push(element as HTMLElement);
+    });
+
+    root.querySelectorAll('*').forEach((element) => {
+      const shadowRoot = (element as HTMLElement).shadowRoot;
+
+      if (shadowRoot) {
+        collectFromRoot(shadowRoot);
+      }
+    });
+  };
+
+  collectFromRoot(document);
+
+  return wrappers;
 }
