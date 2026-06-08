@@ -11,13 +11,13 @@ renderFenceSetName(item: string): string {
   const rawValueLabel = isG ? parts[1]?.split('|')[1] ?? '' : '';
 
   const chipLabel =
-    isGeofence && rawValueLabel
+    isG&& rawValueLabel
       ? `Fence Set: ${rawValueLabel}`
       : typeLabel;
 
   return `
     <div style="${this.getAutocompleteItemStyle()}">
-      <up-tooltip class="autocomplete-name-tooltip" disabled>
+      <tooltip class="autocomplete-name-tooltip" disabled>
         <span
           class="autocomplete-ellipsis-text"
           data-tooltip="${displayText}"
@@ -29,7 +29,7 @@ renderFenceSetName(item: string): string {
         <div class="multiline-tooltip">
           ${displayText}
         </div>
-      </up-tooltip>
+      </tooltip>
 
       <span style="${this.getAutocompleteChipStyle()}">
         ${chipLabel}
