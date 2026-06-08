@@ -1,51 +1,81 @@
-private registerAutocompleteTooltipHover(): void {
-  document.addEventListener('mouseover', this.handleAutocompleteTooltipHover);
+private updateEllipsisTooltipMap(): void {
+  if (this.updatingEllipsisMap) {
+    return;
+  }
+
+  this.updatingEllipsisMap = true;
+
+  requestAnimationFrame(() => {
+    const wrappers = this.findAutocompleteTextWrappers();
+    const nextMap: { [key: string]: boolean } = {};
+
+    wrappers.forEach((wrapperElement) => {
+      const itemKey = wrapperElement.dataset['itemKey'];
+
+      const textElement = wrapperElement.querySelector(
+        '.autocomplete-ellipsis-text'
+      ) as HTMLElement | null;
+
+      if (!itemKey || !textElement) {
+        return;
+      }
+
+      nextMap[itemKey] =
+        textElement.scrollWidth > textElement.clientWidth;
+    });
+
+    const hasChanged =
+      JSON.stringify(this.ellipsisTooltipMap) !== JSON.stringify(nextMap);
+
+    this.ellipsisTooltipMap = nextMap;
+    this.updatingEllipsisMap = false;
+
+    if (hasChanged) {
+      this.searchedAssetsList = [...this.searchedAssetsList];
+
+      requestAnimationFrame(() => {
+        this.observeAutocompleteTextWidthChanges();
+      });
+    }
+  });
 }
 
-private handleAutocompleteTooltipHover = (event: MouseEvent): void => {
-  const target = event.target as HTMLElement | null;
-
-  if (!target) {
-    return;
-  }
-
-  const textElement = target.closest(
-    '.autocomplete-ellipsis-text'
-  ) as HTMLElement | null;
-
-  if (!textElement) {
-    return;
-  }
-
-  const wrapperElement = textElement.closest(
-    '.autocomplete-text-wrapper'
-  ) as HTMLElement | null;
-
-  if (!wrapperElement) {
-    return;
-  }
-
-  const tooltipElement = wrapperElement.querySelector(
-    'up-tooltip.autocomplete-name-tooltip'
-  ) as HTMLElement | null;
-
-  if (!tooltipElement) {
-    return;
-  }
-
-  const hasEllipsis =
-    textElement.scrollWidth > textElement.clientWidth;
-
-  if (hasEllipsis) {
-    tooltipElement.style.display = '';
-  } else {
-    tooltipElement.style.display = 'none';
-  }
-};
 
 
-ngOnDestroy(): void {
-  // keep your existing ngOnDestroy code
+private findAutocompleteTextWrappers(): HTMLElement[] {
+  const wrappers: HTMLElement[] = [];
 
-  document.removeEventListener('mouseover', this.handleAutocompleteTooltipHover);
+  const collectFromRoot = (root: Document | ShadowRoot): void => {
+    root.querySelectorAll('.autocomplete-text-wrapper').forEach((element) => {
+      wrappers.push(element as HTMLElement);
+    });
+
+    root.querySelectorAll('*').forEach((element) => {
+      const shadowRoot = (element as HTMLElement).shadowRoot;
+
+      if (shadowRoot) {
+        collectFromRoot(shadowRoot);
+      }
+    });
+  };
+
+  collectFromRoot(document);
+
+  return wrappers;
+}
+
+
+
+private observeAutocompleteTextWidthChanges(): void {
+  this.resizeObserver?.disconnect();
+
+  this.resizeObserver = new ResizeObserver(() => {
+    this.updateEllipsisTooltipMap();
+  });
+
+  const wrappers = this.findAutocompleteTextWrappers();
+
+  wrappers.forEach((wrapperElement) => {
+    this.resizeObserver?.observe(wrapperElement);
+  });
 }
