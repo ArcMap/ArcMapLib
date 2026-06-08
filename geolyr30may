@@ -1,37 +1,7 @@
-private updateEllipsisTooltips(): void {
-  requestAnimationFrame(() => {
-    document
-      .querySelectorAll('.autocomplete-text-wrapper')
-      .forEach((wrapper) => {
-
-        const textElement = wrapper.querySelector(
-          '.autocomplete-ellipsis-text'
-        ) as HTMLElement | null;
-
-        if (!textElement) {
-          return;
-        }
-
-        const hasEllipsis =
-          textElement.scrollWidth > textElement.clientWidth;
-
-        wrapper.querySelectorAll(
-          '.autocomplete-name-tooltip'
-        ).forEach((tooltip) => tooltip.remove());
-
-        if (!hasEllipsis) {
-          return;
-        }
-
-        const tooltip = document.createElement('up-tooltip');
-
-        tooltip.className = 'autocomplete-name-tooltip';
-        tooltip.setAttribute('placement', 'top');
-        tooltip.setAttribute('show-arrow', '');
-
-        tooltip.innerHTML = textElement.dataset['tooltipText'] ?? '';
-
-        wrapper.appendChild(tooltip);
-      });
-  });
-}
+<span
+  class="autocomplete-ellipsis-text"
+  data-tooltip-text="${displayText}"
+  style="${this.getAutocompleteTextStyle()}"
+>
+  ${displayText}
+</span>
