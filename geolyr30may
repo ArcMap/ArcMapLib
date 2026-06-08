@@ -1,60 +1,88 @@
-private showGraphicPopup(
-  graphic: Graphic,
-  mapPoint: Point,
-  graphics: Graphic[],
-): void {
-  if (
-    this._editorOpen ||
-    this.inDrawingMode ||
-    this._isStartingDraw ||
-    this.shouldSuppressPopup()
-  ) {
-    return;
-  }
-  const popup: any = this.view?.popup;
-  if (!popup) return;
+renderFenceSetName(item: string): string {
+  const isGeofence = item?.includes('|1|');
+  const parts = isGeofence ? item.split('|1|') : [];
+  const meta = this.searchedAssetsMetadata[item];
 
-  const popupGraphics = (graphics ?? []).filter(
-    (g) => g?.geometry && g?.layer === this.featureLayer,
-  );
-  if (popupGraphics.length === 0) return;
+  const displayText = isG
+    ? meta?.id ?? parts[0] ?? ''
+    : meta?.id ?? item;
 
-  // Ensure each feature carries its template.
-  let builtAny = false;
-  for (const g of popupGraphics) {
-    if (!g.popupTemplate) {
-      const t = this.buildPopupTemplate(g);
-      if (t) g.popupTemplate = t;
-    }
-    if (g.popupTemplate) builtAny = true;
-  }
-  if (!builtAny) return;
+  const typeLabel = isG ? 'G' : meta?.type ?? '';
+  const rawValueLabel = isG ? parts[1]?.split('|')[1] ?? '' : '';
 
-  const location =
-    mapPoint ?? UpGeojsonLayer.getPopupPoint(graphic.geometry) ?? undefined;
-  if (!location) return;
+  const chipLabel = isG && rawValueLabel
+    ? `Fence Set: ${rawValueLabel}`
+    : typeLabel;
 
-  popup.autoOpenEnabled = false;
+  return `
+    <div style="${this.getAutocompleteItemStyle()}">
+      <span
+        class="autocomplete-ellipsis-text"
+        data-tooltip="${displayText}"
+        style="${this.getAutocompleteTextStyle()}"
+      >
+        ${displayText}
+      </span>
 
-  // ONE atomic call. Replaces any open popup. No guard, no stationary wait, no timers.
-  (this.view as any).openPopup({
-    features: popupGraphics,
-    location,
-    updateLocationEnabled: false,
-  });
-
-  this._popupOpen = true;
+      <span style="${this.getAutocompleteChipStyle()}">
+        ${chipLabel}
+      </span>
+    </div>
+  `;
 }
 
 
 
-public closePopup(): void {
-  this._popupOpen = false;
-  try {
-    (this.view as any)?.closePopup?.();   // 5.0 pair of openPopup()
-  } catch {}
-  try {
-    this._popupHighlightHandle?.remove?.();
-  } catch {}
-  this._popupHighlightHandle = null;
+private getAutocompleteItemStyle(): string {
+  return `
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+  `;
+}
+
+private getAutocompleteTextStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `;
+}
+
+private getAutocompleteChipStyle(): string {
+  return `
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.4px;
+    text-align: center;
+    color: #000;
+    background: #DCEEE0;
+    border-radius: 10px;
+    padding: 2px 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  `;
+}
+
+
+private updateEllipsisTooltips(): void {
+  requestAnimationFrame(() => {
+    const elements = document.querySelectorAll('.autocomplete-ellipsis-text');
+
+    elements.forEach((element) => {
+      const htmlElement = element as HTMLElement;
+      const tooltipText = htmlElement.dataset['tooltip'] ?? '';
+
+      if (htmlElement.scrollWidth > htmlElement.clientWidth) {
+        htmlElement.setAttribute('title', tooltipText);
+      } else {
+        htmlElement.removeAttribute('title');
+      }
+    });
+  });
 }
