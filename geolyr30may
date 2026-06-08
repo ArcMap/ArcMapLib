@@ -1,13 +1,29 @@
-{
-  "type": "simple",
-  "symbol": {
-    "type": "simple-marker",
-    "style": "circle",
-    "size": 12,
-    "color": [0, 122, 255, 1],
-    "outline": {
-      "color": [255, 255, 255, 1],
-      "width": 1
+if (thisLayerResults.length === 0) {
+  // Fallback: query features within ~10px of the click (zoom-independent).
+  try {
+    const lv: any = await this.view.whenLayerView(this.featureLayer);
+    const tolPx = 10;
+    const buf = tolPx * this.view.resolution; // map units per pixel at this zoom
+    const mp = evt.mapPoint;
+    const area = new Extent({
+      xmin: mp.x - buf, ymin: mp.y - buf,
+      xmax: mp.x + buf, ymax: mp.y + buf,
+      spatialReference: mp.spatialReference,
+    });
+    const q = this.featureLayer.createQuery();
+    q.geometry = area;
+    q.spatialRelationship = "intersects";
+    q.returnGeometry = true;
+    q.outFields = ["*"];
+    const res = await lv.queryFeatures(q);
+    if (res?.features?.length) {
+      const g = res.features[0];
+      this.showGraphicPopup(g, mp, [g]);
+      return;
     }
+  } catch (e: any) {
+    if (e?.name !== "AbortError") console.warn("[up-geojson-layer] fallback query", e);
   }
+  if (this._popupOpen) this.closePopup();
+  return;
 }
