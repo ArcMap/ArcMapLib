@@ -1,18 +1,38 @@
 
 
+  const shouldShowTooltip = displayText.length > 24;
+
   return `
     <div style="${this.getAutocompleteItemStyle()}">
       <span
         class="autocomplete-text-wrapper"
         style="${this.getAutocompleteTextWrapperStyle()}"
       >
-        <span
-          class="autocomplete-ellipsis-text"
-          data-tooltip-text="${displayText}"
-          style="${this.getAutocompleteTextStyle()}"
-        >
-          ${displayText}
-        </span>
+        ${
+          shouldShowTooltip
+            ? `
+              <up-tooltip>
+                <span
+                  class="autocomplete-ellipsis-text"
+                  style="${this.getAutocompleteTextStyle()}"
+                >
+                  ${displayText}
+                </span>
+
+                <div class="multiline-tooltip">
+                  ${displayText}
+                </div>
+              </up-tooltip>
+            `
+            : `
+              <span
+                class="autocomplete-ellipsis-text"
+                style="${this.getAutocompleteTextStyle()}"
+              >
+                ${displayText}
+              </span>
+            `
+        }
       </span>
 
       <span style="${this.getAutocompleteChipStyle()}">
@@ -23,46 +43,30 @@
 }
 
 
+private getAutocompleteItemStyle(): string {
+  return `
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+  `;
+}
 
+private getAutocompleteTextWrapperStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+  `;
+}
 
-private updateEllipsisTooltips(): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const wrappers = document.querySelectorAll('.autocomplete-text-wrapper');
-
-      wrappers.forEach((wrapperElement) => {
-        const textElement = wrapperElement.querySelector(
-          '.autocomplete-ellipsis-text'
-        ) as HTMLElement | null;
-
-        if (!textElement) {
-          return;
-        }
-
-        wrapperElement
-          .querySelectorAll('up-tooltip.autocomplete-name-tooltip')
-          .forEach((tooltip) => tooltip.remove());
-
-        const isEllipsisVisible =
-          textElement.scrollWidth > textElement.clientWidth;
-
-        if (!isEllipsisVisible) {
-          return;
-        }
-
-        const tooltipText = textElement.dataset['tooltipText'] ?? '';
-
-        const tooltipElement = document.createElement('up-tooltip');
-        tooltipElement.className = 'autocomplete-name-tooltip';
-
-        tooltipElement.innerHTML = `
-          <div class="multiline-tooltip">
-            ${tooltipText}
-          </div>
-        `;
-
-        wrapperElement.appendChild(tooltipElement);
-      });
-    });
-  });
+private getAutocompleteTextStyle(): string {
+  return `
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `;
 }
