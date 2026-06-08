@@ -18,14 +18,14 @@ return `
       ${
         shouldShowTooltip
           ? `
-            <up-tooltip
+            <tooltip
               class="autocomplete-name-tooltip"
               placement="top"
               show-arrow
               style="position:absolute;"
             >
               ${displayText}
-            </up-tooltip>
+            </tooltip>
           `
           : ''
       }
