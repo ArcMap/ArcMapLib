@@ -1,41 +1,31 @@
-if (thisLayerResults.length === 0) {
-  // featureLayer is a GraphicsLayer — find the nearest graphic in screen space.
-  try {
-    const tolPx = 12;
-    const graphics = this.featureLayer.graphics?.toArray?.() ?? [];
-    let best: Graphic | null = null;
-    let bestDist = tolPx;
-
-    for (const g of graphics) {
-      const geom: any = g?.geometry;
-      if (!geom) continue;
-      // Use the point itself, or a polygon/circle's center, for the pixel test.
-      const pt =
-        geom.type === "point"
-          ? geom
-          : (geom.centroid ?? geom.extent?.center);
-      if (!pt) continue;
-
-      const sp = this.view.toScreen(pt);
-      if (!sp) continue;
-
-      const d = Math.hypot(sp.x - evt.x, sp.y - evt.y);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = g;
-      }
-    }
-
-    if (best) {
-      this.showGraphicPopup(best, evt.mapPoint, [best]);
-      return;
-    }
-  } catch (e: any) {
-    if (e?.name !== "AbortError") {
-      console.warn("[up-geojson-layer] fallback nearest-graphic search", e);
-    }
-  }
-
-  if (this._popupOpen) this.closePopup();
-  return;
-}
+export default {
+  input: resolve(__dirname, "src/index.ts"),
+  output: {
+    dir: "./dist",
+    format: "es",
+    chunkFileNames: "chunks/[hash].js",
+  },
+  // Keep the peer stack OUT of the published bundle — the Angular app
+  // provides these, so it bundles ONE shared copy instead of ours.
+  external: [
+    /^@arcgis\/core/,
+    /^@arcgis\/map-components/,
+    /^@arcgis\/lumina/,
+    /^@esri\/calcite-components/,
+    /^@up-elements\/core/,
+    /^lit($|\/)/,
+    /^@lit\//,
+    "tslib",
+  ],
+  plugins: [
+    nodeResolve({ browser: true }),
+    typescript(),
+    postcss({ inject: true, minimize: true, extract: false }),
+    replace({
+      preventAssignment: true,
+      "process.env.NODE_ENV": JSON.stringify(
+        process.env.NODE_ENV || "development",
+      ),
+    }),
+  ],
+};
