@@ -1,37 +1,8 @@
-const bundleForDev = process.env.DEV_BUNDLE === "true";
-
-const peerExternals = [
-  /^@arcgis\/core/,
-  /^@arcgis\/map-components/,
-  /^@arcgis\/lumina/,
-  /^@esri\/calcite-components/,
-  /^@up-elements\/core/,
-  /^lit($|\/)/,
-  /^@lit\//
-];
-
-export default {
-  input: resolve(__dirname, "src/index.ts"),
-  output: {
-    dir: bundleForDev ? "./dist-dev" : "./dist",
-    format: "es",
-    chunkFileNames: "chunks/[hash].js"
-  },
-  external: bundleForDev ? [] : peerExternals,
-  plugins: [
-    nodeResolve({ browser: true }),
-    typescript(),
-    postcss({ inject: true, minimize: true, extract: false }),
-    replace({
-      preventAssignment: true,
-      "process.env.NODE_ENV": JSON.stringify(
-        process.env.NODE_ENV || "development"
-      )
-    })
-  ]
-};
-
-
-
-"build": "rollup -c",
-"build:dev": "set NODE_OPTIONS=--max-old-space-size=8192 && cross-env DEV_BUNDLE=true rollup -c"
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-dev",
+    "declaration": false,
+    "declarationMap": false
+  }
+}
