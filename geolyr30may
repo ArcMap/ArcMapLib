@@ -1,31 +1,19 @@
+// rollup.config.js
+const bundleForDev = process.env.DEV_BUNDLE === "true";
+
+const peerExternals = [
+  /^@arcgis\/core/, /^@arcgis\/map-components/, /^@arcgis\/lumina/,
+  /^@esri\/calcite-components/, /^@up-elements\/core/,
+];
+
 export default {
-  input: resolve(__dirname, "src/index.ts"),
-  output: {
-    dir: "./dist",
-    format: "es",
-    chunkFileNames: "chunks/[hash].js",
-  },
-  // Keep the peer stack OUT of the published bundle — the Angular app
-  // provides these, so it bundles ONE shared copy instead of ours.
-  external: [
-    /^@arcgis\/core/,
-    /^@arcgis\/map-components/,
-    /^@arcgis\/lumina/,
-    /^@esri\/calcite-components/,
-    /^@up-elements\/core/,
-    /^lit($|\/)/,
-    /^@lit\//,
-    "tslib",
-  ],
-  plugins: [
-    nodeResolve({ browser: true }),
-    typescript(),
-    postcss({ inject: true, minimize: true, extract: false }),
-    replace({
-      preventAssignment: true,
-      "process.env.NODE_ENV": JSON.stringify(
-        process.env.NODE_ENV || "development",
-      ),
-    }),
-  ],
+  output: { dir: bundleForDev ? "./dist-dev" : "./dist", format: "es", chunkFileNames: "chunks/[hash].js" },
+  external: bundleForDev ? [] : peerExternals,
+  // ...plugins unchanged
 };
+
+
+
+
+"build":     "rollup -c",
+"build:dev": "cross-env DEV_BUNDLE=true rollup -c"
