@@ -4,5 +4,10 @@
     "outDir": "./dist-dev",
     "declaration": false,
     "declarationMap": false
-  }
+  },
+  "exclude": [
+    "dist",
+    "dist-dev",
+    "node_modules"
+  ]
 }
