@@ -1,23 +1,15 @@
-// stay static — constructed during normal map/layer operation
-import PopupTemplate from "@arcgis/core/PopupTemplate";
-import Polygon from "@arcgis/core/geometry/Polygon";
-import Polyline from "@arcgis/core/geometry/Polyline";
-
-// type-only — erased at compile time, zero bundle cost
-import type Zoom from "@arcgis/core/widgets/Zoom";
-import type Locate from "@arcgis/core/widgets/Locate";
-import type Home from "@arcgis/core/widgets/Home";
-import type ScaleBar from "@arcgis/core/widgets/ScaleBar";
-import type { ViewMouseWheelEvent } from "@arcgis/core/views/input/types";
-
-
-
-const widgetTasks: Promise<void>[] = [];
-if (this.showZoom) {
-    widgetTasks.push(import("@arcgis/core/widgets/Zoom.js").then(({ default: Zoom }) => {
-        this.zoomWidget = new Zoom({ view });
-        view.ui.add(this.zoomWidget, "top-left");
-    }));
-}
-// repeat for showHome / showLocate / scale bar
-await Promise.all(widgetTasks);
+await Promise.all([
+  import("@arcgis/map-components/dist/components/arcgis-map"),
+  import("@arcgis/map-components/dist/components/arcgis-zoom"),
+  import("@arcgis/map-components/dist/components/arcgis-home"),
+  import("@arcgis/map-components/dist/components/arcgis-locate"),
+  import("@arcgis/map-components/dist/components/arcgis-scale-bar"),
+  import("@arcgis/map-components/dist/components/arcgis-basemap-gallery"),
+  import("@arcgis/map-components/dist/components/arcgis-layer-list"),
+  import("@arcgis/map-components/dist/components/arcgis-legend"),
+  import("@arcgis/map-components/dist/components/arcgis-measurement"),
+  import("@arcgis/map-components/dist/components/arcgis-area-measurement-2d"),
+  import("@arcgis/map-components/dist/components/arcgis-distance-measurement-2d"),
+  import("@arcgis/map-components/dist/components/arcgis-coordinate-conversion"),
+  import("@arcgis/map-components/dist/components/arcgis-expand")
+]);
