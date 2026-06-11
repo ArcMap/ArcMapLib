@@ -1,5 +1,21 @@
-"styles": [
-  "node_modules/@esri/calcite-components/dist/calcite/calcite.css",
-  "node_modules/@arcgis/core/assets/esri/themes/light/main.css",
-  "src/styles.scss"
-]
+@property({ attribute: "asset-base-path" }) assetBasePath = "assets/arcgis";
+
+firstUpdated() {
+  configureArcgisAssets(this.assetBasePath);
+  // ...then create the arcgis-map view
+}
+
+
+
+// arcgis-assets.ts
+import esriConfig from "@arcgis/core/config.js";
+import { setAssetPath } from "@arcgis/map-components";
+
+let configured = false;
+
+export function configureArcgisAssets(basePath = "assets/arcgis") {
+  if (configured) return;
+  esriConfig.assetsPath = `${basePath}/core`;
+  setAssetPath(`${basePath}/map-components`);
+  configured = true;
+}
