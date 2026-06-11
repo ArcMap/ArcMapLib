@@ -1,12 +1,10 @@
-// src/arcgis-runtime.ts
-
 import esriConfig from "@arcgis/core/config";
 import { setAssetPath as setMapAssetPath } from "@arcgis/map-components";
 import { setAssetPath as setCommonAssetPath } from "@arcgis/common-components";
 
 let initializedPromise: Promise<void> | null = null;
 
-export function initializeArcgisRuntime(): Promise<void> {
+export function initializeArcgisAssets(): Promise<void> {
   if (initializedPromise) {
     return initializedPromise;
   }
@@ -17,26 +15,24 @@ export function initializeArcgisRuntime(): Promise<void> {
 }
 
 async function initialize(): Promise<void> {
-  const version = "5.0";
+  esriConfig.assetsPath = "/assets";
 
-  esriConfig.assetsPath = `https://js.arcgis.com/${version}/assets`;
-
-  setMapAssetPath(`https://js.arcgis.com/${version}/map-components/`);
-  setCommonAssetPath(`https://js.arcgis.com/${version}/common-components/`);
+  setMapAssetPath("/assets");
+  setCommonAssetPath("/common-components/assets");
 
   addStylesheetOnce(
     "upmap-arcgis-core-css",
-    `https://js.arcgis.com/${version}/esri/themes/light/main.css`
+    "/assets/esri/themes/light/main.css"
   );
 
   addStylesheetOnce(
     "upmap-arcgis-map-components-css",
-    `https://js.arcgis.com/${version}/map-components/main.css`
+    "/assets/main.css"
   );
 
   addStylesheetOnce(
     "upmap-arcgis-common-components-css",
-    `https://js.arcgis.com/${version}/common-components/main.css`
+    "/common-components/main.css"
   );
 
   await Promise.all([
@@ -57,11 +53,7 @@ async function initialize(): Promise<void> {
 }
 
 function addStylesheetOnce(id: string, href: string): void {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  if (document.getElementById(id)) {
+  if (typeof document === "undefined" || document.getElementById(id)) {
     return;
   }
 
