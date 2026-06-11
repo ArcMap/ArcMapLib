@@ -1,48 +1,59 @@
-// src/arcgis-assets.ts
+// src/arcgis-runtime.ts
 
 import esriConfig from "@arcgis/core/config";
-import { setAssetPath as setMapComponentsAssetPath } from "@arcgis/map-components";
-import { setAssetPath as setCommonComponentsAssetPath } from "@arcgis/common-components";
+import { setAssetPath as setMapAssetPath } from "@arcgis/map-components";
+import { setAssetPath as setCommonAssetPath } from "@arcgis/common-components";
 
-let arcgisAssetsConfigured = false;
+let initializedPromise: Promise<void> | null = null;
 
-export function configureArcgisAssets(): void {
-  if (arcgisAssetsConfigured) {
-    return;
+export function initializeArcgisRuntime(): Promise<void> {
+  if (initializedPromise) {
+    return initializedPromise;
   }
 
-  /*
-   * IMPORTANT:
-   * Do NOT use:
-   * https://js.arcgis.com/5.0/@arcgis/map-components/dist/cdn/assets
-   *
-   * That path does not exist and causes 404.
-   *
-   * For ArcGIS component packages, use the package CDN base path.
-   */
-  const arcgisVersion = "5.0";
+  initializedPromise = initialize();
 
-  esriConfig.assetsPath = `https://js.arcgis.com/${arcgisVersion}/assets`;
+  return initializedPromise;
+}
 
-  setMapComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/map-components/`);
-  setCommonComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/common-components/`);
+async function initialize(): Promise<void> {
+  const version = "5.0";
+
+  esriConfig.assetsPath = `https://js.arcgis.com/${version}/assets`;
+
+  setMapAssetPath(`https://js.arcgis.com/${version}/map-components/`);
+  setCommonAssetPath(`https://js.arcgis.com/${version}/common-components/`);
 
   addStylesheetOnce(
     "upmap-arcgis-core-css",
-    `https://js.arcgis.com/${arcgisVersion}/esri/themes/light/main.css`
+    `https://js.arcgis.com/${version}/esri/themes/light/main.css`
   );
 
   addStylesheetOnce(
     "upmap-arcgis-map-components-css",
-    `https://js.arcgis.com/${arcgisVersion}/map-components/main.css`
+    `https://js.arcgis.com/${version}/map-components/main.css`
   );
 
   addStylesheetOnce(
     "upmap-arcgis-common-components-css",
-    `https://js.arcgis.com/${arcgisVersion}/common-components/main.css`
+    `https://js.arcgis.com/${version}/common-components/main.css`
   );
 
-  arcgisAssetsConfigured = true;
+  await Promise.all([
+    import("@arcgis/map-components/dist/components/arcgis-map"),
+    import("@arcgis/map-components/dist/components/arcgis-zoom"),
+    import("@arcgis/map-components/dist/components/arcgis-home"),
+    import("@arcgis/map-components/dist/components/arcgis-locate"),
+    import("@arcgis/map-components/dist/components/arcgis-scale-bar"),
+    import("@arcgis/map-components/dist/components/arcgis-basemap-gallery"),
+    import("@arcgis/map-components/dist/components/arcgis-layer-list"),
+    import("@arcgis/map-components/dist/components/arcgis-legend"),
+    import("@arcgis/map-components/dist/components/arcgis-measurement"),
+    import("@arcgis/map-components/dist/components/arcgis-area-measurement-2d"),
+    import("@arcgis/map-components/dist/components/arcgis-distance-measurement-2d"),
+    import("@arcgis/map-components/dist/components/arcgis-coordinate-conversion"),
+    import("@arcgis/map-components/dist/components/arcgis-expand")
+  ]);
 }
 
 function addStylesheetOnce(id: string, href: string): void {
