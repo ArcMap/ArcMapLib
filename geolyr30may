@@ -1,46 +1,23 @@
-// src/arcgis-assets.ts
+// stay static — constructed during normal map/layer operation
+import PopupTemplate from "@arcgis/core/PopupTemplate";
+import Polygon from "@arcgis/core/geometry/Polygon";
+import Polyline from "@arcgis/core/geometry/Polyline";
 
-let initializedPromise: Promise<void> | null = null;
+// type-only — erased at compile time, zero bundle cost
+import type Zoom from "@arcgis/core/widgets/Zoom";
+import type Locate from "@arcgis/core/widgets/Locate";
+import type Home from "@arcgis/core/widgets/Home";
+import type ScaleBar from "@arcgis/core/widgets/ScaleBar";
+import type { ViewMouseWheelEvent } from "@arcgis/core/views/input/types";
 
-export function configureArcgisAssets(): Promise<void> {
-  if (initializedPromise) {
-    return initializedPromise;
-  }
 
-  initializedPromise = initialize();
 
-  return initializedPromise;
+const widgetTasks: Promise<void>[] = [];
+if (this.showZoom) {
+    widgetTasks.push(import("@arcgis/core/widgets/Zoom.js").then(({ default: Zoom }) => {
+        this.zoomWidget = new Zoom({ view });
+        view.ui.add(this.zoomWidget, "top-left");
+    }));
 }
-
-async function initialize(): Promise<void> {
-  addStylesheetOnce(
-    "upmap-arcgis-5-css",
-    "https://js.arcgis.com/5.0/esri/themes/light/main.css"
-  );
-
-  await import("@arcgis/map-components/dist/components/arcgis-map");
-  await import("@arcgis/map-components/dist/components/arcgis-zoom");
-  await import("@arcgis/map-components/dist/components/arcgis-home");
-  await import("@arcgis/map-components/dist/components/arcgis-locate");
-  await import("@arcgis/map-components/dist/components/arcgis-scale-bar");
-  await import("@arcgis/map-components/dist/components/arcgis-basemap-gallery");
-  await import("@arcgis/map-components/dist/components/arcgis-layer-list");
-  await import("@arcgis/map-components/dist/components/arcgis-legend");
-  await import("@arcgis/map-components/dist/components/arcgis-measurement");
-  await import("@arcgis/map-components/dist/components/arcgis-area-measurement-2d");
-  await import("@arcgis/map-components/dist/components/arcgis-distance-measurement-2d");
-  await import("@arcgis/map-components/dist/components/arcgis-coordinate-conversion");
-  await import("@arcgis/map-components/dist/components/arcgis-expand");
-}
-
-function addStylesheetOnce(id: string, href: string): void {
-  if (typeof document === "undefined" || document.getElementById(id)) {
-    return;
-  }
-
-  const link = document.createElement("link");
-  link.id = id;
-  link.rel = "stylesheet";
-  link.href = href;
-  document.head.appendChild(link);
-}
+// repeat for showHome / showLocate / scale bar
+await Promise.all(widgetTasks);
