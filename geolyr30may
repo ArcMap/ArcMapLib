@@ -1,21 +1,10 @@
-@property({ attribute: "asset-base-path" }) assetBasePath = "assets/arcgis";
-
-firstUpdated() {
-  configureArcgisAssets(this.assetBasePath);
-  // ...then create the arcgis-map view
-}
+mkdir -p assets/arcgis/core assets/arcgis/map-components
+cp -r node_modules/@arcgis/core/assets/* assets/arcgis/core/
+cp -r node_modules/@arcgis/map-components/dist/cdn/assets assets/arcgis/map-components/
 
 
 
-// arcgis-assets.ts
-import esriConfig from "@arcgis/core/config.js";
-import { setAssetPath } from "@arcgis/map-components";
 
-let configured = false;
+ls assets/arcgis/core/esri/t9n/basemaps.json
+ls assets/arcgis/core/esri/geometry/support/pe-wasm.wasm
 
-export function configureArcgisAssets(basePath = "assets/arcgis") {
-  if (configured) return;
-  esriConfig.assetsPath = `${basePath}/core`;
-  setAssetPath(`${basePath}/map-components`);
-  configured = true;
-}
