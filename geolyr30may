@@ -1,6 +1,54 @@
-"assets": [
-  "src/favicon.ico",
-  "src/assets",
-  { "glob": "**/*", "input": "node_modules/@arcgis/core/assets", "output": "assets/arcgis/core" },
-  { "glob": "**/*", "input": "node_modules/@arcgis/map-components/dist/cdn/assets", "output": "assets/arcgis/map-components/assets" }
-]
+// src/arcgis-assets.ts
+
+import esriConfig from "@arcgis/core/config";
+import { setAssetPath as setMapComponentsAssetPath } from "@arcgis/map-components";
+import { setAssetPath as setCommonComponentsAssetPath } from "@arcgis/common-components";
+
+let arcgisAssetsConfigured = false;
+
+export function configureArcgisAssets(): void {
+  if (arcgisAssetsConfigured) {
+    return;
+  }
+
+  const arcgisVersion = "5.0";
+
+  esriConfig.assetsPath = `https://js.arcgis.com/${arcgisVersion}/@arcgis/core/assets`;
+
+  setMapComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/@arcgis/map-components/dist/cdn/assets`);
+  setCommonComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/@arcgis/common-components/dist/cdn/assets`);
+
+  addStylesheetOnce(
+    "upmap-arcgis-core-css",
+    `https://js.arcgis.com/${arcgisVersion}/@arcgis/core/assets/esri/themes/light/main.css`
+  );
+
+  addStylesheetOnce(
+    "upmap-arcgis-map-components-css",
+    `https://js.arcgis.com/${arcgisVersion}/@arcgis/map-components/dist/cdn/main.css`
+  );
+
+  addStylesheetOnce(
+    "upmap-arcgis-common-components-css",
+    `https://js.arcgis.com/${arcgisVersion}/@arcgis/common-components/dist/cdn/main.css`
+  );
+
+  arcgisAssetsConfigured = true;
+}
+
+function addStylesheetOnce(id: string, href: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (document.getElementById(id)) {
+    return;
+  }
+
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = href;
+
+  document.head.appendChild(link);
+}
