@@ -11,26 +11,35 @@ export function configureArcgisAssets(): void {
     return;
   }
 
+  /*
+   * IMPORTANT:
+   * Do NOT use:
+   * https://js.arcgis.com/5.0/@arcgis/map-components/dist/cdn/assets
+   *
+   * That path does not exist and causes 404.
+   *
+   * For ArcGIS component packages, use the package CDN base path.
+   */
   const arcgisVersion = "5.0";
 
-  esriConfig.assetsPath = `https://js.arcgis.com/${arcgisVersion}/@arcgis/core/assets`;
+  esriConfig.assetsPath = `https://js.arcgis.com/${arcgisVersion}/assets`;
 
-  setMapComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/@arcgis/map-components/dist/cdn/assets`);
-  setCommonComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/@arcgis/common-components/dist/cdn/assets`);
+  setMapComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/map-components/`);
+  setCommonComponentsAssetPath(`https://js.arcgis.com/${arcgisVersion}/common-components/`);
 
   addStylesheetOnce(
     "upmap-arcgis-core-css",
-    `https://js.arcgis.com/${arcgisVersion}/@arcgis/core/assets/esri/themes/light/main.css`
+    `https://js.arcgis.com/${arcgisVersion}/esri/themes/light/main.css`
   );
 
   addStylesheetOnce(
     "upmap-arcgis-map-components-css",
-    `https://js.arcgis.com/${arcgisVersion}/@arcgis/map-components/dist/cdn/main.css`
+    `https://js.arcgis.com/${arcgisVersion}/map-components/main.css`
   );
 
   addStylesheetOnce(
     "upmap-arcgis-common-components-css",
-    `https://js.arcgis.com/${arcgisVersion}/@arcgis/common-components/dist/cdn/main.css`
+    `https://js.arcgis.com/${arcgisVersion}/common-components/main.css`
   );
 
   arcgisAssetsConfigured = true;
@@ -49,6 +58,5 @@ function addStylesheetOnce(id: string, href: string): void {
   link.id = id;
   link.rel = "stylesheet";
   link.href = href;
-
   document.head.appendChild(link);
 }
