@@ -1,13 +1,20 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "outDir": "./dist-dev",
-    "declaration": false,
-    "declarationMap": false
+"assets": [
+  "src/favicon.ico",
+  "src/assets",
+  {
+    "glob": "**/*",
+    "input": "node_modules/@arcgis/map-components/dist/cdn/assets",
+    "output": "/assets/arcgis"
   },
-  "exclude": [
-    "dist",
-    "dist-dev",
-    "node_modules"
-  ]
+  {
+    "glob": "**/*",
+    "input": "node_modules/@arcgis/common-components/dist/cdn/assets",
+    "output": "/assets/arcgis-common"
+  }
+],
+"loader": {
+  ".woff": "file",
+  ".woff2": "file",
+  ".ttf": "file",
+  ".eot": "file"
 }
