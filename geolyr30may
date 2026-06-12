@@ -1,15 +1,57 @@
-await Promise.all([
-  import("@arcgis/map-components/dist/components/arcgis-map"),
-  import("@arcgis/map-components/dist/components/arcgis-zoom"),
-  import("@arcgis/map-components/dist/components/arcgis-home"),
-  import("@arcgis/map-components/dist/components/arcgis-locate"),
-  import("@arcgis/map-components/dist/components/arcgis-scale-bar"),
-  import("@arcgis/map-components/dist/components/arcgis-basemap-gallery"),
-  import("@arcgis/map-components/dist/components/arcgis-layer-list"),
-  import("@arcgis/map-components/dist/components/arcgis-legend"),
-  import("@arcgis/map-components/dist/components/arcgis-measurement"),
-  import("@arcgis/map-components/dist/components/arcgis-area-measurement-2d"),
-  import("@arcgis/map-components/dist/components/arcgis-distance-measurement-2d"),
-  import("@arcgis/map-components/dist/components/arcgis-coordinate-conversion"),
-  import("@arcgis/map-components/dist/components/arcgis-expand")
-]);
+let arcgisRuntimePromise: Promise<void> | null = null;
+
+export function initializeArcgisAssets(): Promise<void> {
+  if (arcgisRuntimePromise) {
+    return arcgisRuntimePromise;
+  }
+
+  arcgisRuntimePromise = loadArcgisRuntime();
+  return arcgisRuntimePromise;
+}
+
+async function loadArcgisRuntime(): Promise<void> {
+  addStylesheetOnce(
+    "upmap-arcgis-css",
+    "https://js.arcgis.com/5.0/esri/themes/light/main.css"
+  );
+
+  await addScriptOnce(
+    "upmap-arcgis-runtime",
+    "https://js.arcgis.com/5.0/"
+  );
+}
+
+function addStylesheetOnce(id: string, href: string): void {
+  if (typeof document === "undefined" || document.getElementById(id)) {
+    return;
+  }
+
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+function addScriptOnce(id: string, src: string): Promise<void> {
+  if (typeof document === "undefined") {
+    return Promise.resolve();
+  }
+
+  const existingScript = document.getElementById(id) as HTMLScriptElement | null;
+
+  if (existingScript) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = id;
+    script.type = "module";
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ArcGIS runtime: ${src}`));
+
+    document.head.appendChild(script);
+  });
+}
