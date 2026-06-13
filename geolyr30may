@@ -1,28 +1,37 @@
-export function loadMapOnlyArcgisComponent(): Promise<void> {
-  if (mapOnlyComponentPromise) {
-    return mapOnlyComponentPromise;
-  }
+async function initialize(): Promise<void> {
+  const arcgisBaseUrl = "https://js.arcgis.com/5.0.19";
 
-  mapOnlyComponentPromise = initialize().then(() =>
-    import("@arcgis/map-components/dist/components/arcgis-map").then(() => undefined)
-  );
+  await Promise.all([
+    addPreconnectOnce("upmap-preconnect-js-arcgis", "https://js.arcgis.com"),
+    addPreconnectOnce("upmap-preconnect-basemaps", "https://basemaps.arcgis.com"),
+    addPreconnectOnce("upmap-preconnect-static-arcgis", "https://static.arcgis.com"),
 
-  return mapOnlyComponentPromise;
+    addStylesheetOnce(
+      "upmap-arcgis-core-css",
+      `${arcgisBaseUrl}/esri/themes/light/main.css`
+    ),
+    addStylesheetOnce(
+      "upmap-map-components-css",
+      `${arcgisBaseUrl}/map-components/main.css`
+    )
+  ]);
 }
 
-export function loadBaseArcgisComponents(): Promise<void> {
-  if (baseArcgisComponentsPromise) {
-    return baseArcgisComponentsPromise;
-  }
 
-  baseArcgisComponentsPromise = initialize().then(() =>
-    Promise.all([
-      import("@arcgis/map-components/dist/components/arcgis-zoom"),
-      import("@arcgis/map-components/dist/components/arcgis-home"),
-      import("@arcgis/map-components/dist/components/arcgis-locate"),
-      import("@arcgis/map-components/dist/components/arcgis-scale-bar")
-    ]).then(() => undefined)
-  );
+function addPreconnectOnce(id: string, href: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined" || document.getElementById(id)) {
+      resolve();
+      return;
+    }
 
-  return baseArcgisComponentsPromise;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "preconnect";
+    link.href = href;
+    link.crossOrigin = "anonymous";
+
+    document.head.appendChild(link);
+    resolve();
+  });
 }
