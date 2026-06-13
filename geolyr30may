@@ -2,23 +2,37 @@ async function initialize(): Promise<void> {
   const arcgisBaseUrl = "https://js.arcgis.com/5.0.19";
 
   await Promise.all([
-    addPreconnectOnce("upmap-preconnect-js-arcgis", "https://js.arcgis.com"),
-    addPreconnectOnce("upmap-preconnect-basemaps", "https://basemaps.arcgis.com"),
-    addPreconnectOnce("upmap-preconnect-static-arcgis", "https://static.arcgis.com"),
+    addPreconnectOnce("u-preconnect-js-arcgis", "https://js.arcgis.com"),
+    addPreconnectOnce("u-preconnect-static-arcgis", "https://static.arcgis.com"),
+    addPreconnectOnce("u-preconnect-basemaps", "https://basemaps.arcgis.com"),
+
+    addPreloadOnce(
+      "upmap-calcite-action-messages",
+      "https://js.arcgis.com/calcite-components/5.0.2/assets/action/t9n/messages_en.json"
+    ),
+    addPreloadOnce(
+      "u-calcite-panel-messages",
+      "https://js.arcgis.com/calcite-components/5.0.2/assets/panel/t9n/messages_en.json"
+    ),
+    addPreloadOnce(
+      "u-arcgis-zoom-messages",
+      `${arcgisBaseUrl}/esri/widgets/Zoom/t9n/Zoom_en.json`
+    ),
 
     addStylesheetOnce(
-      "upmap-arcgis-core-css",
+      "u-arcgis-core-css",
       `${arcgisBaseUrl}/esri/themes/light/main.css`
     ),
     addStylesheetOnce(
-      "upmap-map-components-css",
+      "ui-map-components-css",
       `${arcgisBaseUrl}/map-components/main.css`
     )
   ]);
 }
 
 
-function addPreconnectOnce(id: string, href: string): Promise<void> {
+
+function addPreloadOnce(id: string, href: string): Promise<void> {
   return new Promise((resolve) => {
     if (typeof document === "undefined" || document.getElementById(id)) {
       resolve();
@@ -27,7 +41,8 @@ function addPreconnectOnce(id: string, href: string): Promise<void> {
 
     const link = document.createElement("link");
     link.id = id;
-    link.rel = "preconnect";
+    link.rel = "preload";
+    link.as = "fetch";
     link.href = href;
     link.crossOrigin = "anonymous";
 
