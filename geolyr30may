@@ -1,20 +1,6 @@
-import esriConfig from "@arcgis/core/config";
-import { setAssetPath as setMapAssetPath } from "@arcgis/map-components";
-
-let initializedPromise: Promise<void> | null = null;
-
-export function configureArcgisAssets(): Promise<void> {
-  if (initializedPromise) {
-    return initializedPromise;
-  }
-
-  initializedPromise = initialize();
-  return initializedPromise;
-}
-
 async function initialize(): Promise<void> {
-  esriConfig.assetsPath = "assets";
-  setMapAssetPath("assets");
+  esriConfig.assetsPath = "https://js.arcgis.com/5.0.19/assets";
+  setMapAssetPath("https://js.arcgis.com/5.0.19/map-components/assets");
 
   await Promise.all([
     addStylesheetOnce(
@@ -26,27 +12,4 @@ async function initialize(): Promise<void> {
       "https://js.arcgis.com/5.0.19/map-components/main.css"
     )
   ]);
-}
-
-function addStylesheetOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof document === "undefined") {
-      resolve();
-      return;
-    }
-
-    if (document.getElementById(id)) {
-      resolve();
-      return;
-    }
-
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = href;
-    link.onload = () => resolve();
-    link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
-
-    document.head.appendChild(link);
-  });
 }
