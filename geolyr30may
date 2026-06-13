@@ -1,122 +1,28 @@
-private async initializeMap(): Promise<void> {
-  const mapEl = await this.arcgisMapElement;
-
-  if (!mapEl) {
-    console.warn("uimap element not found");
-    return;
+export function loadMapOnlyArcgisComponent(): Promise<void> {
+  if (mapOnlyComponentPromise) {
+    return mapOnlyComponentPromise;
   }
 
-  (mapEl as any).basemap = this.normalizeBasemapName(this.basemap);
+  mapOnlyComponentPromise = initialize().then(() =>
+    import("@arcgis/map-components/dist/components/arcgis-map").then(() => undefined)
+  );
 
-  const attachToReadyView = async (): Promise<void> => {
-    const view = mapEl.view;
+  return mapOnlyComponentPromise;
+}
 
-    if (!view) {
-      console.warn("kkmap view not available");
-      return;
-    }
-
-    console.log("Map view is ready", performance.now());
-
-    this.view = view;
-
-    await this.view.when();
-
-    console.log("Map view when() resolved", performance.now());
-
-    view.constraints = {
-      ...view.constraints,
-      rotationEnabled: false
-    };
-
-    try {
-      if ((view as any).navigation) {
-        (view as any).navigation.momentumEnabled = true;
-        (view as any).navigation.mouseWheelZoomEnabled = true;
-      }
-    } catch {
-      // ignore if navigation API is unavailable
-    }
-
-    this._mapInitialized = true;
-
-    (window as any).upMapDebug = {
-      map: this.map,
-      view: this.view,
-      element: this
-    };
-
-    if (this.extent) {
-      await this.updateExtent(this.extent);
-    } else {
-      await this.updateCenter(this.center);
-      await this.updateZoom(this.zoom, undefined);
-    }
-
-    if (this.drawLayer) {
-      this.drawLayer = new GraphicsLayer();
-
-      if (this.view.map) {
-        this.view.map.add(this.drawLayer);
-      }
-    }
-
-    this.setupMapClickHandler();
-    this.setupViewWatchers();
-    this.setupPopupBridge();
-    this.syncPopupOptions();
-    this.setupRawTool();
-    this.setupZoomEmitter();
-    this.syncMouseWheelZoom();
-    this.syncDoubleClickZoom();
-    this.syncKeyboardNavigation();
-
-    this.resolveMapReady();
-
-    // Important: map is ready now. Load child layers/widgets after first map render.
-    this.initializeDeferredChildren();
-  };
-
-  if (mapEl.view) {
-    await attachToReadyView();
-    return;
+export function loadBaseArcgisComponents(): Promise<void> {
+  if (baseArcgisComponentsPromise) {
+    return baseArcgisComponentsPromise;
   }
 
-  const onReady = async (): Promise<void> => {
-    mapEl.removeEventListener("arcgisViewReadyChange", onReady);
-    await attachToReadyView();
-  };
+  baseArcgisComponentsPromise = initialize().then(() =>
+    Promise.all([
+      import("@arcgis/map-components/dist/components/arcgis-zoom"),
+      import("@arcgis/map-components/dist/components/arcgis-home"),
+      import("@arcgis/map-components/dist/components/arcgis-locate"),
+      import("@arcgis/map-components/dist/components/arcgis-scale-bar")
+    ]).then(() => undefined)
+  );
 
-  mapEl.addEventListener("arcgisViewReadyChange", onReady, {
-    once: true
-  });
-}
-
-
-private initializeDeferredChildren(): void {
-  requestAnimationFrame(() => {
-    const children = Array.from(this.children);
-
-    children.forEach((child: Element) => {
-      child.dispatchEvent(
-        new CustomEvent("pp", {
-          detail: {
-            map: this.map,
-            view: this.view
-          },
-          bubbles: false,
-          composed: true
-        })
-      );
-    });
-  });
-}
-
-
-connectedCallback(): void {
-  super.connectedCallback();
-
-  this.addEventListener("pp", async () => {
-    await this.initializeAfterMapReady();
-  });
+  return baseArcgisComponentsPromise;
 }
