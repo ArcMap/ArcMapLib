@@ -1,15 +1,17 @@
 async function initialize(): Promise<void> {
-  esriConfig.assetsPath = "https://js.arcgis.com/5.0.19/assets";
-  setMapAssetPath("https://js.arcgis.com/5.0.19/map-components/assets");
+  const arcgisBaseUrl = "https://js.arcgis.com/5.0.19";
+
+  esriConfig.assetsPath = arcgisBaseUrl;
+  setMapAssetPath(arcgisBaseUrl);
 
   await Promise.all([
     addStylesheetOnce(
       "upmap-arcgis-core-css",
-      "https://js.arcgis.com/5.0.19/esri/themes/light/main.css"
+      `${arcgisBaseUrl}/esri/themes/light/main.css`
     ),
     addStylesheetOnce(
       "upmap-map-components-css",
-      "https://js.arcgis.com/5.0.19/map-components/main.css"
+      `${arcgisBaseUrl}/map-components/main.css`
     )
   ]);
 }
