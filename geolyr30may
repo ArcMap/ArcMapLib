@@ -1,60 +1,14 @@
-// src/arcgis-assets.ts
+addStylesheetOnce(
+  "upmap-arcgis-core-css",
+  "https://js.arcgis.com/5.0.19/esri/themes/light/main.css"
+);
 
-let initializedPromise: Promise<void> | null = null;
+addStylesheetOnce(
+  "upmap-arcgis-map-components-css",
+  "https://js.arcgis.com/5.0.19/map-components/main.css"
+);
 
-export function configureArcgisAssets(): Promise<void> {
-  if (initializedPromise) {
-    return initializedPromise;
-  }
-
-  initializedPromise = initialize();
-  return initializedPromise;
-}
-
-async function initialize(): Promise<void> {
-  await Promise.all([
-    addStyleSheetOnce(
-      "arcgis-css",
-      "https://js.arcgis.com/5.0/esri/themes/light/main.css"
-    ),
-
-    addScriptOnce(
-      "arcgis-js",
-      "https://js.arcgis.com/5.0/"
-    )
-  ]);
-}
-
-function addStyleSheetOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (document.getElementById(id)) {
-      resolve();
-      return;
-    }
-
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = href;
-    link.onload = () => resolve();
-
-    document.head.appendChild(link);
-  });
-}
-
-function addScriptOnce(id: string, src: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (document.getElementById(id)) {
-      resolve();
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = id;
-    script.src = src;
-    script.async = true;
-    script.onload = () => resolve();
-
-    document.head.appendChild(script);
-  });
-}
+addStylesheetOnce(
+  "upmap-arcgis-common-components-css",
+  "https://js.arcgis.com/5.0.19/common-components/main.css"
+);
