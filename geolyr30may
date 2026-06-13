@@ -1,79 +1,122 @@
-const ARCGIS_VERSION = "5.0.19";
-const ARCGIS_BASE_URL = `https://js.arcgis.com/${ARCGIS_VERSION}`;
+private async initializeMap(): Promise<void> {
+  const mapEl = await this.arcgisMapElement;
 
-let initializedPromise: Promise<void> | null = null;
-
-export function loadBaseArcgisComponents(): Promise<void> {
-  if (baseArcgisComponentsPromise) {
-    return baseArcgisComponentsPromise;
+  if (!mapEl) {
+    console.warn("uimap element not found");
+    return;
   }
 
-  baseArcgisComponentsPromise = initialize().then(() =>
-    Promise.all([
-      import("@arcgis/map-components/dist/components/arcgis-map"),
-      import("@arcgis/map-components/dist/components/arcgis-zoom"),
-      import("@arcgis/map-components/dist/components/arcgis-home"),
-      import("@arcgis/map-components/dist/components/arcgis-locate"),
-      import("@arcgis/map-components/dist/components/arcgis-scale-bar")
-    ]).then(() => undefined)
-  );
+  (mapEl as any).basemap = this.normalizeBasemapName(this.basemap);
 
-  return baseArcgisComponentsPromise;
-}
+  const attachToReadyView = async (): Promise<void> => {
+    const view = mapEl.view;
 
-async function initialize(): Promise<void> {
-  if (initializedPromise) {
-    return initializedPromise;
-  }
-
-  initializedPromise = Promise.all([
-    addPreconnectOnce("upmap-preconnect-js-arcgis", "https://js.arcgis.com"),
-    addPreconnectOnce("upmap-preconnect-static-arcgis", "https://static.arcgis.com"),
-    addStylesheetOnce(
-      "upmap-arcgis-core-css",
-      `${ARCGIS_BASE_URL}/esri/themes/light/main.css`
-    ),
-    addStylesheetOnce(
-      "upmap-map-components-css",
-      `${ARCGIS_BASE_URL}/map-components/main.css`
-    )
-  ]).then(() => undefined);
-
-  return initializedPromise;
-}
-
-function addPreconnectOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof document === "undefined" || document.getElementById(id)) {
-      resolve();
+    if (!view) {
+      console.warn("kkmap view not available");
       return;
     }
 
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "preconnect";
-    link.href = href;
-    link.crossOrigin = "anonymous";
+    console.log("Map view is ready", performance.now());
 
-    document.head.appendChild(link);
-    resolve();
+    this.view = view;
+
+    await this.view.when();
+
+    console.log("Map view when() resolved", performance.now());
+
+    view.constraints = {
+      ...view.constraints,
+      rotationEnabled: false
+    };
+
+    try {
+      if ((view as any).navigation) {
+        (view as any).navigation.momentumEnabled = true;
+        (view as any).navigation.mouseWheelZoomEnabled = true;
+      }
+    } catch {
+      // ignore if navigation API is unavailable
+    }
+
+    this._mapInitialized = true;
+
+    (window as any).upMapDebug = {
+      map: this.map,
+      view: this.view,
+      element: this
+    };
+
+    if (this.extent) {
+      await this.updateExtent(this.extent);
+    } else {
+      await this.updateCenter(this.center);
+      await this.updateZoom(this.zoom, undefined);
+    }
+
+    if (this.drawLayer) {
+      this.drawLayer = new GraphicsLayer();
+
+      if (this.view.map) {
+        this.view.map.add(this.drawLayer);
+      }
+    }
+
+    this.setupMapClickHandler();
+    this.setupViewWatchers();
+    this.setupPopupBridge();
+    this.syncPopupOptions();
+    this.setupRawTool();
+    this.setupZoomEmitter();
+    this.syncMouseWheelZoom();
+    this.syncDoubleClickZoom();
+    this.syncKeyboardNavigation();
+
+    this.resolveMapReady();
+
+    // Important: map is ready now. Load child layers/widgets after first map render.
+    this.initializeDeferredChildren();
+  };
+
+  if (mapEl.view) {
+    await attachToReadyView();
+    return;
+  }
+
+  const onReady = async (): Promise<void> => {
+    mapEl.removeEventListener("arcgisViewReadyChange", onReady);
+    await attachToReadyView();
+  };
+
+  mapEl.addEventListener("arcgisViewReadyChange", onReady, {
+    once: true
   });
 }
 
-function addStylesheetOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof document === "undefined" || document.getElementById(id)) {
-      resolve();
-      return;
-    }
 
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = href;
-    link.onload = () => resolve();
-    link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
+private initializeDeferredChildren(): void {
+  requestAnimationFrame(() => {
+    const children = Array.from(this.children);
 
-    document.head.appendChild(link);
+    children.forEach((child: Element) => {
+      child.dispatchEvent(
+        new CustomEvent("pp", {
+          detail: {
+            map: this.map,
+            view: this.view
+          },
+          bubbles: false,
+          composed: true
+        })
+      );
+    });
+  });
+}
+
+
+connectedCallback(): void {
+  super.connectedCallback();
+
+  this.addEventListener("pp", async () => {
+    await this.initializeAfterMapReady();
   });
 }
