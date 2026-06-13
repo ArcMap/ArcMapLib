@@ -1,12 +1,79 @@
+const ARCGIS_VERSION = "5.0.19";
+const ARCGIS_BASE_URL = `https://js.arcgis.com/${ARCGIS_VERSION}`;
+
+let initializedPromise: Promise<void> | null = null;
+
+export function loadBaseArcgisComponents(): Promise<void> {
+  if (baseArcgisComponentsPromise) {
+    return baseArcgisComponentsPromise;
+  }
+
+  baseArcgisComponentsPromise = initialize().then(() =>
+    Promise.all([
+      import("@arcgis/map-components/dist/components/arcgis-map"),
+      import("@arcgis/map-components/dist/components/arcgis-zoom"),
+      import("@arcgis/map-components/dist/components/arcgis-home"),
+      import("@arcgis/map-components/dist/components/arcgis-locate"),
+      import("@arcgis/map-components/dist/components/arcgis-scale-bar")
+    ]).then(() => undefined)
+  );
+
+  return baseArcgisComponentsPromise;
+}
+
 async function initialize(): Promise<void> {
-  await Promise.all([
+  if (initializedPromise) {
+    return initializedPromise;
+  }
+
+  initializedPromise = Promise.all([
+    addPreconnectOnce("upmap-preconnect-js-arcgis", "https://js.arcgis.com"),
+    addPreconnectOnce("upmap-preconnect-static-arcgis", "https://static.arcgis.com"),
     addStylesheetOnce(
       "upmap-arcgis-core-css",
-      "https://js.arcgis.com/5.0.19/esri/themes/light/main.css"
+      `${ARCGIS_BASE_URL}/esri/themes/light/main.css`
     ),
     addStylesheetOnce(
       "upmap-map-components-css",
-      "https://js.arcgis.com/5.0.19/map-components/main.css"
+      `${ARCGIS_BASE_URL}/map-components/main.css`
     )
-  ]);
+  ]).then(() => undefined);
+
+  return initializedPromise;
+}
+
+function addPreconnectOnce(id: string, href: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined" || document.getElementById(id)) {
+      resolve();
+      return;
+    }
+
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "preconnect";
+    link.href = href;
+    link.crossOrigin = "anonymous";
+
+    document.head.appendChild(link);
+    resolve();
+  });
+}
+
+function addStylesheetOnce(id: string, href: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === "undefined" || document.getElementById(id)) {
+      resolve();
+      return;
+    }
+
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href = href;
+    link.onload = () => resolve();
+    link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
+
+    document.head.appendChild(link);
+  });
 }
