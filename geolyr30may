@@ -1,50 +1,14 @@
-buildInfoTemplate(graphic: InfoTemplateGraphic): Record<string, string> {
-  const attributes = graphic.attributes || {};
-  const content: Record<string, string> = {};
+.esri-popup .content-wrapper {
+  flex: 0 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
 
-  if (attributes.type === "Circle") {
-    content["Id"] = attributes.id ?? "";
-    content["FeName"] = attributes.name ?? "";
-    content["Type"] = attributes.type ?? "";
-    content["Center"] = attributes.center
-      ? `${attributes.center[0].toFixed(4)}/${attributes.center[1].toFixed(4)}`
-      : "";
-    content["Radius (degrees)"] = attributes.radius
-      ? attributes.radius.toFixed(4)
-      : "";
-    content["Radius (feet)"] = attributes.radius
-      ? InfoTemplateBuilderService.toRadiusInFeet(attributes.radius)
-      : "";
-    content["Radius (miles)"] = attributes.radius
-      ? InfoTemplateBuilderService.toRadiusInMiles(attributes.radius)
-      : "";
-  } else {
-    content["Id"] = attributes.id ?? "";
-    content["FName"] = attributes.name ?? "";
-    content["Type"] = attributes.type ?? "";
-  }
-
-  let setBacklinkData: string[] | undefined;
-
-  attributes.setMetadata?.forEach((met: { name: string; value: string }) => {
-    if (met.name === "$backlink-0") {
-      setBacklinkData = met.value.split(",");
-    }
-  });
-
-  if (setBacklinkData) {
-    let name = setBacklinkData[1].replace("${g.name}", attributes.name);
-
-    if (name.includes("stripHyphens") && name.includes("g.name")) {
-      name =
-        name.split("${")[0] +
-        attributes.name.replace(/-/g, "") +
-        name.split("}")[1];
-    }
-
-    content["System Link"] =
-      `<a target="_blank" href="${name}" style="text-decoration:none;">${setBacklinkData[0]}</a>`;
-  }
-
-  return content;
+.esri-popup .esri-feature__content-node,
+.esri-popup .esri-feature__main-container,
+.esri-popup .esri-feature__size-container {
+  min-height: 0 !important;
+  height: auto !important;
 }
