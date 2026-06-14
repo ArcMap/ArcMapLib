@@ -1,20 +1,92 @@
-.esri-popup__content,
-.esri-feature,
-.esri-feature__size-container,
-.esri-feature__main-container,
-.esri-feature__content-node {
-  padding: 0 !important;
-  margin: 0 !important;
-  background: transparent !important;
-}
+export class InfoTemplateBuilderService {
+  buildInfoTemplate(graphic: InfoTemplateGraphic): any {
+    const attributes = graphic.attributes || {};
+    const isCircle = attributes.type === "Circle";
 
-.esri-feature__content-node {
-  overflow: auto !important;
-  scrollbar-gutter: stable;
-}
+    const displayName = this.getDisplayName(graphic);
+    const backlinkData = this.getBacklinkData(graphic);
 
-.info-template-root,
-.info-template-container {
-  background: #ffffff;
-  box-sizing: border-box;
+    attributes.centerDisplay = attributes.center
+      ? `${attributes.center[0].toFixed(4)}/${attributes.center[1].toFixed(4)}`
+      : "";
+
+    attributes.radiusDisplay = attributes.radius
+      ? attributes.radius.toFixed(4)
+      : "";
+
+    attributes.radiusFeet = attributes.radius
+      ? InfoTemplateBuilderService.toRadiusInFeet(attributes.radius)
+      : "";
+
+    attributes.radiusMiles = attributes.radius
+      ? InfoTemplateBuilderService.toRadiusInMiles(attributes.radius)
+      : "";
+
+    const fieldInfos = isCircle
+      ? [
+          { fieldName: "id", label: "Id" },
+          { fieldName: "name", label: "F Name" },
+          { fieldName: "type", label: "Type" },
+          { fieldName: "centerDisplay", label: "Center" },
+          { fieldName: "radiusDisplay", label: "Radius (degrees)" },
+          { fieldName: "radiusFeet", label: "Radius (feet)" },
+          { fieldName: "radiusMiles", label: "Radius (miles)" }
+        ]
+      : [
+          { fieldName: "id", label: "Id" },
+          { fieldName: "name", label: "F Name" },
+          { fieldName: "type", label: "Type" }
+        ];
+
+    const content: any[] = [
+      {
+        type: "fields",
+        fieldInfos
+      }
+    ];
+
+    if (backlinkData) {
+      content.unshift({
+        type: "text",
+        text: `<a href="/home/view-fe-details?fenkey=${attributes.id}&fesetkey=${attributes.fSetKey}">${displayName}</a>`
+      });
+    }
+
+    return {
+      title: displayName || "Details",
+      content
+    };
+  }
+
+  private getDisplayName(graphic: InfoTemplateGraphic): string {
+    let displayName = "";
+
+    graphic.attributes?.metadata?.forEach((item: any) => {
+      if (item.name === MetadataKeys.colloquialNameKey) {
+        displayName = item.value;
+      }
+    });
+
+    return displayName || graphic.attributes?.name || "Details";
+  }
+
+  private getBacklinkData(graphic: InfoTemplateGraphic): string[] | undefined {
+    let setbackLinkData: string[] | undefined;
+
+    graphic.attributes?.setMetadata?.forEach((met: { name: string; value: string }) => {
+      if (met.name === "$backlink-0") {
+        setbackLinkData = met.value.split(",");
+      }
+    });
+
+    return setbackLinkData;
+  }
+
+  static toRadiusInFeet(radius: number): string {
+    return (radius * 364000).toFixed(1);
+  }
+
+  static toRadiusInMiles(radius: number): string {
+    return (radius * 69).toFixed(4);
+  }
 }
