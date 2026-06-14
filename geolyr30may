@@ -1,14 +1,6 @@
-.esri-popup .content-wrapper {
-  flex: 0 1 auto !important;
-  min-height: 0 !important;
-  height: auto !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-}
-
-.esri-popup .esri-feature__content-node,
-.esri-popup .esri-feature__main-container,
-.esri-popup .esri-feature__size-container {
-  min-height: 0 !important;
-  height: auto !important;
+.esri-popup__pointer {
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
