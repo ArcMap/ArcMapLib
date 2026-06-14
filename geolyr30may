@@ -1,29 +1,7 @@
-.esri-popup .content-wrapper {
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  scrollbar-gutter: auto !important;
-}
-
-/* Chrome / Edge */
-.esri-popup .content-wrapper::-webkit-scrollbar {
-  width: 8px !important;
-}
-
-.esri-popup .content-wrapper::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-
-.esri-popup .content-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(120, 120, 120, 0.45) !important;
-  border-radius: 8px !important;
-}
-
-.esri-popup .content-wrapper::-webkit-scrollbar-corner {
-  background: transparent !important;
-}
-
-/* Firefox */
-.esri-popup .content-wrapper {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(120, 120, 120, 0.45) transparent;
-}
+[...arcgisMap.shadowRoot.querySelectorAll(".content-wrapper")].map((el, i) => ({
+  index: i,
+  text: el.innerText,
+  rect: el.getBoundingClientRect(),
+  overflowY: getComputedStyle(el).overflowY,
+  background: getComputedStyle(el).backgroundColor
+}))
