@@ -1,13 +1,48 @@
-private resizeObserver?: ResizeObserver;
+private mapResizeObserver?: ResizeObserver;
 
-private setupResizeObserver(mapEl: HTMLElement): void {
-  this.resizeObserver?.disconnect();
+private setupMapResizeObserver(mapEl: HTMLElement): void {
+  this.mapResizeObserver?.disconnect();
 
-  this.resizeObserver = new ResizeObserver(() => {
+  this.mapResizeObserver = new ResizeObserver(() => {
     requestAnimationFrame(() => {
-      this.view?.resize();
+      this.repositionPopupAfterLayoutChange();
+
+      requestAnimationFrame(() => {
+        this.repositionPopupAfterLayoutChange();
+      });
     });
   });
 
-  this.resizeObserver.observe(mapEl);
+  this.mapResizeObserver.observe(mapEl);
+}
+
+private repositionPopupAfterLayoutChange(): void {
+  if (!this.view?.popup?.visible) {
+    return;
+  }
+
+  const popup = this.view.popup;
+  const features = popup.features;
+  const location = popup.location;
+
+  if (!features?.length || !location) {
+    return;
+  }
+
+  popup.close();
+
+  requestAnimationFrame(() => {
+    popup.open({
+      features,
+      location
+    });
+  });
+}
+
+
+
+
+disconnectedCallback(): void {
+  this.mapResizeObserver?.disconnect();
+  super.disconnectedCallback();
 }
