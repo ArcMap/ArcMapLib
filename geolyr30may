@@ -1,35 +1,13 @@
-private mapResizeObserver?: ResizeObserver;
+private resizeObserver?: ResizeObserver;
 
-private setupMapResizeObserver(): void {
-  if (!this.view || !this.mapContainer) {
-    return;
-  }
+private setupResizeObserver(mapEl: HTMLElement): void {
+  this.resizeObserver?.disconnect();
 
-  this.mapResizeObserver?.disconnect();
-
-  this.mapResizeObserver = new ResizeObserver(() => {
+  this.resizeObserver = new ResizeObserver(() => {
     requestAnimationFrame(() => {
       this.view?.resize();
-
-      requestAnimationFrame(() => {
-        this.view?.resize();
-      });
     });
   });
 
-  this.mapResizeObserver.observe(this.mapContainer);
-}
-
-
-
-
-await this.view.when();
-
-this.setupMapResizeObserver();
-
-
-
-disconnectedCallback(): void {
-  this.mapResizeObserver?.disconnect();
-  super.disconnectedCallback();
+  this.resizeObserver.observe(mapEl);
 }
