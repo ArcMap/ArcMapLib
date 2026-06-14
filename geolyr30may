@@ -1,52 +1,28 @@
-async function initialize(): Promise<void> {
-  const arcgisBaseUrl = "https://js.arcgis.com/5.0.19";
-
-  await Promise.all([
-    addPreconnectOnce("u-preconnect-js-arcgis", "https://js.arcgis.com"),
-    addPreconnectOnce("u-preconnect-static-arcgis", "https://static.arcgis.com"),
-    addPreconnectOnce("u-preconnect-basemaps", "https://basemaps.arcgis.com"),
-
-    addPreloadOnce(
-      "upmap-calcite-action-messages",
-      "https://js.arcgis.com/calcite-components/5.0.2/assets/action/t9n/messages_en.json"
-    ),
-    addPreloadOnce(
-      "u-calcite-panel-messages",
-      "https://js.arcgis.com/calcite-components/5.0.2/assets/panel/t9n/messages_en.json"
-    ),
-    addPreloadOnce(
-      "u-arcgis-zoom-messages",
-      `${arcgisBaseUrl}/esri/widgets/Zoom/t9n/Zoom_en.json`
-    ),
-
-    addStylesheetOnce(
-      "u-arcgis-core-css",
-      `${arcgisBaseUrl}/esri/themes/light/main.css`
-    ),
-    addStylesheetOnce(
-      "ui-map-components-css",
-      `${arcgisBaseUrl}/map-components/main.css`
-    )
-  ]);
+private initializeDeferredChildren(): void {
+  requestAnimationFrame(() => {
+    Array.from(this.children).forEach((child: Element, index: number) => {
+      child.dispatchEvent(
+        new CustomEvent("upMapDeferredReady", {
+          detail: {
+            map: this.map,
+            view: this.view,
+            layerIndex: index
+          },
+          bubbles: false,
+          composed: true
+        })
+      );
+    });
+  });
 }
 
 
 
-function addPreloadOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof document === "undefined" || document.getElementById(id)) {
-      resolve();
-      return;
-    }
 
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "preload";
-    link.as = "fetch";
-    link.href = href;
-    link.crossOrigin = "anonymous";
+const layerIndex = event.detail?.layerIndex ?? undefined;
 
-    document.head.appendChild(link);
-    resolve();
-  });
+if (layerIndex !== undefined) {
+  this.view.map.add(this.featureLayer, layerIndex);
+} else {
+  this.view.map.add(this.featureLayer);
 }
