@@ -1,92 +1,50 @@
-export class InfoTemplateBuilderService {
-  buildInfoTemplate(graphic: InfoTemplateGraphic): any {
-    const attributes = graphic.attributes || {};
-    const isCircle = attributes.type === "Circle";
+buildInfoTemplate(graphic: InfoTemplateGraphic): Record<string, string> {
+  const attributes = graphic.attributes || {};
+  const content: Record<string, string> = {};
 
-    const displayName = this.getDisplayName(graphic);
-    const backlinkData = this.getBacklinkData(graphic);
-
-    attributes.centerDisplay = attributes.center
+  if (attributes.type === "Circle") {
+    content["Id"] = attributes.id ?? "";
+    content["FeName"] = attributes.name ?? "";
+    content["Type"] = attributes.type ?? "";
+    content["Center"] = attributes.center
       ? `${attributes.center[0].toFixed(4)}/${attributes.center[1].toFixed(4)}`
       : "";
-
-    attributes.radiusDisplay = attributes.radius
+    content["Radius (degrees)"] = attributes.radius
       ? attributes.radius.toFixed(4)
       : "";
-
-    attributes.radiusFeet = attributes.radius
+    content["Radius (feet)"] = attributes.radius
       ? InfoTemplateBuilderService.toRadiusInFeet(attributes.radius)
       : "";
-
-    attributes.radiusMiles = attributes.radius
+    content["Radius (miles)"] = attributes.radius
       ? InfoTemplateBuilderService.toRadiusInMiles(attributes.radius)
       : "";
+  } else {
+    content["Id"] = attributes.id ?? "";
+    content["FName"] = attributes.name ?? "";
+    content["Type"] = attributes.type ?? "";
+  }
 
-    const fieldInfos = isCircle
-      ? [
-          { fieldName: "id", label: "Id" },
-          { fieldName: "name", label: "F Name" },
-          { fieldName: "type", label: "Type" },
-          { fieldName: "centerDisplay", label: "Center" },
-          { fieldName: "radiusDisplay", label: "Radius (degrees)" },
-          { fieldName: "radiusFeet", label: "Radius (feet)" },
-          { fieldName: "radiusMiles", label: "Radius (miles)" }
-        ]
-      : [
-          { fieldName: "id", label: "Id" },
-          { fieldName: "name", label: "F Name" },
-          { fieldName: "type", label: "Type" }
-        ];
+  let setBacklinkData: string[] | undefined;
 
-    const content: any[] = [
-      {
-        type: "fields",
-        fieldInfos
-      }
-    ];
+  attributes.setMetadata?.forEach((met: { name: string; value: string }) => {
+    if (met.name === "$backlink-0") {
+      setBacklinkData = met.value.split(",");
+    }
+  });
 
-    if (backlinkData) {
-      content.unshift({
-        type: "text",
-        text: `<a href="/home/view-fe-details?fenkey=${attributes.id}&fesetkey=${attributes.fSetKey}">${displayName}</a>`
-      });
+  if (setBacklinkData) {
+    let name = setBacklinkData[1].replace("${g.name}", attributes.name);
+
+    if (name.includes("stripHyphens") && name.includes("g.name")) {
+      name =
+        name.split("${")[0] +
+        attributes.name.replace(/-/g, "") +
+        name.split("}")[1];
     }
 
-    return {
-      title: displayName || "Details",
-      content
-    };
+    content["System Link"] =
+      `<a target="_blank" href="${name}" style="text-decoration:none;">${setBacklinkData[0]}</a>`;
   }
 
-  private getDisplayName(graphic: InfoTemplateGraphic): string {
-    let displayName = "";
-
-    graphic.attributes?.metadata?.forEach((item: any) => {
-      if (item.name === MetadataKeys.colloquialNameKey) {
-        displayName = item.value;
-      }
-    });
-
-    return displayName || graphic.attributes?.name || "Details";
-  }
-
-  private getBacklinkData(graphic: InfoTemplateGraphic): string[] | undefined {
-    let setbackLinkData: string[] | undefined;
-
-    graphic.attributes?.setMetadata?.forEach((met: { name: string; value: string }) => {
-      if (met.name === "$backlink-0") {
-        setbackLinkData = met.value.split(",");
-      }
-    });
-
-    return setbackLinkData;
-  }
-
-  static toRadiusInFeet(radius: number): string {
-    return (radius * 364000).toFixed(1);
-  }
-
-  static toRadiusInMiles(radius: number): string {
-    return (radius * 69).toFixed(4);
-  }
+  return content;
 }
