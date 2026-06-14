@@ -1,17 +1,20 @@
-.esri-popup__content {
-  background: #ffffff;
-  padding: 0;
+.esri-popup__content,
+.esri-feature,
+.esri-feature__size-container,
+.esri-feature__main-container,
+.esri-feature__content-node {
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
 }
 
 .esri-feature__content-node {
-  background: #ffffff;
-  padding: 0;
+  overflow: auto !important;
+  scrollbar-gutter: stable;
 }
 
-.esri-feature__main-container {
+.info-template-root,
+.info-template-container {
   background: #ffffff;
-}
-
-.esri-popup__main-container {
-  overflow: hidden;
+  box-sizing: border-box;
 }
