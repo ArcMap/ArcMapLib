@@ -1,7 +1,35 @@
-[...arcgisMap.shadowRoot.querySelectorAll(".content-wrapper")].map((el, i) => ({
-  index: i,
-  text: el.innerText,
-  rect: el.getBoundingClientRect(),
-  overflowY: getComputedStyle(el).overflowY,
-  background: getComputedStyle(el).backgroundColor
-}))
+private mapResizeObserver?: ResizeObserver;
+
+private setupMapResizeObserver(): void {
+  if (!this.view || !this.mapContainer) {
+    return;
+  }
+
+  this.mapResizeObserver?.disconnect();
+
+  this.mapResizeObserver = new ResizeObserver(() => {
+    requestAnimationFrame(() => {
+      this.view?.resize();
+
+      requestAnimationFrame(() => {
+        this.view?.resize();
+      });
+    });
+  });
+
+  this.mapResizeObserver.observe(this.mapContainer);
+}
+
+
+
+
+await this.view.when();
+
+this.setupMapResizeObserver();
+
+
+
+disconnectedCallback(): void {
+  this.mapResizeObserver?.disconnect();
+  super.disconnectedCallback();
+}
