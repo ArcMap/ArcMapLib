@@ -1,28 +1,17 @@
-private initializeDeferredChildren(): void {
-  requestAnimationFrame(() => {
-    Array.from(this.children).forEach((child: Element, index: number) => {
-      child.dispatchEvent(
-        new CustomEvent("upMapDeferredReady", {
-          detail: {
-            map: this.map,
-            view: this.view,
-            layerIndex: index
-          },
-          bubbles: false,
-          composed: true
-        })
-      );
-    });
-  });
+.esri-popup__content {
+  background: #ffffff;
+  padding: 0;
 }
 
+.esri-feature__content-node {
+  background: #ffffff;
+  padding: 0;
+}
 
+.esri-feature__main-container {
+  background: #ffffff;
+}
 
-
-const layerIndex = event.detail?.layerIndex ?? undefined;
-
-if (layerIndex !== undefined) {
-  this.view.map.add(this.featureLayer, layerIndex);
-} else {
-  this.view.map.add(this.featureLayer);
+.esri-popup__main-container {
+  overflow: hidden;
 }
