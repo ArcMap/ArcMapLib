@@ -1,6 +1,29 @@
-.esri-popup__pointer {
-  width: 0 !important;
-  height: 0 !important;
+.esri-popup .content-wrapper {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: auto !important;
+}
+
+/* Chrome / Edge */
+.esri-popup .content-wrapper::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.esri-popup .content-wrapper::-webkit-scrollbar-track {
   background: transparent !important;
-  box-shadow: none !important;
+}
+
+.esri-popup .content-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.45) !important;
+  border-radius: 8px !important;
+}
+
+.esri-popup .content-wrapper::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+/* Firefox */
+.esri-popup .content-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 120, 120, 0.45) transparent;
 }
