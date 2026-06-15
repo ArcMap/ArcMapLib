@@ -12,14 +12,13 @@ const __dirname = path.dirname(__filename);
 const bundleForDev = process.env.DEV_BUNDLE === "true";
 
 /**
- * IMPORTANT:
- * Do NOT externalize ArcGIS packages.
- * Customer should install only UPMap, so ArcGIS must be resolved from UPMap dependencies.
+ * Do NOT externalize ArcGIS.
+ * Requirement: customer installs only UPMap.
  */
 const peerExternals = [
   /^lit$/,
   /^lit\//,
-  /^@up-elements\/core/
+  /^@elements\/core/
 ];
 
 export default {
@@ -29,7 +28,25 @@ export default {
     dir: bundleForDev ? "./dist-dev" : "./dist",
     format: "es",
     sourcemap: true,
-    chunkFileNames: "chunks/[hash].js"
+    chunkFileNames: "chunks/[hash].js",
+
+    manualChunks(id) {
+      if (id.includes("@arcgis/core")) {
+        return "arcgis-core";
+      }
+
+      if (id.includes("@arcgis/map-components")) {
+        return "arcgis-map-components";
+      }
+
+      if (id.includes("@arcgis/lumina")) {
+        return "arcgis-lumina";
+      }
+
+      if (id.includes("@esri/calcite-components")) {
+        return "calcite-components";
+      }
+    }
   },
 
   external: bundleForDev ? [] : peerExternals,
