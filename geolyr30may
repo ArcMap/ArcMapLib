@@ -1,27 +1,19 @@
-let zoomComponentPromise: Promise<void> | null = null;
+protected override async updated(changedProperties: Map<string, unknown>): Promise<void> {
+  super.updated(changedProperties);
 
-export function loadZoomComponent(): Promise<void> {
-  if (zoomComponentPromise) {
-    return zoomComponentPromise;
+  if (changedProperties.has('showZoom') && this.showZoom) {
+    await loadZoomComponent();
   }
 
-  zoomComponentPromise = initialize()
-    .then(() => import('@arcgis/map-components/dist/components/arcgis-zoom'))
-    .then(() => customElements.whenDefined('arcgis-zoom'))
-    .then(() => undefined);
+  if (changedProperties.has('showHome') && this.showHome) {
+    await loadHomeComponent();
+  }
 
-  return zoomComponentPromise;
-}
+  if (changedProperties.has('showLocate') && this.showLocate) {
+    await loadLocateComponent();
+  }
 
-
-
-public async showZoomSlider(): Promise<void> {
-  await this.mapReady;
-
-  await loadZoomComponent();
-
-  console.log('arcgis-zoom registered:', customElements.get('arcgis-zoom'));
-
-  this.showZoom = true;
-  await this.updateComplete;
+  if (changedProperties.has('showScaleBar') && this.showScaleBar) {
+    await loadScaleBarComponent();
+  }
 }
