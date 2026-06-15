@@ -1,88 +1,150 @@
-import path from "path";
-import { fileURLToPath } from "url";
-import resolve from "@rollup/plugin-node-resolve";
-import commonjs from "@rollup/plugin-commonjs";
-import typescript from "@rollup/plugin-typescript";
-import replace from "@rollup/plugin-replace";
-import postcss from "rollup-plugin-postcss";
+import esriConfig from '@arcgis/core/config';
+import { setAssetPath as setMapAssetPath } from '@arcgis/map-components';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let initializedPromise: Promise<void> | null = null;
 
-const bundleForDev = process.env.DEV_BUNDLE === "true";
+let mapOnlyComponentPromise: Promise<void> | null = null;
+let baseArcgisComponentsPromise: Promise<void> | null = null;
+let basemapGalleryComponentPromise: Promise<void> | null = null;
+let legendComponentPromise: Promise<void> | null = null;
+let layerListComponentPromise: Promise<void> | null = null;
+let measurementComponentsPromise: Promise<void> | null = null;
 
-/**
- * Do NOT externalize ArcGIS.
- * Requirement: customer installs only UPMap.
- */
-const peerExternals = [
-  /^lit$/,
-  /^lit\//,
-  /^@elements\/core/
-];
+const ARCGIS_VERSION = '5.0.19';
+const ARCGIS_BASE_URL = `https://js.arcgis.com/${ARCGIS_VERSION}`;
 
-export default {
-  input: path.resolve(__dirname, "src/index.ts"),
+export function loadMapOnlyArcgisComponent(): Promise<void> {
+  if (mapOnlyComponentPromise) {
+    return mapOnlyComponentPromise;
+  }
 
-  output: {
-    dir: bundleForDev ? "./dist-dev" : "./dist",
-    format: "es",
-    sourcemap: true,
-    chunkFileNames: "chunks/[hash].js",
+  mapOnlyComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-map').then(() => undefined)
+  );
 
-    manualChunks(id) {
-      if (id.includes("@arcgis/core")) {
-        return "arcgis-core";
-      }
+  return mapOnlyComponentPromise;
+}
 
-      if (id.includes("@arcgis/map-components")) {
-        return "arcgis-map-components";
-      }
+export function loadBaseArcgisComponents(): Promise<void> {
+  if (baseArcgisComponentsPromise) {
+    return baseArcgisComponentsPromise;
+  }
 
-      if (id.includes("@arcgis/lumina")) {
-        return "arcgis-lumina";
-      }
+  baseArcgisComponentsPromise = initialize().then(() =>
+    Promise.all([
+      import('@arcgis/map-components/dist/components/arcgis-map'),
+      import('@arcgis/map-components/dist/components/arcgis-zoom'),
+      import('@arcgis/map-components/dist/components/arcgis-home'),
+      import('@arcgis/map-components/dist/components/arcgis-locate'),
+      import('@arcgis/map-components/dist/components/arcgis-scale-bar')
+    ]).then(() => undefined)
+  );
 
-      if (id.includes("@esri/calcite-components")) {
-        return "calcite-components";
-      }
-    }
-  },
+  return baseArcgisComponentsPromise;
+}
 
-  external: bundleForDev ? [] : peerExternals,
+export function loadBasemapGalleryComponent(): Promise<void> {
+  if (basemapGalleryComponentPromise) {
+    return basemapGalleryComponentPromise;
+  }
 
-  plugins: [
-    resolve({
-      browser: true,
-      preferBuiltins: false,
-      dedupe: ["lit", "@up-elements/core"]
-    }),
+  basemapGalleryComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-basemap-gallery').then(() => undefined)
+  );
 
-    commonjs(),
+  return basemapGalleryComponentPromise;
+}
 
-    typescript({
-      tsconfig: bundleForDev ? "./tsconfig.dev.json" : "./tsconfig.json"
-    }),
+export function loadLegendComponent(): Promise<void> {
+  if (legendComponentPromise) {
+    return legendComponentPromise;
+  }
 
-    postcss({
-      inject: true,
-      minimize: true,
-      extract: false
-    }),
+  legendComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-legend').then(() => undefined)
+  );
 
-    replace({
-      preventAssignment: true,
-      "process.env.NODE_ENV": JSON.stringify(
-        process.env.NODE_ENV || "development"
-      )
-    })
-  ],
+  return legendComponentPromise;
+}
 
-  onwarn(warning, warn) {
-    if (warning.code === "CIRCULAR_DEPENDENCY") {
+export function loadLayerListComponent(): Promise<void> {
+  if (layerListComponentPromise) {
+    return layerListComponentPromise;
+  }
+
+  layerListComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-layer-list').then(() => undefined)
+  );
+
+  return layerListComponentPromise;
+}
+
+export function loadMeasurementComponents(): Promise<void> {
+  if (measurementComponentsPromise) {
+    return measurementComponentsPromise;
+  }
+
+  measurementComponentsPromise = initialize().then(() =>
+    Promise.all([
+      import('@arcgis/map-components/dist/components/arcgis-distance-measurement-2d'),
+      import('@arcgis/map-components/dist/components/arcgis-area-measurement-2d')
+    ]).then(() => undefined)
+  );
+
+  return measurementComponentsPromise;
+}
+
+async function initialize(): Promise<void> {
+  if (initializedPromise) {
+    return initializedPromise;
+  }
+
+  initializedPromise = Promise.all([
+    addPreconnectOnce('u-preconnect-js-arcgis', 'https://js.arcgis.com'),
+    addPreconnectOnce('u-preconnect-static-arcgis', 'https://static.arcgis.com'),
+    addStylesheetOnce('u-arcgis-core-css', `${ARCGIS_BASE_URL}/esri/themes/light/main.css`),
+    addStylesheetOnce('u-map-components-css', `${ARCGIS_BASE_URL}/map-components/main.css`)
+  ]).then(() => {
+    esriConfig.assetsPath = `${ARCGIS_BASE_URL}/assets`;
+    setMapAssetPath(`${ARCGIS_BASE_URL}/map-components/assets`);
+  });
+
+  return initializedPromise;
+}
+
+function addPreconnectOnce(id: string, href: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined' || document.getElementById(id)) {
+      resolve();
       return;
     }
 
-    warn(warning);
-  }
-};
+    const link = document.createElement('link');
+    link.id = id;
+    link.rel = 'preconnect';
+    link.href = href;
+    link.crossOrigin = 'anonymous';
+
+    document.head.appendChild(link);
+    resolve();
+  });
+}
+
+function addStylesheetOnce(id: string, href: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === 'undefined' || document.getElementById(id)) {
+      resolve();
+      return;
+    }
+
+    const link = document.createElement('link');
+    link.id = id;
+    link.rel = 'stylesheet';
+    link.href = href;
+
+    link.onload = () => resolve();
+    link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
+
+    document.head.appendChild(link);
+  });
+}
