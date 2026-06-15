@@ -1,48 +1,71 @@
-private mapResizeObserver?: ResizeObserver;
+import path from "path";
+import { fileURLToPath } from "url";
+import resolve from "@rollup/plugin-node-resolve";
+import commonjs from "@rollup/plugin-commonjs";
+import typescript from "@rollup/plugin-typescript";
+import replace from "@rollup/plugin-replace";
+import postcss from "rollup-plugin-postcss";
 
-private setupMapResizeObserver(mapEl: HTMLElement): void {
-  this.mapResizeObserver?.disconnect();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-  this.mapResizeObserver = new ResizeObserver(() => {
-    requestAnimationFrame(() => {
-      this.repositionPopupAfterLayoutChange();
+const bundleForDev = process.env.DEV_BUNDLE === "true";
 
-      requestAnimationFrame(() => {
-        this.repositionPopupAfterLayoutChange();
-      });
-    });
-  });
+/**
+ * IMPORTANT:
+ * Do NOT externalize ArcGIS packages.
+ * Customer should install only UPMap, so ArcGIS must be resolved from UPMap dependencies.
+ */
+const peerExternals = [
+  /^lit$/,
+  /^lit\//,
+  /^@up-elements\/core/
+];
 
-  this.mapResizeObserver.observe(mapEl);
-}
+export default {
+  input: path.resolve(__dirname, "src/index.ts"),
 
-private repositionPopupAfterLayoutChange(): void {
-  if (!this.view?.popup?.visible) {
-    return;
+  output: {
+    dir: bundleForDev ? "./dist-dev" : "./dist",
+    format: "es",
+    sourcemap: true,
+    chunkFileNames: "chunks/[hash].js"
+  },
+
+  external: bundleForDev ? [] : peerExternals,
+
+  plugins: [
+    resolve({
+      browser: true,
+      preferBuiltins: false,
+      dedupe: ["lit", "@up-elements/core"]
+    }),
+
+    commonjs(),
+
+    typescript({
+      tsconfig: bundleForDev ? "./tsconfig.dev.json" : "./tsconfig.json"
+    }),
+
+    postcss({
+      inject: true,
+      minimize: true,
+      extract: false
+    }),
+
+    replace({
+      preventAssignment: true,
+      "process.env.NODE_ENV": JSON.stringify(
+        process.env.NODE_ENV || "development"
+      )
+    })
+  ],
+
+  onwarn(warning, warn) {
+    if (warning.code === "CIRCULAR_DEPENDENCY") {
+      return;
+    }
+
+    warn(warning);
   }
-
-  const popup = this.view.popup;
-  const features = popup.features;
-  const location = popup.location;
-
-  if (!features?.length || !location) {
-    return;
-  }
-
-  popup.close();
-
-  requestAnimationFrame(() => {
-    popup.open({
-      features,
-      location
-    });
-  });
-}
-
-
-
-
-disconnectedCallback(): void {
-  this.mapResizeObserver?.disconnect();
-  super.disconnectedCallback();
-}
+};
