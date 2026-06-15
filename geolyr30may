@@ -1,52 +1,27 @@
 let zoomComponentPromise: Promise<void> | null = null;
-let homeComponentPromise: Promise<void> | null = null;
-let locateComponentPromise: Promise<void> | null = null;
-let scaleBarComponentPromise: Promise<void> | null = null;
 
 export function loadZoomComponent(): Promise<void> {
   if (zoomComponentPromise) {
     return zoomComponentPromise;
   }
 
-  zoomComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-zoom').then(() => undefined)
-  );
+  zoomComponentPromise = initialize()
+    .then(() => import('@arcgis/map-components/dist/components/arcgis-zoom'))
+    .then(() => customElements.whenDefined('arcgis-zoom'))
+    .then(() => undefined);
 
   return zoomComponentPromise;
 }
 
-export function loadHomeComponent(): Promise<void> {
-  if (homeComponentPromise) {
-    return homeComponentPromise;
-  }
 
-  homeComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-home').then(() => undefined)
-  );
 
-  return homeComponentPromise;
-}
+public async showZoomSlider(): Promise<void> {
+  await this.mapReady;
 
-export function loadLocateComponent(): Promise<void> {
-  if (locateComponentPromise) {
-    return locateComponentPromise;
-  }
+  await loadZoomComponent();
 
-  locateComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-locate').then(() => undefined)
-  );
+  console.log('arcgis-zoom registered:', customElements.get('arcgis-zoom'));
 
-  return locateComponentPromise;
-}
-
-export function loadScaleBarComponent(): Promise<void> {
-  if (scaleBarComponentPromise) {
-    return scaleBarComponentPromise;
-  }
-
-  scaleBarComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-scale-bar').then(() => undefined)
-  );
-
-  return scaleBarComponentPromise;
+  this.showZoom = true;
+  await this.updateComplete;
 }
