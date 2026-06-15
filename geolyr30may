@@ -1,150 +1,52 @@
-import esriConfig from '@arcgis/core/config';
-import { setAssetPath as setMapAssetPath } from '@arcgis/map-components';
+let zoomComponentPromise: Promise<void> | null = null;
+let homeComponentPromise: Promise<void> | null = null;
+let locateComponentPromise: Promise<void> | null = null;
+let scaleBarComponentPromise: Promise<void> | null = null;
 
-let initializedPromise: Promise<void> | null = null;
-
-let mapOnlyComponentPromise: Promise<void> | null = null;
-let baseArcgisComponentsPromise: Promise<void> | null = null;
-let basemapGalleryComponentPromise: Promise<void> | null = null;
-let legendComponentPromise: Promise<void> | null = null;
-let layerListComponentPromise: Promise<void> | null = null;
-let measurementComponentsPromise: Promise<void> | null = null;
-
-const ARCGIS_VERSION = '5.0.19';
-const ARCGIS_BASE_URL = `https://js.arcgis.com/${ARCGIS_VERSION}`;
-
-export function loadMapOnlyArcgisComponent(): Promise<void> {
-  if (mapOnlyComponentPromise) {
-    return mapOnlyComponentPromise;
+export function loadZoomComponent(): Promise<void> {
+  if (zoomComponentPromise) {
+    return zoomComponentPromise;
   }
 
-  mapOnlyComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-map').then(() => undefined)
+  zoomComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-zoom').then(() => undefined)
   );
 
-  return mapOnlyComponentPromise;
+  return zoomComponentPromise;
 }
 
-export function loadBaseArcgisComponents(): Promise<void> {
-  if (baseArcgisComponentsPromise) {
-    return baseArcgisComponentsPromise;
+export function loadHomeComponent(): Promise<void> {
+  if (homeComponentPromise) {
+    return homeComponentPromise;
   }
 
-  baseArcgisComponentsPromise = initialize().then(() =>
-    Promise.all([
-      import('@arcgis/map-components/dist/components/arcgis-map'),
-      import('@arcgis/map-components/dist/components/arcgis-zoom'),
-      import('@arcgis/map-components/dist/components/arcgis-home'),
-      import('@arcgis/map-components/dist/components/arcgis-locate'),
-      import('@arcgis/map-components/dist/components/arcgis-scale-bar')
-    ]).then(() => undefined)
+  homeComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-home').then(() => undefined)
   );
 
-  return baseArcgisComponentsPromise;
+  return homeComponentPromise;
 }
 
-export function loadBasemapGalleryComponent(): Promise<void> {
-  if (basemapGalleryComponentPromise) {
-    return basemapGalleryComponentPromise;
+export function loadLocateComponent(): Promise<void> {
+  if (locateComponentPromise) {
+    return locateComponentPromise;
   }
 
-  basemapGalleryComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-basemap-gallery').then(() => undefined)
+  locateComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-locate').then(() => undefined)
   );
 
-  return basemapGalleryComponentPromise;
+  return locateComponentPromise;
 }
 
-export function loadLegendComponent(): Promise<void> {
-  if (legendComponentPromise) {
-    return legendComponentPromise;
+export function loadScaleBarComponent(): Promise<void> {
+  if (scaleBarComponentPromise) {
+    return scaleBarComponentPromise;
   }
 
-  legendComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-legend').then(() => undefined)
+  scaleBarComponentPromise = initialize().then(() =>
+    import('@arcgis/map-components/dist/components/arcgis-scale-bar').then(() => undefined)
   );
 
-  return legendComponentPromise;
-}
-
-export function loadLayerListComponent(): Promise<void> {
-  if (layerListComponentPromise) {
-    return layerListComponentPromise;
-  }
-
-  layerListComponentPromise = initialize().then(() =>
-    import('@arcgis/map-components/dist/components/arcgis-layer-list').then(() => undefined)
-  );
-
-  return layerListComponentPromise;
-}
-
-export function loadMeasurementComponents(): Promise<void> {
-  if (measurementComponentsPromise) {
-    return measurementComponentsPromise;
-  }
-
-  measurementComponentsPromise = initialize().then(() =>
-    Promise.all([
-      import('@arcgis/map-components/dist/components/arcgis-distance-measurement-2d'),
-      import('@arcgis/map-components/dist/components/arcgis-area-measurement-2d')
-    ]).then(() => undefined)
-  );
-
-  return measurementComponentsPromise;
-}
-
-async function initialize(): Promise<void> {
-  if (initializedPromise) {
-    return initializedPromise;
-  }
-
-  initializedPromise = Promise.all([
-    addPreconnectOnce('u-preconnect-js-arcgis', 'https://js.arcgis.com'),
-    addPreconnectOnce('u-preconnect-static-arcgis', 'https://static.arcgis.com'),
-    addStylesheetOnce('u-arcgis-core-css', `${ARCGIS_BASE_URL}/esri/themes/light/main.css`),
-    addStylesheetOnce('u-map-components-css', `${ARCGIS_BASE_URL}/map-components/main.css`)
-  ]).then(() => {
-    esriConfig.assetsPath = `${ARCGIS_BASE_URL}/assets`;
-    setMapAssetPath(`${ARCGIS_BASE_URL}/map-components/assets`);
-  });
-
-  return initializedPromise;
-}
-
-function addPreconnectOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof document === 'undefined' || document.getElementById(id)) {
-      resolve();
-      return;
-    }
-
-    const link = document.createElement('link');
-    link.id = id;
-    link.rel = 'preconnect';
-    link.href = href;
-    link.crossOrigin = 'anonymous';
-
-    document.head.appendChild(link);
-    resolve();
-  });
-}
-
-function addStylesheetOnce(id: string, href: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof document === 'undefined' || document.getElementById(id)) {
-      resolve();
-      return;
-    }
-
-    const link = document.createElement('link');
-    link.id = id;
-    link.rel = 'stylesheet';
-    link.href = href;
-
-    link.onload = () => resolve();
-    link.onerror = () => reject(new Error(`Failed to load stylesheet: ${href}`));
-
-    document.head.appendChild(link);
-  });
+  return scaleBarComponentPromise;
 }
