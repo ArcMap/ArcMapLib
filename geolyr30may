@@ -1,133 +1,107 @@
-const clickHandle = this.view.on("click", async (evt: any) => {
-  const popupStart = performance.now();
+private static popupLayerInstances = new Set<UpGeojsonLayer>();
+private static prioritizedHitTests = new Map<string, Promise<any>>();
 
-  console.log("[popup-click] entered", {
-    layer: this.featureLayer?.title,
-    sketchLayer: this.sketchLayer?.title,
-    inDrawingMode: this.inDrawingMode,
-    isStartingDraw: this.__isStartingDraw,
-    editorOpen: this._editorOpen,
+private getClickSignature(evt: any): string {
+  const nativeTime = evt?.native?.timeStamp ?? 0;
+  const x = Math.round(evt?.x ?? evt?.screenPoint?.x ?? evt?.native?.offsetX ?? 0);
+  const y = Math.round(evt?.y ?? evt?.screenPoint?.y ?? evt?.native?.offsetY ?? 0);
+
+  return `${nativeTime}_${x}_${y}`;
+}
+
+private getGraphicPriority(graphic: Graphic): number {
+  const type = graphic?.geometry?.type;
+
+  if (type === "point" || type === "multipoint") {
+    return 3;
+  }
+
+  if (type === "polyline") {
+    return 2;
+  }
+
+  if (type === "polygon") {
+    return 1;
+  }
+
+  return 0;
+}
+
+private getWinningGraphicFromResults(graphicResults: any[]): Graphic | undefined {
+  const sortedResults = [...graphicResults].sort((a: any, b: any) => {
+    const aPriority = this.getGraphicPriority(a.graphic);
+    const bPriority = this.getGraphicPriority(b.graphic);
+
+    if (aPriority !== bPriority) {
+      return bPriority - aPriority;
+    }
+
+    return 0;
   });
 
-  if (this.isPopupDomTarget(evt?.native?.target)) {
-    console.log("[popup-click] ignored popup dom click", {
-      layer: this.featureLayer?.title,
+  return sortedResults[0]?.graphic as Graphic | undefined;
+}
+
+private getRegisteredLayers(): any[] {
+  const layers: any[] = [];
+
+  UpGeojsonLayer.popupLayerInstances.forEach((instance: UpGeojsonLayer) => {
+    [instance.featureLayer, instance.sketchLayer].forEach((layer: any) => {
+      if (layer && !layers.includes(layer)) {
+        layers.push(layer);
+      }
     });
-    return;
+  });
+
+  return layers;
+}
+
+private getPrioritizedSharedHitTest(evt: any): Promise<any> {
+  const signature = this.getClickSignature(evt);
+
+  const existing = UpGeojsonLayer.prioritizedHitTests.get(signature);
+  if (existing) {
+    return existing;
   }
 
-  if (this.inDrawingMode || this.__isStartingDraw) {
-    console.log("[popup-click] ignored drawing mode", {
-      layer: this.featureLayer?.title,
-    });
-    return;
-  }
+  const promise = (async () => {
+    const start = performance.now();
 
-  this.__isOpeningPopup = false;
-
-  try {
-    const hitDecision = await this.getPrioritizedSharedHitTest(evt);
-
-    const winningGraphic = hitDecision?.winningGraphic as Graphic | undefined;
-    const graphicResults = hitDecision?.graphicResults ?? [];
-
-    console.log("[popup-click] hit decision", {
-      currentLayer: this.featureLayer?.title,
-      winningLayer: winningGraphic?.layer?.title,
-      winningGeometry: winningGraphic?.geometry?.type,
-      resultCount: graphicResults.length,
+    const hit = await this.view.hitTest(evt, {
+      include: this.getRegisteredLayers(),
     });
 
-    if (!winningGraphic) {
-      console.log("[popup-click] no winning graphic", {
-        currentLayer: this.featureLayer?.title,
-      });
-      return;
-    }
-
-    const isThisLayerWinner =
-      winningGraphic.layer === this.featureLayer ||
-      winningGraphic.layer === this.sketchLayer;
-
-    if (!isThisLayerWinner) {
-      console.log("[popup-click] losing layer ignored", {
-        currentLayer: this.featureLayer?.title,
-        winningLayer: winningGraphic.layer?.title,
-      });
-      return;
-    }
-
-    const thisLayerGraphics = graphicResults
-      .filter((result: any) => {
-        return (
-          result?.graphic?.layer === this.featureLayer ||
-          result?.graphic?.layer === this.sketchLayer
-        );
-      })
-      .map((result: any) => result.graphic as Graphic);
-
-    console.log("[popup-click] winner layer will open popup", {
-      currentLayer: this.featureLayer?.title,
-      graphicsCount: thisLayerGraphics.length,
-    });
-
-    this.emitLayerEvent(
-      "layerClick",
-      this.graphicToGeoJsonFeature(winningGraphic),
-      winningGraphic,
-      {
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: winningGraphic.attributes ?? {},
-        },
-      }
-    );
-
-    if (this.isUserEditEnabled()) {
-      this.closePopup();
-
-      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-        this.removeFromGeoJSON(winningGraphic);
-        this.graphicsEditor?.cancel();
-        return;
-      }
-
-      await this.activateGraphicsEditor(winningGraphic, "transform");
-      return;
-    }
-
-    if (
-      !this._editorOpen &&
-      !this.inDrawingMode &&
-      !this.__isStartingDraw &&
-      !this.shouldSuppressPopup()
-    ) {
-      this.showGraphicPopup(
-        winningGraphic,
-        evt.mapPoint,
-        thisLayerGraphics.length ? thisLayerGraphics : [winningGraphic]
+    const graphicResults = (hit?.results ?? []).filter((result: any) => {
+      return (
+        result?.type === "graphic" &&
+        result?.graphic &&
+        result.graphic.layer &&
+        result.graphic.geometry
       );
-
-      requestAnimationFrame(() => {
-        console.log("[popup-perf] popup requested", {
-          currentLayer: this.featureLayer?.title,
-          totalMs: Math.round(performance.now() - popupStart),
-          popupLayer: winningGraphic.layer?.title,
-          geometryType: winningGraphic.geometry?.type,
-        });
-      });
-    }
-  } catch (err) {
-    console.error("[popup-click] failed", {
-      currentLayer: this.featureLayer?.title,
-      error: err,
     });
 
-    this.__isOpeningPopup = false;
-  }
-});
+    const winningGraphic = this.getWinningGraphicFromResults(graphicResults);
 
-this.eventHandles.push(clickHandle);
+    const ms = Math.round(performance.now() - start);
+
+    if (ms > 300) {
+      console.warn("[popup-perf] prioritized hitTest slow", {
+        ms,
+        totalResults: graphicResults.length,
+        winningLayer: winningGraphic?.layer?.title,
+        winningGeometry: winningGraphic?.geometry?.type,
+      });
+    }
+
+    return {
+      winningGraphic,
+      graphicResults,
+    };
+  })().finally(() => {
+    UpGeojsonLayer.prioritizedHitTests.delete(signature);
+  });
+
+  UpGeojsonLayer.prioritizedHitTests.set(signature, promise);
+
+  return promise;
+}
