@@ -1,23 +1,8 @@
-// Module-level coordinator — shared across all instances
-interface _ClickBid { layer: UpGeoJsonLayer; index: number; }
-const _clickBids = new Map<number, _ClickBid>();
-
-
-// Submit this layer's bid
-if (thisLayerFirstIndex !== -1) {
-    const existing = _clickBids.get(evt.timestamp);
-    if (!existing || thisLayerFirstIndex < existing.index) {
-        _clickBids.set(evt.timestamp, { layer: this, index: thisLayerFirstIndex });
-    }
+if (changedProperties.has('infoTemplate') && this.featureLayer) {
+    this.featureLayer.graphics.forEach((graphic: any) => {
+        graphic.popupTemplate =
+            this._editorOpen || this.inDrawingMode || !this.infoTemplate
+                ? (null as any)
+                : (this.buildPopupTemplate(graphic) as any);
+    });
 }
-
-// Wait for ALL concurrent handlers to submit their bids
-await new Promise<void>(resolve => setTimeout(resolve, 0));
-
-// Check if we won
-const bid = _clickBids.get(evt.timestamp);
-if (bid?.layer !== this) return; // not the topmost — stay quiet
-
-// We won — clean up and proceed
-_clickBids.delete(evt.timestamp);
-// ... rest of your existing code (emitLayerEvent, showGraphicPopup etc.)
