@@ -1,6 +1,124 @@
+private static popupLayerInstances = new Set<UpGeojsonLayer>();
+private static prioritizedHitTests = new Map<string, Promise<any>>();
+
+private getClickSignature(evt: any): string {
+  const nativeTime = evt?.native?.timeStamp ?? 0;
+  const x = Math.round(evt?.x ?? evt?.screenPoint?.x ?? evt?.native?.offsetX ?? 0);
+  const y = Math.round(evt?.y ?? evt?.screenPoint?.y ?? evt?.native?.offsetY ?? 0);
+
+  return `${nativeTime}_${x}_${y}`;
+}
+
+private getLayerGeometryType(layer: any): string {
+  return (
+    layer?.geometryType ??
+    layer?.source?.getItemAt?.(0)?.geometry?.type ??
+    layer?.graphics?.getItemAt?.(0)?.geometry?.type ??
+    layer?.graphics?.toArray?.()?.find((g: Graphic) => !!g?.geometry)?.geometry?.type ??
+    ""
+  );
+}
+
+private getRegisteredLayersByGeometry(geometryTypes: string[]): any[] {
+  const layers: any[] = [];
+
+  UpGeojsonLayer.popupLayerInstances.forEach((instance: UpGeojsonLayer) => {
+    [instance.featureLayer, instance.sketchLayer].forEach((layer: any) => {
+      if (!layer) return;
+
+      const geometryType = instance.getLayerGeometryType(layer);
+
+      if (geometryTypes.includes(geometryType) && !layers.includes(layer)) {
+        layers.push(layer);
+      }
+    });
+  });
+
+  return layers;
+}
+
+private async hitTestLayers(evt: any, layers: any[]): Promise<any[]> {
+  if (!layers.length) {
+    return [];
+  }
+
+  const hit = await this.view.hitTest(evt, {
+    include: layers,
+  });
+
+  return (hit?.results ?? []).filter((result: any) => {
+    return (
+      result?.type === "graphic" &&
+      result?.graphic &&
+      result.graphic.layer &&
+      result.graphic.geometry
+    );
+  });
+}
+
+private getPrioritizedSharedHitTest(evt: any): Promise<any> {
+  const signature = this.getClickSignature(evt);
+
+  const existing = UpGeojsonLayer.prioritizedHitTests.get(signature);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async () => {
+    const start = performance.now();
+
+    let graphicResults = await this.hitTestLayers(
+      evt,
+      this.getRegisteredLayersByGeometry(["point", "multipoint"])
+    );
+
+    if (!graphicResults.length) {
+      graphicResults = await this.hitTestLayers(
+        evt,
+        this.getRegisteredLayersByGeometry(["polyline"])
+      );
+    }
+
+    if (!graphicResults.length) {
+      graphicResults = await this.hitTestLayers(
+        evt,
+        this.getRegisteredLayersByGeometry(["polygon"])
+      );
+    }
+
+    const ms = Math.round(performance.now() - start);
+
+    if (ms > 300) {
+      console.warn("[popup-perf] prioritized hitTest slow", {
+        ms,
+        totalResults: graphicResults.length,
+      });
+    }
+
+    return {
+      winningGraphic: graphicResults[0]?.graphic as Graphic | undefined,
+      graphicResults,
+    };
+  })().finally(() => {
+    UpGeojsonLayer.prioritizedHitTests.delete(signature);
+  });
+
+  UpGeojsonLayer.prioritizedHitTests.set(signature, promise);
+
+  return promise;
+}
+
+
+
+
+
+
+
+
+
+
 const clickHandle = this.view.on("click", async (evt: any) => {
   const popupStart = performance.now();
-  const clickId = this.getClickId(evt);
 
   if (this.isPopupDomTarget(evt?.native?.target)) {
     return;
@@ -13,34 +131,13 @@ const clickHandle = this.view.on("click", async (evt: any) => {
   this.__isOpeningPopup = false;
 
   try {
-    const hit = await this.getSharedHitTest(evt);
+    const hitDecision = await this.getPrioritizedSharedHitTest(evt);
 
-    if (!this.isLatestClick(clickId)) {
-      console.warn("[popup-debug] stale click ignored", {
-        clickId,
-        latestClickId: UpGeojsonLayer.latestClickId,
-        currentFeatureLayerTitle: this.featureLayer?.title,
-      });
-      return;
-    }
-
-    const graphicResults = (hit?.results ?? []).filter((result: any) => {
-      return (
-        result?.type === "graphic" &&
-        result?.graphic &&
-        result.graphic.layer &&
-        result.graphic.geometry
-      );
-    });
-
-    if (!graphicResults.length) {
-      this.closePopup();
-      return;
-    }
-
-    const winningGraphic = this.getWinningGraphic(graphicResults);
+    const winningGraphic = hitDecision?.winningGraphic as Graphic | undefined;
+    const graphicResults = hitDecision?.graphicResults ?? [];
 
     if (!winningGraphic) {
+      this.closePopup();
       return;
     }
 
@@ -118,20 +215,4 @@ const clickHandle = this.view.on("click", async (evt: any) => {
 
     this.__isOpeningPopup = false;
   }
-});
-
-
-
-
-
-requestAnimationFrame(() => {
-  (this.view as any).openPopup({
-    features: popupGraphics,
-    location,
-    updateLocationEnabled: false,
-  });
-
-  requestAnimationFrame(() => {
-    this.view?.popup?.reposition?.();
-  });
 });
