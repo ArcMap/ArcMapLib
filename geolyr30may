@@ -1,56 +1,18 @@
 const clickHandle = this.view.on("click", async (evt: any) => {
   const popupStart = performance.now();
 
-  const nativeTarget = evt?.native?.target as HTMLElement | null;
-  const popupTarget = this.isPopupDomTarget(evt?.native?.target);
-
-  console.log("[popup-debug] click handler entered", {
-    currentFeatureLayerTitle: this.featureLayer?.title,
-    currentSketchLayerTitle: this.sketchLayer?.title,
-    targetTag: nativeTarget?.tagName,
-    targetClass: nativeTarget?.className,
-    popupTarget,
-    inDrawingMode: this.inDrawingMode,
-    isStartingDraw: this.__isStartingDraw,
-    editorOpen: this._editorOpen,
-    suppressPopup: this.shouldSuppressPopup?.(),
-  });
-
-  if (popupTarget) {
-    console.warn("[popup-debug] stopped before hitTest: popup dom target", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-    });
+  if (this.isPopupDomTarget(evt?.native?.target)) {
     return;
   }
 
   if (this.inDrawingMode || this.__isStartingDraw) {
-    console.warn("[popup-debug] stopped before hitTest: drawing/start draw", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      inDrawingMode: this.inDrawingMode,
-      isStartingDraw: this.__isStartingDraw,
-    });
     return;
   }
 
   this.__isOpeningPopup = false;
 
   try {
-    console.log("[popup-debug] before shared hitTest", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      viewReady: this.view?.ready,
-      viewUpdating: this.view?.updating,
-      viewSuspended: this.view?.suspended,
-    });
-
-    const hitStart = performance.now();
     const hit = await this.getSharedHitTest(evt);
-
-    console.log("[popup-debug] shared hitTest completed", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      ms: Math.round(performance.now() - hitStart),
-      totalResults: hit?.results?.length ?? 0,
-    });
-
     const allResults = hit?.results ?? [];
 
     const graphicResults = allResults.filter((result: any) => {
@@ -61,74 +23,37 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       );
     });
 
-    console.log("[popup-debug] graphicResults", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      count: graphicResults.length,
-      layers: graphicResults.map((r: any) => r.graphic?.layer?.title),
-    });
-
     if (!graphicResults.length) {
-      console.warn("[popup-debug] stopped after hitTest: no graphic results", {
-        currentFeatureLayerTitle: this.featureLayer?.title,
-      });
       this.closePopup();
       return;
     }
 
-    /**
-     * Important:
-     * Do NOT sort by map.layers.indexOf here.
-     * ArcGIS hitTest already returns the visually hit graphics.
-     * Sorting manually was making Container Layer always win.
-     */
-    const topGraphic = graphicResults[0]?.graphic as Graphic | undefined;
-
-    console.log("[popup-debug] topGraphic", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      hasGraphic: !!topGraphic,
-      topLayerTitle: topGraphic?.layer?.title,
-      attributes: topGraphic?.attributes,
+    const thisLayerResults = graphicResults.filter((result: any) => {
+      return (
+        result?.graphic?.layer === this.featureLayer ||
+        result?.graphic?.layer === this.sketchLayer
+      );
     });
+
+    if (!thisLayerResults.length) {
+      return;
+    }
+
+    const topGraphic = thisLayerResults[0]?.graphic as Graphic | undefined;
 
     if (!topGraphic) {
-      console.warn("[popup-debug] stopped: topGraphic missing", {
-        currentFeatureLayerTitle: this.featureLayer?.title,
-      });
       return;
     }
 
-    const isThisLayerTop =
-      topGraphic.layer === this.featureLayer ||
-      topGraphic.layer === this.sketchLayer;
+    const thisLayerGraphics = thisLayerResults.map(
+      (result: any) => result.graphic as Graphic
+    );
 
-    console.log("[popup-debug] isThisLayerTop", {
+    console.log("[popup-debug] selected current layer graphic", {
       currentFeatureLayerTitle: this.featureLayer?.title,
-      isThisLayerTop,
-      topLayerTitle: topGraphic.layer?.title,
-      featureLayerTitle: this.featureLayer?.title,
-      sketchLayerTitle: this.sketchLayer?.title,
-    });
-
-    if (!isThisLayerTop) {
-      console.warn("[popup-debug] stopped: this layer is not top layer", {
-        currentFeatureLayerTitle: this.featureLayer?.title,
-        topLayerTitle: topGraphic.layer?.title,
-      });
-      return;
-    }
-
-    const thisLayerGraphics = graphicResults
-      .filter((result: any) => {
-        return (
-          result?.graphic?.layer === this.featureLayer ||
-          result?.graphic?.layer === this.sketchLayer
-        );
-      })
-      .map((result: any) => result.graphic as Graphic);
-
-    console.log("[popup-debug] thisLayerGraphics", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      count: thisLayerGraphics.length,
+      topGraphicLayerTitle: topGraphic.layer?.title,
+      thisLayerGraphicsCount: thisLayerGraphics.length,
+      totalHitGraphics: graphicResults.length,
     });
 
     this.emitLayerEvent(
@@ -146,26 +71,10 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       }
     );
 
-    console.log("[popup-debug] editState", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      isUserEditEnabled: this.isUserEditEnabled(),
-      editorOpen: this._editorOpen,
-      inDrawingMode: this.inDrawingMode,
-      isStartingDraw: this.__isStartingDraw,
-    });
-
     if (this.isUserEditEnabled()) {
-      console.warn("[popup-debug] edit mode path entered", {
-        currentFeatureLayerTitle: this.featureLayer?.title,
-      });
-
       this.closePopup();
 
       if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-        console.warn("[popup-debug] edit remove path entered", {
-          currentFeatureLayerTitle: this.featureLayer?.title,
-        });
-
         this.removeFromGeoJSON(topGraphic);
         this.graphicsEditor?.cancel();
         return;
@@ -177,52 +86,26 @@ const clickHandle = this.view.on("click", async (evt: any) => {
 
     const suppressPopup = this.shouldSuppressPopup();
 
-    console.log("[popup-debug] popupConditions", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      editorOpen: this._editorOpen,
-      inDrawingMode: this.inDrawingMode,
-      isStartingDraw: this.__isStartingDraw,
-      suppressPopup,
-    });
-
     if (
       !this._editorOpen &&
       !this.inDrawingMode &&
       !this.__isStartingDraw &&
       !suppressPopup
     ) {
-      const showStart = performance.now();
-
       this.showGraphicPopup(
         topGraphic,
         evt.mapPoint,
         thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
       );
 
-      console.log("[popup-perf] showGraphicPopup called", {
-        currentFeatureLayerTitle: this.featureLayer?.title,
-        ms: Math.round(performance.now() - showStart),
-      });
-
       requestAnimationFrame(() => {
         console.log("[popup-perf] popup rendered next frame", {
           currentFeatureLayerTitle: this.featureLayer?.title,
           totalMs: Math.round(performance.now() - popupStart),
           layer: topGraphic?.layer?.title,
-          attributes: topGraphic?.attributes,
         });
       });
-
-      return;
     }
-
-    console.warn("[popup-debug] stopped: popup conditions failed", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      editorOpen: this._editorOpen,
-      inDrawingMode: this.inDrawingMode,
-      isStartingDraw: this.__isStartingDraw,
-      suppressPopup,
-    });
   } catch (err) {
     console.error("[popup-debug] click handler failed", {
       currentFeatureLayerTitle: this.featureLayer?.title,
