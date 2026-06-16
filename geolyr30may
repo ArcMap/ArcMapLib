@@ -1,12 +1,26 @@
-private logPopupPerf(label: string, startTime: number, extra?: any): void {
-  const duration = Math.round(performance.now() - startTime);
+private isPopupDomTarget(target: EventTarget | null | undefined): boolean {
+  const element = target as HTMLElement | null;
 
-  if (duration > 100) {
-    console.warn(`[up-geojson-layer][popup-perf] ${label}: ${duration}ms`, extra ?? "");
-  } else {
-    console.log(`[up-geojson-layer][popup-perf] ${label}: ${duration}ms`, extra ?? "");
+  if (!element) {
+    return false;
   }
+
+  return !!element.closest(
+    ".esri-popup__button, .esri-popup__action, .esri-popup__header-buttons, .esri-popup__footer"
+  );
 }
+
+
+
+const popupStart = performance.now();
+
+console.log("[up-geojson-layer][popup-flow] click received", {
+  target: (evt?.native?.target as HTMLElement)?.className,
+  inDrawingMode: this.inDrawingMode,
+  isStartingDraw: this.__isStartingDraw,
+  editorOpen: this._editorOpen,
+  suppressPopup: this.shouldSuppressPopup?.(),
+});
 
 
 
@@ -14,10 +28,16 @@ private logPopupPerf(label: string, startTime: number, extra?: any): void {
 if (
   !this._editorOpen &&
   !this.inDrawingMode &&
-  !this.__isStartingDraw &&
-  !this.shouldSuppressPopup()
+  !this.__isStartingDraw
 ) {
-  const templateStart = performance.now();
+  const suppressPopup = this.shouldSuppressPopup();
+
+  if (suppressPopup) {
+    console.warn("[up-geojson-layer][popup-flow] popup skipped because shouldSuppressPopup true");
+    return;
+  }
+
+  const showStart = performance.now();
 
   this.showGraphicPopup(
     topGraphic,
@@ -25,12 +45,20 @@ if (
     thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
   );
 
-  this.logPopupPerf("showGraphicPopup called", templateStart);
+  console.log("[up-geojson-layer][popup-perf] showGraphicPopup called", {
+    ms: Math.round(performance.now() - showStart),
+  });
 
   requestAnimationFrame(() => {
-    this.logPopupPerf("popup rendered next frame", popupStart, {
-      title: topGraphic?.attributes?.properties?.name,
+    console.log("[up-geojson-layer][popup-perf] popup rendered next frame", {
+      totalMs: Math.round(performance.now() - popupStart),
       layer: topGraphic?.layer?.title,
+      attributes: topGraphic?.attributes,
     });
   });
 }
+
+
+console.log("[up-geojson-layer][popup-flow] hitTest completed", {
+  totalResults: hit?.results?.length ?? 0,
+});
