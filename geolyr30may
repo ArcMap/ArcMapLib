@@ -1,18 +1,16 @@
-// Pass 1: unrestricted — see ALL layers for topmost check
-const allLayersHit = await this.view.hitTest(evt);
-const allLayersResults = allLayersHit?.results ?? [];
+const validResults = allLayersResults.filter((r: any) => {
+    const layer = r?.graphic?.layer;
+    if (!r?.graphic?.geometry || !layer) return false;
+    if (layer === this.sketchLayer) return false;
+    if (layer === this.labelLayer) return false;
+    // exclude internal ArcGIS overlay layers (popup handles, highlights etc.)
+    return this.view?.map?.layers?.indexOf(layer) !== -1;
+});
 
-const validResults = allLayersResults.filter((r: any) =>
-    r?.graphic?.geometry &&
-    r?.graphic?.layer !== this.sketchLayer &&
-    r?.graphic?.layer !== this.labelLayer
-);
-
-const thisLayerFirstIndex = allLayersResults.findIndex(
+const thisLayerFirstIndex = validResults.findIndex(
     (r: any) => r?.graphic?.layer === this.featureLayer
 );
-const otherLayerFirstIndex = allLayersResults.findIndex(
-    (r: any) => r?.graphic?.layer !== this.featureLayer &&
-                r?.graphic?.layer !== this.sketchLayer &&
-                r?.graphic?.layer !== this.labelLayer
+
+const otherLayerFirstIndex = validResults.findIndex(
+    (r: any) => r?.graphic?.layer !== this.featureLayer
 );
