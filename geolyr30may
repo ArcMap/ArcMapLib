@@ -1,8 +1,17 @@
-if (changedProperties.has('infoTemplate') && this.featureLayer) {
-    this.featureLayer.graphics.forEach((graphic: any) => {
-        graphic.popupTemplate =
-            this._editorOpen || this.inDrawingMode || !this.infoTemplate
-                ? (null as any)
-                : (this.buildPopupTemplate(graphic) as any);
-    });
+} else if (
+    !this._editorOpen &&
+    !this.inDrawingMode &&
+    !this._isStartingDraw &&
+    !this.shouldSuppressPopup()
+) {
+    // Only ONE layer opens popup per click — ArcGIS fetchFeatures
+    // finds topmost layer automatically
+    if (evt.timestamp !== _lastPopupTimestamp) {
+        _lastPopupTimestamp = evt.timestamp;
+        (this.view as any).openPopup({
+            location: evt.mapPoint,
+            fetchFeatures: true,
+        });
+    }
+    return;
 }
