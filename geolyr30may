@@ -1,30 +1,23 @@
-// Only compare against known geojson featureLayers — ignores ALL
-// internal ArcGIS layers, highlights, popup overlays, etc.
-const validResults = allLayersResults.filter((r: any) =>
-    r?.graphic?.geometry &&
-    UpGeoJsonLayer._registry.has(r?.graphic?.layer)
-);
+// Module-level coordinator — shared across all instances
+interface _ClickBid { layer: UpGeoJsonLayer; index: number; }
+const _clickBids = new Map<number, _ClickBid>();
 
-const thisLayerFirstIndex = validResults.findIndex(
-    (r: any) => r?.graphic?.layer === this.featureLayer
-);
-const otherLayerFirstIndex = validResults.findIndex(
-    (r: any) => r?.graphic?.layer !== this.featureLayer
-);
 
-if (
-    otherLayerFirstIndex !== -1 &&
-    (thisLayerFirstIndex === -1 || otherLayerFirstIndex < thisLayerFirstIndex)
-) {
-    return;
+// Submit this layer's bid
+if (thisLayerFirstIndex !== -1) {
+    const existing = _clickBids.get(evt.timestamp);
+    if (!existing || thisLayerFirstIndex < existing.index) {
+        _clickBids.set(evt.timestamp, { layer: this, index: thisLayerFirstIndex });
+    }
 }
 
+// Wait for ALL concurrent handlers to submit their bids
+await new Promise<void>(resolve => setTimeout(resolve, 0));
 
+// Check if we won
+const bid = _clickBids.get(evt.timestamp);
+if (bid?.layer !== this) return; // not the topmost — stay quiet
 
-private static _registry = new Set<any>();
-
-
-UpGeoJsonLayer._registry.add(this.featureLayer);
-
-
-UpGeoJsonLayer._registry.delete(this.featureLayer);
+// We won — clean up and proceed
+_clickBids.delete(evt.timestamp);
+// ... rest of your existing code (emitLayerEvent, showGraphicPopup etc.)
