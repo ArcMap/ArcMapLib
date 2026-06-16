@@ -1,30 +1,209 @@
-console.log("[popup-debug] topGraphic", {
-  hasGraphic: !!topGraphic,
-  layerTitle: topGraphic?.layer?.title,
-  attributes: topGraphic?.attributes
-});
+const clickHandle = this.view.on("click", async (evt: any) => {
+  const popupStart = performance.now();
 
+  const nativeTarget = evt?.native?.target as HTMLElement | null;
+  const popupTarget = this.isPopupDomTarget(evt?.native?.target);
 
-console.log("[popup-debug] isThisLayerTop", isThisLayerTop);
+  console.log("[up-geojson-layer][popup-flow] click received", {
+    targetTag: nativeTarget?.tagName,
+    targetClass: nativeTarget?.className,
+    popupTarget,
+    inDrawingMode: this.inDrawingMode,
+    isStartingDraw: this.__isStartingDraw,
+    editorOpen: this._editorOpen,
+    suppressPopup: this.shouldSuppressPopup?.(),
+  });
 
+  if (popupTarget) {
+    console.warn("[up-geojson-layer][popup-flow] stopped before hitTest: popup dom target");
+    return;
+  }
 
+  if (this.inDrawingMode || this.__isStartingDraw) {
+    console.warn("[up-geojson-layer][popup-flow] stopped before hitTest: drawing/start draw", {
+      inDrawingMode: this.inDrawingMode,
+      isStartingDraw: this.__isStartingDraw,
+    });
+    return;
+  }
 
+  this.__isOpeningPopup = false;
 
-console.log("[popup-debug] editState", {
-  isUserEditEnabled: this.isUserEditEnabled(),
-  editorOpen: this._editorOpen,
-  inDrawingMode: this.inDrawingMode,
-  isStartingDraw: this.__isStartingDraw
-});
+  try {
+    console.log("[up-geojson-layer][popup-debug] before hitTest", {
+      viewReady: this.view?.ready,
+      viewUpdating: this.view?.updating,
+      viewSuspended: this.view?.suspended,
+    });
 
+    const hitStart = performance.now();
+    const hit = await this.view.hitTest(evt);
 
+    console.log("[up-geojson-layer][popup-flow] hitTest completed", {
+      ms: Math.round(performance.now() - hitStart),
+      totalResults: hit?.results?.length ?? 0,
+    });
 
+    const allResults = hit?.results ?? [];
 
-const suppressPopup = this.shouldSuppressPopup();
+    const graphicResults = allResults.filter((result: any) => {
+      return (
+        result?.type === "graphic" &&
+        result?.graphic &&
+        result.graphic.layer
+      );
+    });
 
-console.log("[popup-debug] popupConditions", {
-  editorOpen: this._editorOpen,
-  inDrawingMode: this.inDrawingMode,
-  isStartingDraw: this.__isStartingDraw,
-  suppressPopup
+    console.log("[up-geojson-layer][popup-debug] graphicResults", {
+      count: graphicResults.length,
+      layers: graphicResults.map((r: any) => r.graphic?.layer?.title),
+    });
+
+    if (!graphicResults.length) {
+      console.warn("[up-geojson-layer][popup-flow] stopped after hitTest: no graphic results");
+      this.closePopup();
+      return;
+    }
+
+    const sortedGraphicResults = graphicResults.sort((a: any, b: any) => {
+      const aIndex = this.view.map.layers.indexOf(a.graphic.layer);
+      const bIndex = this.view.map.layers.indexOf(b.graphic.layer);
+
+      return bIndex - aIndex;
+    });
+
+    console.log("[up-geojson-layer][popup-debug] sortedGraphicResults", {
+      layers: sortedGraphicResults.map((r: any) => ({
+        layerTitle: r.graphic?.layer?.title,
+        layerIndex: this.view.map.layers.indexOf(r.graphic?.layer),
+      })),
+    });
+
+    const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
+
+    console.log("[up-geojson-layer][popup-debug] topGraphic", {
+      hasGraphic: !!topGraphic,
+      layerTitle: topGraphic?.layer?.title,
+      attributes: topGraphic?.attributes,
+    });
+
+    if (!topGraphic) {
+      console.warn("[up-geojson-layer][popup-flow] stopped: topGraphic missing");
+      return;
+    }
+
+    const isThisLayerTop =
+      topGraphic.layer === this.featureLayer ||
+      topGraphic.layer === this.sketchLayer;
+
+    console.log("[up-geojson-layer][popup-debug] isThisLayerTop", {
+      isThisLayerTop,
+      topLayerTitle: topGraphic.layer?.title,
+      featureLayerTitle: this.featureLayer?.title,
+      sketchLayerTitle: this.sketchLayer?.title,
+    });
+
+    if (!isThisLayerTop) {
+      console.warn("[up-geojson-layer][popup-flow] stopped: this layer is not top layer");
+      return;
+    }
+
+    const thisLayerGraphics = sortedGraphicResults
+      .filter((result: any) => {
+        return (
+          result?.graphic?.layer === this.featureLayer ||
+          result?.graphic?.layer === this.sketchLayer
+        );
+      })
+      .map((result: any) => result.graphic as Graphic);
+
+    console.log("[up-geojson-layer][popup-debug] thisLayerGraphics", {
+      count: thisLayerGraphics.length,
+    });
+
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(topGraphic),
+      topGraphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: topGraphic.attributes ?? {},
+        },
+      }
+    );
+
+    console.log("[up-geojson-layer][popup-debug] editState", {
+      isUserEditEnabled: this.isUserEditEnabled(),
+      editorOpen: this._editorOpen,
+      inDrawingMode: this.inDrawingMode,
+      isStartingDraw: this.__isStartingDraw,
+    });
+
+    if (this.isUserEditEnabled()) {
+      console.warn("[up-geojson-layer][popup-flow] edit mode path entered");
+      this.closePopup();
+
+      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
+        console.warn("[up-geojson-layer][popup-flow] edit remove path entered");
+        this.removeFromGeoJSON(topGraphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
+
+      await this.activateGraphicsEditor(topGraphic, "transform");
+      return;
+    }
+
+    const suppressPopup = this.shouldSuppressPopup();
+
+    console.log("[up-geojson-layer][popup-debug] popupConditions", {
+      editorOpen: this._editorOpen,
+      inDrawingMode: this.inDrawingMode,
+      isStartingDraw: this.__isStartingDraw,
+      suppressPopup,
+    });
+
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this.__isStartingDraw &&
+      !suppressPopup
+    ) {
+      const showStart = performance.now();
+
+      this.showGraphicPopup(
+        topGraphic,
+        evt.mapPoint,
+        thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
+      );
+
+      console.log("[up-geojson-layer][popup-perf] showGraphicPopup called", {
+        ms: Math.round(performance.now() - showStart),
+      });
+
+      requestAnimationFrame(() => {
+        console.log("[up-geojson-layer][popup-perf] popup rendered next frame", {
+          totalMs: Math.round(performance.now() - popupStart),
+          layer: topGraphic?.layer?.title,
+          attributes: topGraphic?.attributes,
+        });
+      });
+
+      return;
+    }
+
+    console.warn("[up-geojson-layer][popup-flow] stopped: popup conditions failed", {
+      editorOpen: this._editorOpen,
+      inDrawingMode: this.inDrawingMode,
+      isStartingDraw: this.__isStartingDraw,
+      suppressPopup,
+    });
+  } catch (err) {
+    console.error("[up-geojson-layer][popup-flow] click handler failed", err);
+    this.__isOpeningPopup = false;
+  }
 });
