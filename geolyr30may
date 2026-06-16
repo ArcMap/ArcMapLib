@@ -1,7 +1,24 @@
-/ Release Note Version
+Implemented lazy loading for ArcGIS map components through the newly introduced arcgis-assets.ts module.
 
-* Fixed inconsistent popup behavior for overlapping GeoJSON layers.
-* Corrected popup feature prioritization to ensure the topmost feature receives the popup.
-* Prevented popup cancellation caused by competing layer click handlers.
-* Improved popup rendering stability and responsiveness during rapid map interactions.
-* Added shared hit-test coordination and enhanced popup diagnostics.
+Changes Made
+
+* Created a centralized asset loader (arcgis-assets.ts) to manage ArcGIS component imports.
+* Converted map widgets/components to dynamic imports instead of loading them during initial application startup.
+* Added component-specific loader methods for widgets such as Zoom, Home, Scale Bar, Basemap Gallery, and other ArcGIS UI components.
+* Ensured each component is loaded only once and reused across the application.
+* Reduced unnecessary upfront JavaScript loading and initialization overhead.
+
+Benefits
+
+* Improved initial map load performance.
+* Reduced application startup time by loading components on demand.
+* Prevented loading unused ArcGIS widgets.
+* Improved scalability for future ArcGIS components and widgets.
+* Centralized asset management, making maintenance and troubleshooting easier.
+
+Technical Approach
+
+* Introduced dynamic import() based loading.
+* Implemented singleton-style loader promises to avoid duplicate component registration and downloads.
+* Separated ArcGIS asset initialization from map rendering logic.
+* Maintained backward compatibility with existing UPMap APIs and consumer applications.
