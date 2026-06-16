@@ -1,53 +1,36 @@
-public ownsGraphic(graphic: Graphic | undefined | null): boolean {
-  if (!graphic) {
-    return false;
-  }
+private logPopupPerf(label: string, startTime: number, extra?: any): void {
+  const duration = Math.round(performance.now() - startTime);
 
-  return (
-    graphic.layer === this.featureLayer ||
-    graphic.layer === this.sketchLayer
-  );
+  if (duration > 100) {
+    console.warn(`[up-geojson-layer][popup-perf] ${label}: ${duration}ms`, extra ?? "");
+  } else {
+    console.log(`[up-geojson-layer][popup-perf] ${label}: ${duration}ms`, extra ?? "");
+  }
 }
 
-public async handleParentMapClick(evt: any, topGraphic: Graphic): Promise<void> {
-  if (!topGraphic) {
-    return;
-  }
 
-  this.emitLayerEvent(
-    "layerClick",
-    this.graphicToGeoJsonFeature(topGraphic),
+
+
+if (
+  !this._editorOpen &&
+  !this.inDrawingMode &&
+  !this.__isStartingDraw &&
+  !this.shouldSuppressPopup()
+) {
+  const templateStart = performance.now();
+
+  this.showGraphicPopup(
     topGraphic,
-    {
-      event: {
-        coordinates: {
-          latitude: evt.mapPoint?.latitude ?? 0,
-          longitude: evt.mapPoint?.longitude ?? 0,
-        },
-        attributes: topGraphic.attributes ?? {},
-      },
-    }
+    evt.mapPoint,
+    thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
   );
 
-  if (this.isUserEditEnabled()) {
-    this.closePopup();
+  this.logPopupPerf("showGraphicPopup called", templateStart);
 
-    if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-      this.removeFromGeoJSON(topGraphic);
-      this.graphicsEditor?.cancel();
-      return;
-    }
-
-    await this.activateGraphicsEditor(topGraphic, "transform");
-    return;
-  }
-
-  if (
-    !this._editorOpen &&
-    !this.inDrawingMode &&
-    !this.__isStartingDraw &&
-    !this.shouldSuppressPopup()
-  ) {
-    this.showGraphicPopup(topGraphic, evt.mapPoint, [topGraphic]);
-  }
+  requestAnimationFrame(() => {
+    this.logPopupPerf("popup rendered next frame", popupStart, {
+      title: topGraphic?.attributes?.properties?.name,
+      layer: topGraphic?.layer?.title,
+    });
+  });
 }
