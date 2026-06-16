@@ -1,16 +1,30 @@
-const validResults = allLayersResults.filter((r: any) => {
-    const layer = r?.graphic?.layer;
-    if (!r?.graphic?.geometry || !layer) return false;
-    if (layer === this.sketchLayer) return false;
-    if (layer === this.labelLayer) return false;
-    // exclude internal ArcGIS overlay layers (popup handles, highlights etc.)
-    return this.view?.map?.layers?.indexOf(layer) !== -1;
-});
+// Only compare against known geojson featureLayers — ignores ALL
+// internal ArcGIS layers, highlights, popup overlays, etc.
+const validResults = allLayersResults.filter((r: any) =>
+    r?.graphic?.geometry &&
+    UpGeoJsonLayer._registry.has(r?.graphic?.layer)
+);
 
 const thisLayerFirstIndex = validResults.findIndex(
     (r: any) => r?.graphic?.layer === this.featureLayer
 );
-
 const otherLayerFirstIndex = validResults.findIndex(
     (r: any) => r?.graphic?.layer !== this.featureLayer
 );
+
+if (
+    otherLayerFirstIndex !== -1 &&
+    (thisLayerFirstIndex === -1 || otherLayerFirstIndex < thisLayerFirstIndex)
+) {
+    return;
+}
+
+
+
+private static _registry = new Set<any>();
+
+
+UpGeoJsonLayer._registry.add(this.featureLayer);
+
+
+UpGeoJsonLayer._registry.delete(this.featureLayer);
