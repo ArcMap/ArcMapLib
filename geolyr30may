@@ -1,10 +1,17 @@
+console.log("[popup-debug] bindViewEvents registered", {
+  featureLayerTitle: this.featureLayer?.title,
+  sketchLayerTitle: this.sketchLayer?.title,
+});
+
 const clickHandle = this.view.on("click", async (evt: any) => {
   const popupStart = performance.now();
 
   const nativeTarget = evt?.native?.target as HTMLElement | null;
   const popupTarget = this.isPopupDomTarget(evt?.native?.target);
 
-  console.log("[up-geojson-layer][popup-flow] click received", {
+  console.log("[popup-debug] click handler entered", {
+    currentFeatureLayerTitle: this.featureLayer?.title,
+    currentSketchLayerTitle: this.sketchLayer?.title,
     targetTag: nativeTarget?.tagName,
     targetClass: nativeTarget?.className,
     popupTarget,
@@ -15,12 +22,15 @@ const clickHandle = this.view.on("click", async (evt: any) => {
   });
 
   if (popupTarget) {
-    console.warn("[up-geojson-layer][popup-flow] stopped before hitTest: popup dom target");
+    console.warn("[popup-debug] stopped before hitTest: popup dom target", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
+    });
     return;
   }
 
   if (this.inDrawingMode || this.__isStartingDraw) {
-    console.warn("[up-geojson-layer][popup-flow] stopped before hitTest: drawing/start draw", {
+    console.warn("[popup-debug] stopped before hitTest: drawing/start draw", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       inDrawingMode: this.inDrawingMode,
       isStartingDraw: this.__isStartingDraw,
     });
@@ -30,7 +40,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
   this.__isOpeningPopup = false;
 
   try {
-    console.log("[up-geojson-layer][popup-debug] before hitTest", {
+    console.log("[popup-debug] before hitTest", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       viewReady: this.view?.ready,
       viewUpdating: this.view?.updating,
       viewSuspended: this.view?.suspended,
@@ -39,7 +50,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
     const hitStart = performance.now();
     const hit = await this.view.hitTest(evt);
 
-    console.log("[up-geojson-layer][popup-flow] hitTest completed", {
+    console.log("[popup-debug] hitTest completed", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       ms: Math.round(performance.now() - hitStart),
       totalResults: hit?.results?.length ?? 0,
     });
@@ -54,13 +66,16 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       );
     });
 
-    console.log("[up-geojson-layer][popup-debug] graphicResults", {
+    console.log("[popup-debug] graphicResults", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       count: graphicResults.length,
       layers: graphicResults.map((r: any) => r.graphic?.layer?.title),
     });
 
     if (!graphicResults.length) {
-      console.warn("[up-geojson-layer][popup-flow] stopped after hitTest: no graphic results");
+      console.warn("[popup-debug] stopped after hitTest: no graphic results", {
+        currentFeatureLayerTitle: this.featureLayer?.title,
+      });
       this.closePopup();
       return;
     }
@@ -72,7 +87,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       return bIndex - aIndex;
     });
 
-    console.log("[up-geojson-layer][popup-debug] sortedGraphicResults", {
+    console.log("[popup-debug] sortedGraphicResults", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       layers: sortedGraphicResults.map((r: any) => ({
         layerTitle: r.graphic?.layer?.title,
         layerIndex: this.view.map.layers.indexOf(r.graphic?.layer),
@@ -81,14 +97,17 @@ const clickHandle = this.view.on("click", async (evt: any) => {
 
     const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
 
-    console.log("[up-geojson-layer][popup-debug] topGraphic", {
+    console.log("[popup-debug] topGraphic", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       hasGraphic: !!topGraphic,
-      layerTitle: topGraphic?.layer?.title,
+      topLayerTitle: topGraphic?.layer?.title,
       attributes: topGraphic?.attributes,
     });
 
     if (!topGraphic) {
-      console.warn("[up-geojson-layer][popup-flow] stopped: topGraphic missing");
+      console.warn("[popup-debug] stopped: topGraphic missing", {
+        currentFeatureLayerTitle: this.featureLayer?.title,
+      });
       return;
     }
 
@@ -96,7 +115,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       topGraphic.layer === this.featureLayer ||
       topGraphic.layer === this.sketchLayer;
 
-    console.log("[up-geojson-layer][popup-debug] isThisLayerTop", {
+    console.log("[popup-debug] isThisLayerTop", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       isThisLayerTop,
       topLayerTitle: topGraphic.layer?.title,
       featureLayerTitle: this.featureLayer?.title,
@@ -104,7 +124,10 @@ const clickHandle = this.view.on("click", async (evt: any) => {
     });
 
     if (!isThisLayerTop) {
-      console.warn("[up-geojson-layer][popup-flow] stopped: this layer is not top layer");
+      console.warn("[popup-debug] stopped: this layer is not top layer", {
+        currentFeatureLayerTitle: this.featureLayer?.title,
+        topLayerTitle: topGraphic.layer?.title,
+      });
       return;
     }
 
@@ -117,7 +140,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       })
       .map((result: any) => result.graphic as Graphic);
 
-    console.log("[up-geojson-layer][popup-debug] thisLayerGraphics", {
+    console.log("[popup-debug] thisLayerGraphics", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       count: thisLayerGraphics.length,
     });
 
@@ -136,7 +160,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       }
     );
 
-    console.log("[up-geojson-layer][popup-debug] editState", {
+    console.log("[popup-debug] editState", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       isUserEditEnabled: this.isUserEditEnabled(),
       editorOpen: this._editorOpen,
       inDrawingMode: this.inDrawingMode,
@@ -144,11 +169,17 @@ const clickHandle = this.view.on("click", async (evt: any) => {
     });
 
     if (this.isUserEditEnabled()) {
-      console.warn("[up-geojson-layer][popup-flow] edit mode path entered");
+      console.warn("[popup-debug] edit mode path entered", {
+        currentFeatureLayerTitle: this.featureLayer?.title,
+      });
+
       this.closePopup();
 
       if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-        console.warn("[up-geojson-layer][popup-flow] edit remove path entered");
+        console.warn("[popup-debug] edit remove path entered", {
+          currentFeatureLayerTitle: this.featureLayer?.title,
+        });
+
         this.removeFromGeoJSON(topGraphic);
         this.graphicsEditor?.cancel();
         return;
@@ -160,7 +191,8 @@ const clickHandle = this.view.on("click", async (evt: any) => {
 
     const suppressPopup = this.shouldSuppressPopup();
 
-    console.log("[up-geojson-layer][popup-debug] popupConditions", {
+    console.log("[popup-debug] popupConditions", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       editorOpen: this._editorOpen,
       inDrawingMode: this.inDrawingMode,
       isStartingDraw: this.__isStartingDraw,
@@ -181,12 +213,14 @@ const clickHandle = this.view.on("click", async (evt: any) => {
         thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
       );
 
-      console.log("[up-geojson-layer][popup-perf] showGraphicPopup called", {
+      console.log("[popup-perf] showGraphicPopup called", {
+        currentFeatureLayerTitle: this.featureLayer?.title,
         ms: Math.round(performance.now() - showStart),
       });
 
       requestAnimationFrame(() => {
-        console.log("[up-geojson-layer][popup-perf] popup rendered next frame", {
+        console.log("[popup-perf] popup rendered next frame", {
+          currentFeatureLayerTitle: this.featureLayer?.title,
           totalMs: Math.round(performance.now() - popupStart),
           layer: topGraphic?.layer?.title,
           attributes: topGraphic?.attributes,
@@ -196,14 +230,19 @@ const clickHandle = this.view.on("click", async (evt: any) => {
       return;
     }
 
-    console.warn("[up-geojson-layer][popup-flow] stopped: popup conditions failed", {
+    console.warn("[popup-debug] stopped: popup conditions failed", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
       editorOpen: this._editorOpen,
       inDrawingMode: this.inDrawingMode,
       isStartingDraw: this.__isStartingDraw,
       suppressPopup,
     });
   } catch (err) {
-    console.error("[up-geojson-layer][popup-flow] click handler failed", err);
+    console.error("[popup-debug] click handler failed", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
+      error: err,
+    });
+
     this.__isOpeningPopup = false;
   }
 });
