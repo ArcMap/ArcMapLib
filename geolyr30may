@@ -1,20 +1,24 @@
-// Filter to only operational layers present in map.layers
-const validResults = allResults.filter((r: any) => {
-    const layer = r?.graphic?.layer;
-    if (!layer || !r?.graphic?.geometry) return false;
-    return this.view.map.layers.indexOf(layer) !== -1;
-});
+// Filter out internal ArcGIS layers (highlight, interaction overlays)
+const validResults = allResults.filter((r: any) =>
+    r?.graphic?.geometry &&
+    r?.graphic?.layer !== this.sketchLayer &&
+    r?.graphic?.layer !== this.labelLayer
+);
 
-const topmostGraphic = validResults[0]?.graphic;
-const topmostLayer = topmostGraphic?.layer;
-const topmostIsThisLayer =
-    topmostLayer === this.featureLayer ||
-    topmostLayer === this.sketchLayer;
+// Find where THIS layer's graphic appears in the valid results
+const thisLayerFirstIndex = validResults.findIndex(
+    (r: any) => r?.graphic?.layer === this.featureLayer
+);
 
-if (topmostGraphic && !topmostIsThisLayer) {
-    try {
-        const topmostIndex = this.view.map.layers.indexOf(topmostLayer);
-        const thisIndex = this.view.map.layers.indexOf(this.featureLayer);
-        if (topmostIndex > thisIndex) return;
-    } catch {}
+// Find if any OTHER layer's graphic appears before ours
+const otherLayerFirstIndex = validResults.findIndex(
+    (r: any) => r?.graphic?.layer !== this.featureLayer
+);
+
+// Another layer is visually on top — stay quiet, let it handle the click
+if (
+    otherLayerFirstIndex !== -1 &&
+    (thisLayerFirstIndex === -1 || otherLayerFirstIndex < thisLayerFirstIndex)
+) {
+    return;
 }
