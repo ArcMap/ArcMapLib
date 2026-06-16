@@ -1,111 +1,53 @@
-private setupMapClickHandler(): void {
-  if (!this.view) return;
+public ownsGraphic(graphic: Graphic | undefined | null): boolean {
+  if (!graphic) {
+    return false;
+  }
 
-  this.eventHandles.add(
-    this.view.on("click", async (event: any) => {
-      if (!this.view) return;
-
-      const nativeTarget = event?.native?.target as HTMLElement | null;
-
-      if (
-        nativeTarget?.closest(
-          ".esri-popup__button, .esri-popup__action, .esri-popup__header-buttons, .esri-popup__footer"
-        )
-      ) {
-        return;
-      }
-
-      const geographicPoint = webMercatorUtils.webMercatorToGeographic(
-        event.mapPoint
-      ) as Point | null;
-
-      if (!geographicPoint) return;
-
-      const latLongPoint: LatLongPoint = {
-        latitude: ValidationService.validateLatitude(
-          geographicPoint.latitude,
-          UpMap.DEFAULT_CENTER_LATITUDE
-        ),
-        longitude: ValidationService.validateLongitude(
-          geographicPoint.longitude,
-          UpMap.DEFAULT_CENTER_LONGITUDE
-        ),
-      };
-
-      const popupHandled = await this.handleGeojsonLayerPopupClick(event);
-
-      if (!popupHandled) {
-        this.view.popup?.close();
-      }
-
-      this.dispatchEvent(
-        new CustomEvent<LatLongPoint>("map-click", {
-          detail: latLongPoint,
-          bubbles: true,
-          composed: true,
-        })
-      );
-
-      this.dispatchEvent(
-        new CustomEvent<LatLongPoint>("mapClick", {
-          detail: latLongPoint,
-          bubbles: true,
-          composed: true,
-        })
-      );
-    })
+  return (
+    graphic.layer === this.featureLayer ||
+    graphic.layer === this.sketchLayer
   );
 }
 
-
-
-private async handleGeojsonLayerPopupClick(event: any): Promise<boolean> {
-  if (!this.view) return false;
-
-  const hit = await this.view.hitTest(event);
-  const allResults = hit?.results ?? [];
-
-  const graphicResults = allResults.filter((result: any) => {
-    return (
-      result?.type === "graphic" &&
-      result?.graphic &&
-      result.graphic.layer
-    );
-  });
-
-  if (!graphicResults.length) {
-    return false;
-  }
-
-  const sortedGraphicResults = graphicResults.sort((a: any, b: any) => {
-    const aLayerIndex = this.view.map.layers.indexOf(a.graphic.layer);
-    const bLayerIndex = this.view.map.layers.indexOf(b.graphic.layer);
-
-    return bLayerIndex - aLayerIndex;
-  });
-
-  const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
-
+public async handleParentMapClick(evt: any, topGraphic: Graphic): Promise<void> {
   if (!topGraphic) {
-    return false;
+    return;
   }
 
-  const geojsonLayers = Array.from(
-    this.querySelectorAll("up-geojson-layer, arc-geojson-layer")
-  ) as any[];
+  this.emitLayerEvent(
+    "layerClick",
+    this.graphicToGeoJsonFeature(topGraphic),
+    topGraphic,
+    {
+      event: {
+        coordinates: {
+          latitude: evt.mapPoint?.latitude ?? 0,
+          longitude: evt.mapPoint?.longitude ?? 0,
+        },
+        attributes: topGraphic.attributes ?? {},
+      },
+    }
+  );
 
-  const ownerLayer = geojsonLayers.find((layer: any) => {
-    return (
-      typeof layer.ownsGraphic === "function" &&
-      layer.ownsGraphic(topGraphic)
-    );
-  });
+  if (this.isUserEditEnabled()) {
+    this.closePopup();
 
-  if (!ownerLayer) {
-    return false;
+    if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
+      this.removeFromGeoJSON(topGraphic);
+      this.graphicsEditor?.cancel();
+      return;
+    }
+
+    await this.activateGraphicsEditor(topGraphic, "transform");
+    return;
   }
 
-  await ownerLayer.handleParentMapClick(event, topGraphic);
-
-  return true;
+  if (
+    !this._editorOpen &&
+    !this.inDrawingMode &&
+    !this.__isStartingDraw &&
+    !this.shouldSuppressPopup()
+  ) {
+    this.showGraphicPopup(topGraphic, evt.mapPoint, [topGraphic]);
+  }
 }
