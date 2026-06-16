@@ -1,24 +1,4 @@
-// Filter out internal ArcGIS layers (highlight, interaction overlays)
-const validResults = allResults.filter((r: any) =>
-    r?.graphic?.geometry &&
-    r?.graphic?.layer !== this.sketchLayer &&
-    r?.graphic?.layer !== this.labelLayer
-);
-
-// Find where THIS layer's graphic appears in the valid results
-const thisLayerFirstIndex = validResults.findIndex(
-    (r: any) => r?.graphic?.layer === this.featureLayer
-);
-
-// Find if any OTHER layer's graphic appears before ours
-const otherLayerFirstIndex = validResults.findIndex(
-    (r: any) => r?.graphic?.layer !== this.featureLayer
-);
-
-// Another layer is visually on top — stay quiet, let it handle the click
-if (
-    otherLayerFirstIndex !== -1 &&
-    (thisLayerFirstIndex === -1 || otherLayerFirstIndex < thisLayerFirstIndex)
-) {
-    return;
-}
+console.log(`[${this.name}] validResults:`, 
+    validResults.map((r: any) => r?.graphic?.layer?.title || r?.graphic?.layer?.id));
+console.log(`[${this.name}] thisLayerFirstIndex:`, thisLayerFirstIndex);
+console.log(`[${this.name}] otherLayerFirstIndex:`, otherLayerFirstIndex);
