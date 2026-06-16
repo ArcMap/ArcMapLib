@@ -1,19 +1,20 @@
-protected override async updated(changedProperties: Map<string, unknown>): Promise<void> {
-  super.updated(changedProperties);
+// Filter to only operational layers present in map.layers
+const validResults = allResults.filter((r: any) => {
+    const layer = r?.graphic?.layer;
+    if (!layer || !r?.graphic?.geometry) return false;
+    return this.view.map.layers.indexOf(layer) !== -1;
+});
 
-  if (changedProperties.has('showZoom') && this.showZoom) {
-    await loadZoomComponent();
-  }
+const topmostGraphic = validResults[0]?.graphic;
+const topmostLayer = topmostGraphic?.layer;
+const topmostIsThisLayer =
+    topmostLayer === this.featureLayer ||
+    topmostLayer === this.sketchLayer;
 
-  if (changedProperties.has('showHome') && this.showHome) {
-    await loadHomeComponent();
-  }
-
-  if (changedProperties.has('showLocate') && this.showLocate) {
-    await loadLocateComponent();
-  }
-
-  if (changedProperties.has('showScaleBar') && this.showScaleBar) {
-    await loadScaleBarComponent();
-  }
+if (topmostGraphic && !topmostIsThisLayer) {
+    try {
+        const topmostIndex = this.view.map.layers.indexOf(topmostLayer);
+        const thisIndex = this.view.map.layers.indexOf(this.featureLayer);
+        if (topmostIndex > thisIndex) return;
+    } catch {}
 }
