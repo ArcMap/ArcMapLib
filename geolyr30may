@@ -1,4 +1,28 @@
-console.log(`[${this.name}] validResults:`, 
-    validResults.map((r: any) => r?.graphic?.layer?.title || r?.graphic?.layer?.id));
-console.log(`[${this.name}] thisLayerFirstIndex:`, thisLayerFirstIndex);
-console.log(`[${this.name}] otherLayerFirstIndex:`, otherLayerFirstIndex);
+// Pass 1: unrestricted — see ALL layers to determine which is on top
+const allLayersHit = await this.view.hitTest(evt);
+const allLayersResults = (allLayersHit?.results ?? []).filter((r: any) =>
+    r?.graphic?.geometry &&
+    r?.graphic?.layer !== this.sketchLayer &&
+    r?.graphic?.layer !== this.labelLayer
+);
+
+const thisLayerFirstIndex = allLayersResults.findIndex(
+    (r: any) => r?.graphic?.layer === this.featureLayer
+);
+const otherLayerFirstIndex = allLayersResults.findIndex(
+    (r: any) => r?.graphic?.layer !== this.featureLayer
+);
+
+// Another layer is visually on top — stay quiet
+if (
+    otherLayerFirstIndex !== -1 &&
+    (thisLayerFirstIndex === -1 || otherLayerFirstIndex < thisLayerFirstIndex)
+) {
+    return;
+}
+
+// Pass 2: restricted — get THIS layer's own graphics for popup
+const hit = await this.view.hitTest(evt, { include: [this.featureLayer] });
+const thisLayerResults = (hit?.results ?? []).filter(
+    (r: any) => r?.graphic?.layer === this.featureLayer
+);
