@@ -1,15 +1,29 @@
-private static sharedHitTests = new WeakMap<object, Promise<any>>();
-private static clickIds = new WeakMap<object, number>();
+private static sharedHitTests = new Map<string, Promise<any>>();
+private static clickIds = new Map<string, number>();
 private static latestClickId = 0;
 
-private getClickId(evt: any): number {
-  const key = evt?.native ?? evt;
-  const existing = UpGeojsonLayer.clickIds.get(key);
+private getClickSignature(evt: any): string {
+  const nativeTime = evt?.native?.timeStamp ?? 0;
+  const x = Math.round(evt?.x ?? evt?.screenPoint?.x ?? evt?.native?.offsetX ?? 0);
+  const y = Math.round(evt?.y ?? evt?.screenPoint?.y ?? evt?.native?.offsetY ?? 0);
 
-  if (existing) return existing;
+  return `${nativeTime}_${x}_${y}`;
+}
+
+private getClickId(evt: any): number {
+  const signature = this.getClickSignature(evt);
+  const existing = UpGeojsonLayer.clickIds.get(signature);
+
+  if (existing) {
+    return existing;
+  }
 
   const clickId = ++UpGeojsonLayer.latestClickId;
-  UpGeojsonLayer.clickIds.set(key, clickId);
+  UpGeojsonLayer.clickIds.set(signature, clickId);
+
+  setTimeout(() => {
+    UpGeojsonLayer.clickIds.delete(signature);
+  }, 5000);
 
   return clickId;
 }
@@ -19,10 +33,12 @@ private isLatestClick(clickId: number): boolean {
 }
 
 private getSharedHitTest(evt: any): Promise<any> {
-  const key = evt?.native ?? evt;
-  const existing = UpGeojsonLayer.sharedHitTests.get(key);
+  const signature = this.getClickSignature(evt);
+  const existing = UpGeojsonLayer.sharedHitTests.get(signature);
 
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
 
   const start = performance.now();
 
@@ -40,10 +56,11 @@ private getSharedHitTest(evt: any): Promise<any> {
       return hit;
     })
     .finally(() => {
-      UpGeojsonLayer.sharedHitTests.delete(key);
+      UpGeojsonLayer.sharedHitTests.delete(signature);
     });
 
-  UpGeojsonLayer.sharedHitTests.set(key, hitTestPromise);
+  UpGeojsonLayer.sharedHitTests.set(signature, hitTestPromise);
+
   return hitTestPromise;
 }
 
@@ -62,150 +79,8 @@ private getWinningGraphic(graphicResults: any[]): Graphic | undefined {
     const aPriority = this.getGraphicPriority(a.graphic);
     const bPriority = this.getGraphicPriority(b.graphic);
 
-    if (aPriority !== bPriority) {
-      return bPriority - aPriority;
-    }
-
-    return 0;
+    return bPriority - aPriority;
   });
 
   return sortedResults[0]?.graphic as Graphic | undefined;
 }
-
-
-
-
-
-
-
-
-
-const clickHandle = this.view.on("click", async (evt: any) => {
-  const popupStart = performance.now();
-  const clickId = this.getClickId(evt);
-
-  if (this.isPopupDomTarget(evt?.native?.target)) {
-    return;
-  }
-
-  if (this.inDrawingMode || this.__isStartingDraw) {
-    return;
-  }
-
-  this.__isOpeningPopup = false;
-
-  try {
-    const hit = await this.getSharedHitTest(evt);
-
-    if (!this.isLatestClick(clickId)) {
-      console.warn("[popup-debug] stale click ignored", {
-        clickId,
-        latestClickId: UpGeojsonLayer.latestClickId,
-        currentFeatureLayerTitle: this.featureLayer?.title,
-      });
-      return;
-    }
-
-    const allResults = hit?.results ?? [];
-
-    const graphicResults = allResults.filter((result: any) => {
-      return (
-        result?.type === "graphic" &&
-        result?.graphic &&
-        result.graphic.layer &&
-        result.graphic.geometry
-      );
-    });
-
-    if (!graphicResults.length) {
-      this.closePopup();
-      return;
-    }
-
-    /**
-     * Main fix:
-     * Pick global winner first.
-     * Point wins over polyline.
-     * Polyline wins over polygon.
-     */
-    const winningGraphic = this.getWinningGraphic(graphicResults);
-
-    if (!winningGraphic) {
-      return;
-    }
-
-    const isThisLayerWinner =
-      winningGraphic.layer === this.featureLayer ||
-      winningGraphic.layer === this.sketchLayer;
-
-    if (!isThisLayerWinner) {
-      return;
-    }
-
-    const thisLayerGraphics = graphicResults
-      .filter((result: any) => {
-        return (
-          result?.graphic?.layer === this.featureLayer ||
-          result?.graphic?.layer === this.sketchLayer
-        );
-      })
-      .map((result: any) => result.graphic as Graphic);
-
-    this.emitLayerEvent(
-      "layerClick",
-      this.graphicToGeoJsonFeature(winningGraphic),
-      winningGraphic,
-      {
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: winningGraphic.attributes ?? {},
-        },
-      }
-    );
-
-    if (this.isUserEditEnabled()) {
-      this.closePopup();
-
-      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-        this.removeFromGeoJSON(winningGraphic);
-        this.graphicsEditor?.cancel();
-        return;
-      }
-
-      await this.activateGraphicsEditor(winningGraphic, "transform");
-      return;
-    }
-
-    if (
-      !this._editorOpen &&
-      !this.inDrawingMode &&
-      !this.__isStartingDraw &&
-      !this.shouldSuppressPopup()
-    ) {
-      this.showGraphicPopup(
-        winningGraphic,
-        evt.mapPoint,
-        thisLayerGraphics.length ? thisLayerGraphics : [winningGraphic]
-      );
-
-      requestAnimationFrame(() => {
-        console.log("[popup-perf] popup rendered next frame", {
-          currentFeatureLayerTitle: this.featureLayer?.title,
-          totalMs: Math.round(performance.now() - popupStart),
-          layer: winningGraphic?.layer?.title,
-          geometryType: winningGraphic?.geometry?.type,
-        });
-      });
-    }
-  } catch (err) {
-    console.error("[popup-debug] click handler failed", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      error: err,
-    });
-
-    this.__isOpeningPopup = false;
-  }
-});
