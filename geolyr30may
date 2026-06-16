@@ -1,117 +1,54 @@
-const clickHandle = this.view.on("click", async (evt: any) => {
-  const popupStart = performance.now();
+private static sharedHitTests = new WeakMap<object, Promise<any>>();
+private static clickIds = new WeakMap<object, number>();
+private static latestClickId = 0;
 
-  if (this.isPopupDomTarget(evt?.native?.target)) {
-    return;
+private getClickId(evt: any): number {
+  const key = evt?.native ?? evt;
+
+  const existing = UpGeojsonLayer.clickIds.get(key);
+  if (existing) {
+    return existing;
   }
 
-  if (this.inDrawingMode || this.__isStartingDraw) {
-    return;
+  const clickId = ++UpGeojsonLayer.latestClickId;
+  UpGeojsonLayer.clickIds.set(key, clickId);
+
+  return clickId;
+}
+
+private isLatestClick(clickId: number): boolean {
+  return clickId === UpGeojsonLayer.latestClickId;
+}
+
+private getSharedHitTest(evt: any): Promise<any> {
+  const key = evt?.native ?? evt;
+
+  const existing = UpGeojsonLayer.sharedHitTests.get(key);
+  if (existing) {
+    return existing;
   }
 
-  this.__isOpeningPopup = false;
+  const start = performance.now();
 
-  try {
-    const hit = await this.getSharedHitTest(evt);
-    const allResults = hit?.results ?? [];
+  const hitTestPromise = this.view
+    .hitTest(evt)
+    .then((hit: any) => {
+      const ms = Math.round(performance.now() - start);
 
-    const graphicResults = allResults.filter((result: any) => {
-      return (
-        result?.type === "graphic" &&
-        result?.graphic &&
-        result.graphic.layer
-      );
-    });
-
-    if (!graphicResults.length) {
-      this.closePopup();
-      return;
-    }
-
-    const thisLayerResults = graphicResults.filter((result: any) => {
-      return (
-        result?.graphic?.layer === this.featureLayer ||
-        result?.graphic?.layer === this.sketchLayer
-      );
-    });
-
-    if (!thisLayerResults.length) {
-      return;
-    }
-
-    const topGraphic = thisLayerResults[0]?.graphic as Graphic | undefined;
-
-    if (!topGraphic) {
-      return;
-    }
-
-    const thisLayerGraphics = thisLayerResults.map(
-      (result: any) => result.graphic as Graphic
-    );
-
-    console.log("[popup-debug] selected current layer graphic", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      topGraphicLayerTitle: topGraphic.layer?.title,
-      thisLayerGraphicsCount: thisLayerGraphics.length,
-      totalHitGraphics: graphicResults.length,
-    });
-
-    this.emitLayerEvent(
-      "layerClick",
-      this.graphicToGeoJsonFeature(topGraphic),
-      topGraphic,
-      {
-        event: {
-          coordinates: {
-            latitude: evt.mapPoint?.latitude ?? 0,
-            longitude: evt.mapPoint?.longitude ?? 0,
-          },
-          attributes: topGraphic.attributes ?? {},
-        },
-      }
-    );
-
-    if (this.isUserEditEnabled()) {
-      this.closePopup();
-
-      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-        this.removeFromGeoJSON(topGraphic);
-        this.graphicsEditor?.cancel();
-        return;
-      }
-
-      await this.activateGraphicsEditor(topGraphic, "transform");
-      return;
-    }
-
-    const suppressPopup = this.shouldSuppressPopup();
-
-    if (
-      !this._editorOpen &&
-      !this.inDrawingMode &&
-      !this.__isStartingDraw &&
-      !suppressPopup
-    ) {
-      this.showGraphicPopup(
-        topGraphic,
-        evt.mapPoint,
-        thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
-      );
-
-      requestAnimationFrame(() => {
-        console.log("[popup-perf] popup rendered next frame", {
-          currentFeatureLayerTitle: this.featureLayer?.title,
-          totalMs: Math.round(performance.now() - popupStart),
-          layer: topGraphic?.layer?.title,
+      if (ms > 300) {
+        console.warn("[popup-perf] shared hitTest slow", {
+          ms,
+          totalResults: hit?.results?.length ?? 0,
         });
-      });
-    }
-  } catch (err) {
-    console.error("[popup-debug] click handler failed", {
-      currentFeatureLayerTitle: this.featureLayer?.title,
-      error: err,
+      }
+
+      return hit;
+    })
+    .finally(() => {
+      UpGeojsonLayer.sharedHitTests.delete(key);
     });
 
-    this.__isOpeningPopup = false;
-  }
-});
+  UpGeojsonLayer.sharedHitTests.set(key, hitTestPromise);
+
+  return hitTestPromise;
+}
