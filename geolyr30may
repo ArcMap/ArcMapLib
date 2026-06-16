@@ -1,54 +1,121 @@
-private static sharedHitTests = new WeakMap<object, Promise<any>>();
-private static clickIds = new WeakMap<object, number>();
-private static latestClickId = 0;
+const clickHandle = this.view.on("click", async (evt: any) => {
+  const popupStart = performance.now();
+  const clickId = this.getClickId(evt);
 
-private getClickId(evt: any): number {
-  const key = evt?.native ?? evt;
-
-  const existing = UpGeojsonLayer.clickIds.get(key);
-  if (existing) {
-    return existing;
+  if (this.isPopupDomTarget(evt?.native?.target)) {
+    return;
   }
 
-  const clickId = ++UpGeojsonLayer.latestClickId;
-  UpGeojsonLayer.clickIds.set(key, clickId);
-
-  return clickId;
-}
-
-private isLatestClick(clickId: number): boolean {
-  return clickId === UpGeojsonLayer.latestClickId;
-}
-
-private getSharedHitTest(evt: any): Promise<any> {
-  const key = evt?.native ?? evt;
-
-  const existing = UpGeojsonLayer.sharedHitTests.get(key);
-  if (existing) {
-    return existing;
+  if (this.inDrawingMode || this.__isStartingDraw) {
+    return;
   }
 
-  const start = performance.now();
+  this.__isOpeningPopup = false;
 
-  const hitTestPromise = this.view
-    .hitTest(evt)
-    .then((hit: any) => {
-      const ms = Math.round(performance.now() - start);
+  try {
+    const hit = await this.getSharedHitTest(evt);
 
-      if (ms > 300) {
-        console.warn("[popup-perf] shared hitTest slow", {
-          ms,
-          totalResults: hit?.results?.length ?? 0,
-        });
-      }
+    if (!this.isLatestClick(clickId)) {
+      console.warn("[popup-debug] skipped stale click result", {
+        clickId,
+        latestClickId: UpGeojsonLayer.latestClickId,
+        currentFeatureLayerTitle: this.featureLayer?.title,
+      });
+      return;
+    }
 
-      return hit;
-    })
-    .finally(() => {
-      UpGeojsonLayer.sharedHitTests.delete(key);
+    const allResults = hit?.results ?? [];
+
+    const graphicResults = allResults.filter((result: any) => {
+      return (
+        result?.type === "graphic" &&
+        result?.graphic &&
+        result.graphic.layer
+      );
     });
 
-  UpGeojsonLayer.sharedHitTests.set(key, hitTestPromise);
+    if (!graphicResults.length) {
+      this.closePopup();
+      return;
+    }
 
-  return hitTestPromise;
-}
+    const thisLayerResults = graphicResults.filter((result: any) => {
+      return (
+        result?.graphic?.layer === this.featureLayer ||
+        result?.graphic?.layer === this.sketchLayer
+      );
+    });
+
+    if (!thisLayerResults.length) {
+      return;
+    }
+
+    const topGraphic = thisLayerResults[0]?.graphic as Graphic | undefined;
+
+    if (!topGraphic) {
+      return;
+    }
+
+    const thisLayerGraphics = thisLayerResults.map(
+      (result: any) => result.graphic as Graphic
+    );
+
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(topGraphic),
+      topGraphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: topGraphic.attributes ?? {},
+        },
+      }
+    );
+
+    if (this.isUserEditEnabled()) {
+      this.closePopup();
+
+      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
+        this.removeFromGeoJSON(topGraphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
+
+      await this.activateGraphicsEditor(topGraphic, "transform");
+      return;
+    }
+
+    const suppressPopup = this.shouldSuppressPopup();
+
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this.__isStartingDraw &&
+      !suppressPopup
+    ) {
+      this.showGraphicPopup(
+        topGraphic,
+        evt.mapPoint,
+        thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
+      );
+
+      requestAnimationFrame(() => {
+        console.log("[popup-perf] popup rendered next frame", {
+          currentFeatureLayerTitle: this.featureLayer?.title,
+          totalMs: Math.round(performance.now() - popupStart),
+          layer: topGraphic?.layer?.title,
+        });
+      });
+    }
+  } catch (err) {
+    console.error("[popup-debug] click handler failed", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
+      error: err,
+    });
+
+    this.__isOpeningPopup = false;
+  }
+});
