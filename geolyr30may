@@ -1,12 +1,211 @@
-console.log('[popup-open]', {
-  popupGraphicsLength: popupGraphics.length,
-  popupGraphic: popupGraphics[0],
-  location,
-  popupVisibleBefore: popup.visible
-});
+private static sharedHitTests = new WeakMap<object, Promise<any>>();
+private static clickIds = new WeakMap<object, number>();
+private static latestClickId = 0;
+
+private getClickId(evt: any): number {
+  const key = evt?.native ?? evt;
+  const existing = UpGeojsonLayer.clickIds.get(key);
+
+  if (existing) return existing;
+
+  const clickId = ++UpGeojsonLayer.latestClickId;
+  UpGeojsonLayer.clickIds.set(key, clickId);
+
+  return clickId;
+}
+
+private isLatestClick(clickId: number): boolean {
+  return clickId === UpGeojsonLayer.latestClickId;
+}
+
+private getSharedHitTest(evt: any): Promise<any> {
+  const key = evt?.native ?? evt;
+  const existing = UpGeojsonLayer.sharedHitTests.get(key);
+
+  if (existing) return existing;
+
+  const start = performance.now();
+
+  const hitTestPromise = this.view.hitTest(evt)
+    .then((hit: any) => {
+      const ms = Math.round(performance.now() - start);
+
+      if (ms > 300) {
+        console.warn("[popup-perf] shared hitTest slow", {
+          ms,
+          totalResults: hit?.results?.length ?? 0,
+        });
+      }
+
+      return hit;
+    })
+    .finally(() => {
+      UpGeojsonLayer.sharedHitTests.delete(key);
+    });
+
+  UpGeojsonLayer.sharedHitTests.set(key, hitTestPromise);
+  return hitTestPromise;
+}
+
+private getGraphicPriority(graphic: Graphic): number {
+  const type = graphic.geometry?.type;
+
+  if (type === "point") return 3;
+  if (type === "polyline") return 2;
+  if (type === "polygon") return 1;
+
+  return 0;
+}
+
+private getWinningGraphic(graphicResults: any[]): Graphic | undefined {
+  const sortedResults = [...graphicResults].sort((a: any, b: any) => {
+    const aPriority = this.getGraphicPriority(a.graphic);
+    const bPriority = this.getGraphicPriority(b.graphic);
+
+    if (aPriority !== bPriority) {
+      return bPriority - aPriority;
+    }
+
+    return 0;
+  });
+
+  return sortedResults[0]?.graphic as Graphic | undefined;
+}
 
 
-console.log('[popup-open-after]', {
-  popupVisibleAfter: popup.visible,
-  selectedFeature: popup.selectedFeature
+
+
+
+
+
+
+
+const clickHandle = this.view.on("click", async (evt: any) => {
+  const popupStart = performance.now();
+  const clickId = this.getClickId(evt);
+
+  if (this.isPopupDomTarget(evt?.native?.target)) {
+    return;
+  }
+
+  if (this.inDrawingMode || this.__isStartingDraw) {
+    return;
+  }
+
+  this.__isOpeningPopup = false;
+
+  try {
+    const hit = await this.getSharedHitTest(evt);
+
+    if (!this.isLatestClick(clickId)) {
+      console.warn("[popup-debug] stale click ignored", {
+        clickId,
+        latestClickId: UpGeojsonLayer.latestClickId,
+        currentFeatureLayerTitle: this.featureLayer?.title,
+      });
+      return;
+    }
+
+    const allResults = hit?.results ?? [];
+
+    const graphicResults = allResults.filter((result: any) => {
+      return (
+        result?.type === "graphic" &&
+        result?.graphic &&
+        result.graphic.layer &&
+        result.graphic.geometry
+      );
+    });
+
+    if (!graphicResults.length) {
+      this.closePopup();
+      return;
+    }
+
+    /**
+     * Main fix:
+     * Pick global winner first.
+     * Point wins over polyline.
+     * Polyline wins over polygon.
+     */
+    const winningGraphic = this.getWinningGraphic(graphicResults);
+
+    if (!winningGraphic) {
+      return;
+    }
+
+    const isThisLayerWinner =
+      winningGraphic.layer === this.featureLayer ||
+      winningGraphic.layer === this.sketchLayer;
+
+    if (!isThisLayerWinner) {
+      return;
+    }
+
+    const thisLayerGraphics = graphicResults
+      .filter((result: any) => {
+        return (
+          result?.graphic?.layer === this.featureLayer ||
+          result?.graphic?.layer === this.sketchLayer
+        );
+      })
+      .map((result: any) => result.graphic as Graphic);
+
+    this.emitLayerEvent(
+      "layerClick",
+      this.graphicToGeoJsonFeature(winningGraphic),
+      winningGraphic,
+      {
+        event: {
+          coordinates: {
+            latitude: evt.mapPoint?.latitude ?? 0,
+            longitude: evt.mapPoint?.longitude ?? 0,
+          },
+          attributes: winningGraphic.attributes ?? {},
+        },
+      }
+    );
+
+    if (this.isUserEditEnabled()) {
+      this.closePopup();
+
+      if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
+        this.removeFromGeoJSON(winningGraphic);
+        this.graphicsEditor?.cancel();
+        return;
+      }
+
+      await this.activateGraphicsEditor(winningGraphic, "transform");
+      return;
+    }
+
+    if (
+      !this._editorOpen &&
+      !this.inDrawingMode &&
+      !this.__isStartingDraw &&
+      !this.shouldSuppressPopup()
+    ) {
+      this.showGraphicPopup(
+        winningGraphic,
+        evt.mapPoint,
+        thisLayerGraphics.length ? thisLayerGraphics : [winningGraphic]
+      );
+
+      requestAnimationFrame(() => {
+        console.log("[popup-perf] popup rendered next frame", {
+          currentFeatureLayerTitle: this.featureLayer?.title,
+          totalMs: Math.round(performance.now() - popupStart),
+          layer: winningGraphic?.layer?.title,
+          geometryType: winningGraphic?.geometry?.type,
+        });
+      });
+    }
+  } catch (err) {
+    console.error("[popup-debug] click handler failed", {
+      currentFeatureLayerTitle: this.featureLayer?.title,
+      error: err,
+    });
+
+    this.__isOpeningPopup = false;
+  }
 });
