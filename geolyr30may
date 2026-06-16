@@ -1,305 +1,111 @@
-private bindViewEvents(): void {
-  if (!this.view || !this.featureLayer) return;
+private setupMapClickHandler(): void {
+  if (!this.view) return;
 
-  if (this.view.popup) {
-    this.view.popup.autoEnabled = false;
-  }
+  this.eventHandles.add(
+    this.view.on("click", async (event: any) => {
+      if (!this.view) return;
 
-  this.cleanupViewEvents();
-  this.setupPopupCloseWatcher();
+      const nativeTarget = event?.native?.target as HTMLElement | null;
 
-  const clickHandle = this.view.on("click", async (evt: any) => {
-    if (this.isPopupDomTarget(evt?.native?.target)) {
-      return;
-    }
-
-    if (this.inDrawingMode || this.__isStartingDraw) {
-      return;
-    }
-
-    if (this.__isOpeningPopup) {
-      this.__isOpeningPopup = false;
-    }
-
-    try {
-      /**
-       * IMPORTANT:
-       * Do NOT pass include: [this.featureLayer, this.sketchLayer]
-       * here, because each geojson-layer component has its own click handler.
-       *
-       * If we only hitTest this layer, bottom layer will think it was clicked
-       * and will open its popup, even when top layer was actually clicked.
-       */
-      const hit = await this.view.hitTest(evt);
-
-      const allResults = hit?.results ?? [];
-
-      const graphicResults = allResults.filter((result: any) => {
-        return (
-          result?.type === "graphic" &&
-          result?.graphic &&
-          result.graphic.layer
-        );
-      });
-
-      if (!graphicResults.length) {
-        this.closePopup();
+      if (
+        nativeTarget?.closest(
+          ".esri-popup__button, .esri-popup__action, .esri-popup__header-buttons, .esri-popup__footer"
+        )
+      ) {
         return;
       }
 
-      /**
-       * ArcGIS hitTest result order is not always safe for overlapping graphics.
-       * So we calculate the visible top layer using map layer order.
-       * Higher index means higher/top layer.
-       */
-      const sortedGraphicResults = graphicResults.sort((a: any, b: any) => {
-        const aLayerIndex = this.view.map.layers.indexOf(a.graphic.layer);
-        const bLayerIndex = this.view.map.layers.indexOf(b.graphic.layer);
+      const geographicPoint = webMercatorUtils.webMercatorToGeographic(
+        event.mapPoint
+      ) as Point | null;
 
-        return bLayerIndex - aLayerIndex;
-      });
+      if (!geographicPoint) return;
 
-      const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
+      const latLongPoint: LatLongPoint = {
+        latitude: ValidationService.validateLatitude(
+          geographicPoint.latitude,
+          UpMap.DEFAULT_CENTER_LATITUDE
+        ),
+        longitude: ValidationService.validateLongitude(
+          geographicPoint.longitude,
+          UpMap.DEFAULT_CENTER_LONGITUDE
+        ),
+      };
 
-      if (!topGraphic) {
-        this.closePopup();
-        return;
+      const popupHandled = await this.handleGeojsonLayerPopupClick(event);
+
+      if (!popupHandled) {
+        this.view.popup?.close();
       }
 
-      const isThisLayerTop =
-        topGraphic.layer === this.featureLayer ||
-        topGraphic.layer === this.sketchLayer;
-
-      /**
-       * This is the main fix.
-       * If clicked graphic belongs to another upper layer,
-       * this component must not open popup.
-       */
-      if (!isThisLayerTop) {
-        this.closePopup();
-        return;
-      }
-
-      const thisLayerGraphics = sortedGraphicResults
-        .filter((result: any) => {
-          return (
-            result?.graphic?.layer === this.featureLayer ||
-            result?.graphic?.layer === this.sketchLayer
-          );
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>("map-click", {
+          detail: latLongPoint,
+          bubbles: true,
+          composed: true,
         })
-        .map((result: any) => result.graphic as Graphic);
-
-      this.emitLayerEvent(
-        "layerClick",
-        this.graphicToGeoJsonFeature(topGraphic),
-        topGraphic,
-        {
-          event: {
-            coordinates: {
-              latitude: evt.mapPoint?.latitude ?? 0,
-              longitude: evt.mapPoint?.longitude ?? 0,
-            },
-            attributes: topGraphic.attributes ?? {},
-          },
-        }
       );
 
-      if (this.isUserEditEnabled()) {
-        this.closePopup();
-      }
+      this.dispatchEvent(
+        new CustomEvent<LatLongPoint>("mapClick", {
+          detail: latLongPoint,
+          bubbles: true,
+          composed: true,
+        })
+      );
+    })
+  );
+}
 
-      if (
-        this.isUserEditEnabled() &&
-        !this.inDrawingMode
-      ) {
-        if (evt.native?.ctrlKey || evt.native?.metaKey || evt.native?.altKey) {
-          this.removeFromGeoJSON(topGraphic);
-          this.graphicsEditor?.cancel();
-          return;
-        }
 
-        if (this._editorOpen) {
-          const activeGraphic =
-            (this.sketchLayer?.graphics?.toArray?.() ?? []).find(
-              (g: Graphic) => !!g?.geometry
-            ) as Graphic | undefined;
 
-          const activeId =
-            activeGraphic?.attributes?.[this.uniqueIdPropertyName] ??
-            activeGraphic?.attributes?.OBJECTID ??
-            activeGraphic?.attributes?.id;
+private async handleGeojsonLayerPopupClick(event: any): Promise<boolean> {
+  if (!this.view) return false;
 
-          const clickedId =
-            topGraphic.attributes?.[this.uniqueIdPropertyName] ??
-            topGraphic.attributes?.OBJECTID ??
-            topGraphic.attributes?.id;
+  const hit = await this.view.hitTest(event);
+  const allResults = hit?.results ?? [];
 
-          if (
-            activeGraphic &&
-            activeId !== undefined &&
-            clickedId !== undefined &&
-            String(activeId) === String(clickedId)
-          ) {
-            const currentTool = String(
-              (this.graphicsEditor as any)?.activeTool ?? "transform"
-            ).toLowerCase();
-
-            const nextTool =
-              currentTool === "transform" || currentTool === "reshape"
-                ? "reshape"
-                : "transform";
-
-            const isCircle = this.isCircleGraphic(activeGraphic);
-
-            const updateOptions: any =
-              nextTool === "reshape"
-                ? {
-                    tool: "reshape",
-                    enableMoveAllGraphics: false,
-                    multipleSelectionEnabled: false,
-                    toggleToolOnClick: true,
-                  }
-                : {
-                    tool: "transform",
-                    enableRotation: isCircle
-                      ? false
-                      : this.enableUserEditRotating,
-                    enableScaling: isCircle
-                      ? true
-                      : this.enableUserEditScaling,
-                    preserveAspectRatio: isCircle
-                      ? true
-                      : this.enableUserEditUniformScaling,
-                    enableMoveAllGraphics: false,
-                    multipleSelectionEnabled: false,
-                    toggleToolOnClick: true,
-                  };
-
-            await this.graphicsEditor?.update([activeGraphic], updateOptions);
-            return;
-          }
-        }
-
-        await this.activateGraphicsEditor(topGraphic, "transform");
-        return;
-      }
-
-      /**
-       * View-only mode.
-       * Only the real top graphic from the real top layer opens popup.
-       */
-      if (
-        !this._editorOpen &&
-        !this.inDrawingMode &&
-        !this.__isStartingDraw &&
-        !this.shouldSuppressPopup()
-      ) {
-        this.showGraphicPopup(
-          topGraphic,
-          evt.mapPoint,
-          thisLayerGraphics.length ? thisLayerGraphics : [topGraphic]
-        );
-      }
-
-      return;
-    } catch (err) {
-      console.error("[up-geojson-layer] click handler failed:", err);
-      this.__isOpeningPopup = false;
-    }
+  const graphicResults = allResults.filter((result: any) => {
+    return (
+      result?.type === "graphic" &&
+      result?.graphic &&
+      result.graphic.layer
+    );
   });
 
-  let isHovered = false;
-  let pointerMoveThrottle: any = null;
-  let lastHoveredGraphic: Graphic | null = null;
-  const viewContainer = this.view.container as HTMLElement;
+  if (!graphicResults.length) {
+    return false;
+  }
 
-  const pointerMoveHandle = this.view.on("pointer-move", (evt: any) => {
-    if (pointerMoveThrottle) return;
+  const sortedGraphicResults = graphicResults.sort((a: any, b: any) => {
+    const aLayerIndex = this.view.map.layers.indexOf(a.graphic.layer);
+    const bLayerIndex = this.view.map.layers.indexOf(b.graphic.layer);
 
-    pointerMoveThrottle = setTimeout(async () => {
-      pointerMoveThrottle = null;
-
-      if (this.inDrawingMode || this._editorOpen) {
-        if (viewContainer) viewContainer.style.cursor = "default";
-        return;
-      }
-
-      try {
-        const hitResult = await this.view.hitTest(evt);
-
-        const graphicResults = (hitResult?.results ?? []).filter((result: any) => {
-          return (
-            result?.type === "graphic" &&
-            result?.graphic &&
-            result.graphic.layer
-          );
-        });
-
-        const sortedGraphicResults = graphicResults.sort((a: any, b: any) => {
-          const aLayerIndex = this.view.map.layers.indexOf(a.graphic.layer);
-          const bLayerIndex = this.view.map.layers.indexOf(b.graphic.layer);
-
-          return bLayerIndex - aLayerIndex;
-        });
-
-        const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
-
-        const isThisLayerTop =
-          topGraphic &&
-          (topGraphic.layer === this.featureLayer ||
-            topGraphic.layer === this.sketchLayer);
-
-        if (isThisLayerTop && topGraphic) {
-          if (viewContainer) viewContainer.style.cursor = "pointer";
-
-          if (!isHovered || lastHoveredGraphic !== topGraphic) {
-            isHovered = true;
-            lastHoveredGraphic = topGraphic;
-
-            this.emitLayerEvent(
-              "layerMouseOver",
-              this.graphicToGeoJsonFeature(topGraphic),
-              topGraphic,
-              {
-                event: {
-                  coordinates: {
-                    latitude: evt.mapPoint?.latitude ?? 0,
-                    longitude: evt.mapPoint?.longitude ?? 0,
-                  },
-                  attributes: topGraphic.attributes ?? {},
-                },
-              }
-            );
-          }
-        } else {
-          if (viewContainer) viewContainer.style.cursor = "default";
-
-          if (isHovered && lastHoveredGraphic) {
-            this.emitLayerEvent(
-              "layerMouseOut",
-              this.graphicToGeoJsonFeature(lastHoveredGraphic),
-              lastHoveredGraphic,
-              {
-                event: {
-                  coordinates: {
-                    latitude: evt.mapPoint?.latitude ?? 0,
-                    longitude: evt.mapPoint?.longitude ?? 0,
-                  },
-                  attributes: lastHoveredGraphic.attributes ?? {},
-                },
-              }
-            );
-          }
-
-          isHovered = false;
-          lastHoveredGraphic = null;
-        }
-      } catch (err) {
-        console.error("[up-geojson-layer] pointer move failed:", err);
-      }
-    }, 50);
+    return bLayerIndex - aLayerIndex;
   });
 
-  this.eventHandles.push(clickHandle);
-  this.eventHandles.push(pointerMoveHandle);
+  const topGraphic = sortedGraphicResults[0]?.graphic as Graphic | undefined;
+
+  if (!topGraphic) {
+    return false;
+  }
+
+  const geojsonLayers = Array.from(
+    this.querySelectorAll("up-geojson-layer, arc-geojson-layer")
+  ) as any[];
+
+  const ownerLayer = geojsonLayers.find((layer: any) => {
+    return (
+      typeof layer.ownsGraphic === "function" &&
+      layer.ownsGraphic(topGraphic)
+    );
+  });
+
+  if (!ownerLayer) {
+    return false;
+  }
+
+  await ownerLayer.handleParentMapClick(event, topGraphic);
+
+  return true;
 }
