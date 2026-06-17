@@ -2,59 +2,34 @@ export async function runWithMapLoader(
   layerElement: HTMLElement,
   callback: () => Promise<void>
 ): Promise<void> {
-  const ancestorMap = layerElement.closest('map') as any;
+  const ancestorMap =
+    (layerElement.closest('map') as any) ||
+    (layerElement.closest('u') as any);
+
   const loaderManager = ancestorMap?.getLoaderManager?.();
 
   if (!loaderManager) {
+    console.warn('[layer-loader-utils] Loader manager not found');
     await callback();
     return;
   }
 
-  await loaderManager.run(async () => {
+  loaderManager.start();
+
+  try {
+    await waitForBrowserPaint();
     await callback();
-  });
-}
-
-export async function waitForLayerView(
-  view: any,
-  layer: any,
-  logPrefix: string
-): Promise<void> {
-  if (!view || !layer) {
-    return;
-  }
-
-  await new Promise((resolve) => requestAnimationFrame(resolve));
-
-  try {
-    await view.whenLayerView(layer);
-  } catch (layerViewError) {
-    console.warn(
-      `${logPrefix} Layer was added, but LayerView was not ready yet`,
-      layerViewError
-    );
+  } finally {
+    loaderManager.stop();
   }
 }
 
-
-
-
-private async initializeAfterMapReady(): Promise<void> {
-  try {
-    await this.resolveAncestorMapAndView();
-
-    await runWithMapLoader(this, async () => {
-      await this.createLayer();
-
-      await waitForLayerView(
-        this.view,
-        this.featureLayer,
-        '[esri-feature-layer]'
-      );
-
-      await this.registerViewHandles();
+function waitForBrowserPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        resolve();
+      });
     });
-  } catch (error) {
-    console.error('[esri-feature-layer] failed to initialize', error);
-  }
+  });
 }
