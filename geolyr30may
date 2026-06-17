@@ -1,32 +1,16 @@
-private async initializeAfterMapReady(): Promise<void> {
+private async waitForLayerView(): Promise<void> {
+  if (!this.view || !this.featureLayer) {
+    return;
+  }
+
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
   try {
-    await this.resolveAncestorMapAndView();
-
-    const loaderManager = this.ancestorMap?.getLoaderManager?.();
-
-    if (!loaderManager) {
-      await this.createLayer();
-      await this.registerViewHandles();
-      return;
-    }
-
-    await loaderManager.run(async () => {
-      await this.createLayer();
-
-      if (this.view && this.featureLayer) {
-        try {
-          await this.view.whenLayerView(this.featureLayer);
-        } catch (layerViewError) {
-          console.warn(
-            '[feature-layer] Layer was added, but LayerView was not ready yet',
-            layerViewError
-          );
-        }
-      }
-
-      await this.registerViewHandles();
-    });
-  } catch (error) {
-    console.error('[feature-layer] failed to initialize', error);
+    await this.view.whenLayerView(this.featureLayer);
+  } catch (layerViewError) {
+    console.warn(
+      '[-feature-layer] Layer was added, but LayerView was not ready yet',
+      layerViewError
+    );
   }
 }
