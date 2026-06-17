@@ -1,24 +1,251 @@
-Implemented lazy loading for ArcGIS map components through the newly introduced arcgis-assets.ts module.
+export type MapLoaderListener = (isLoading: boolean) => void;
 
-Changes Made
+export class MapLoaderManager {
+  private loadingCount = 0;
+  private listeners: MapLoaderListener[] = [];
 
-* Created a centralized asset loader (arcgis-assets.ts) to manage ArcGIS component imports.
-* Converted map widgets/components to dynamic imports instead of loading them during initial application startup.
-* Added component-specific loader methods for widgets such as Zoom, Home, Scale Bar, Basemap Gallery, and other ArcGIS UI components.
-* Ensured each component is loaded only once and reused across the application.
-* Reduced unnecessary upfront JavaScript loading and initialization overhead.
+  public start(): void {
+    this.loadingCount++;
+    this.notify();
+  }
 
-Benefits
+  public stop(): void {
+    this.loadingCount = Math.max(0, this.loadingCount - 1);
+    this.notify();
+  }
 
-* Improved initial map load performance.
-* Reduced application startup time by loading components on demand.
-* Prevented loading unused ArcGIS widgets.
-* Improved scalability for future ArcGIS components and widgets.
-* Centralized asset management, making maintenance and troubleshooting easier.
+  public async run<T>(task: () => Promise<T>): Promise<T> {
+    this.start();
 
-Technical Approach
+    try {
+      return await task();
+    } finally {
+      this.stop();
+    }
+  }
 
-* Introduced dynamic import() based loading.
-* Implemented singleton-style loader promises to avoid duplicate component registration and downloads.
-* Separated ArcGIS asset initialization from map rendering logic.
-* Maintained backward compatibility with existing UPMap APIs and consumer applications.
+  public isLoading(): boolean {
+    return this.loadingCount > 0;
+  }
+
+  public subscribe(listener: MapLoaderListener): () => void {
+    this.listeners.push(listener);
+    listener(this.isLoading());
+
+    return () => {
+      this.listeners = this.listeners.filter(
+        (existingListener) => existingListener !== listener
+      );
+    };
+  }
+
+  private notify(): void {
+    const isLoading = this.isLoading();
+
+    this.listeners.forEach((listener) => {
+      listener(isLoading);
+    });
+  }
+}
+
+
+
+
+
+import { html, LitElement, nothing, css } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { MapLoaderManager } from './MapLoaderManager';
+
+
+
+private mapLoaderManager = new MapLoaderManager();
+private unsubscribeMapLoader?: () => void;
+
+@state()
+private isMapLoading = fals
+
+
+
+
+public getLoaderManager(): MapLoaderManager {
+  return this.mapLoaderManager;
+}
+
+
+
+
+public connectedCallback(): void {
+  super.connectedCallback();
+
+  this.unsubscribeMapLoader = this.mapLoaderManager.subscribe(
+    (isLoading: boolean) => {
+      this.isMapLoading = isLoading;
+      this.requestUpdate();
+    }
+  );
+}
+
+
+
+public disconnectedCallback(): void {
+  if (this.unsubscribeMapLoader) {
+    this.unsubscribeMapLoader();
+    this.unsubscribeMapLoader = undefined;
+  }
+
+  super.disconnectedCallback();
+}
+
+
+
+
+private renderMapLoader() {
+  if (!this.isMapLoading) {
+    return nothing;
+  }
+
+  return html`
+    <div class="map-loader-overlay">
+      <div class="map-loader-box">
+        <div class="map-loader-spinner"></div>
+        <div class="map-loader-text">Loading map data...</div>
+      </div>
+    </div>
+  `;
+}
+
+
+
+protected render() {
+  return html`
+    <div class="arc-map-root">
+      <div id="mapViewDiv" class="arc-map-view"></div>
+
+      <slot></slot>
+
+      ${this.renderMapLoader()}
+    </div>
+  `;
+}
+
+
+
+
+
+
+static styles = css`
+  :host {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .arc-map-root {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .arc-map-view {
+    width: 100%;
+    height: 100%;
+  }
+
+  .map-loader-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 9999;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: rgba(255, 255, 255, 0.65);
+    pointer-events: auto;
+  }
+
+  .map-loader-box {
+    min-width: 180px;
+    padding: 18px 22px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  }
+
+  .map-loader-spinner {
+    width: 34px;
+    height: 34px;
+
+    border: 4px solid #d6d6d6;
+    border-top-color: #2f6fed;
+    border-radius: 50%;
+
+    animation: map-loader-spin 0.8s linear infinite;
+  }
+
+  .map-loader-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: #222222;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  @keyframes map-loader-spin {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`;
+
+
+
+
+private async buildGeoJsonLayer(): Promise<void> {
+  const arcMapElement = this.closest('arc-map') as any;
+  const loaderManager = arcMapElement?.getLoaderManager?.();
+
+  if (!loaderManager) {
+    await this.createGeoJsonLayer();
+    return;
+  }
+
+  await loaderManager.run(async () => {
+    await this.createGeoJsonLayer();
+
+    if (this.view && this.featureLayer) {
+      await this.view.whenLayerView(this.featureLayer);
+    }
+  });
+}
+
+
+
+
+private async buildEsriLayer(): Promise<void> {
+  const arcMapElement = this.closest('arc-map') as any;
+  const loaderManager = arcMapElement?.getLoaderManager?.();
+
+  if (!loaderManager) {
+    await this.createEsriLayer();
+    return;
+  }
+
+  await loaderManager.run(async () => {
+    await this.createEsriLayer();
+
+    if (this.view && this.esriLayer) {
+      await this.view.whenLayerView(this.esriLayer);
+    }
+  });
+}
