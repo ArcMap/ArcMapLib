@@ -1,36 +1,12 @@
-private async resolveAndAttach(): Promise<void> {
-  const mapElement = this.resolveMapElement();
+<script>
+  const map = document.getElementById('u');
 
-  if (!mapElement) {
-    console.warn('<layer-list> could not find related <map>');
-    return;
-  }
+  setTimeout(() => {
+    console.log('Adding layer list after 5 seconds');
 
-  const loaderManager = (mapElement as any)?.getLoaderManager?.();
+    const layerList = document.createElement('layer-list');
+    layerList.id = 'testing';
 
-  const attachLayerList = async (): Promise<void> => {
-    if (typeof (mapElement as any).componentOnReady === 'function') {
-      await (mapElement as any).componentOnReady();
-    }
-
-    const view = await (mapElement as any).getViewInstance();
-
-    if (!view) {
-      console.warn('<layer-list> could not resolve MapView from <up-map>');
-      return;
-    }
-
-    await view.when();
-
-    this.attachToMapView(view);
-  };
-
-  if (!loaderManager) {
-    await attachLayerList();
-    return;
-  }
-
-  await loaderManager.run(async () => {
-    await attachLayerList();
-  });
-}
+    map.appendChild(layerList);
+  }, 5000);
+</script>
