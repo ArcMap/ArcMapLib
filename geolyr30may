@@ -1,251 +1,32 @@
-export type MapLoaderListener = (isLoading: boolean) => void;
+private async initializeAfterMapReady(): Promise<void> {
+  try {
+    await this.resolveAncestorMapAndView();
 
-export class MapLoaderManager {
-  private loadingCount = 0;
-  private listeners: MapLoaderListener[] = [];
+    const loaderManager = this.ancestorMap?.getLoaderManager?.();
 
-  public start(): void {
-    this.loadingCount++;
-    this.notify();
-  }
-
-  public stop(): void {
-    this.loadingCount = Math.max(0, this.loadingCount - 1);
-    this.notify();
-  }
-
-  public async run<T>(task: () => Promise<T>): Promise<T> {
-    this.start();
-
-    try {
-      return await task();
-    } finally {
-      this.stop();
+    if (!loaderManager) {
+      await this.createLayer();
+      await this.registerViewHandles();
+      return;
     }
-  }
 
-  public isLoading(): boolean {
-    return this.loadingCount > 0;
-  }
+    await loaderManager.run(async () => {
+      await this.createLayer();
 
-  public subscribe(listener: MapLoaderListener): () => void {
-    this.listeners.push(listener);
-    listener(this.isLoading());
+      if (this.view && this.featureLayer) {
+        try {
+          await this.view.whenLayerView(this.featureLayer);
+        } catch (layerViewError) {
+          console.warn(
+            '[feature-layer] Layer was added, but LayerView was not ready yet',
+            layerViewError
+          );
+        }
+      }
 
-    return () => {
-      this.listeners = this.listeners.filter(
-        (existingListener) => existingListener !== listener
-      );
-    };
-  }
-
-  private notify(): void {
-    const isLoading = this.isLoading();
-
-    this.listeners.forEach((listener) => {
-      listener(isLoading);
+      await this.registerViewHandles();
     });
+  } catch (error) {
+    console.error('[feature-layer] failed to initialize', error);
   }
-}
-
-
-
-
-
-import { html, LitElement, nothing, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-import { MapLoaderManager } from './MapLoaderManager';
-
-
-
-private mapLoaderManager = new MapLoaderManager();
-private unsubscribeMapLoader?: () => void;
-
-@state()
-private isMapLoading = fals
-
-
-
-
-public getLoaderManager(): MapLoaderManager {
-  return this.mapLoaderManager;
-}
-
-
-
-
-public connectedCallback(): void {
-  super.connectedCallback();
-
-  this.unsubscribeMapLoader = this.mapLoaderManager.subscribe(
-    (isLoading: boolean) => {
-      this.isMapLoading = isLoading;
-      this.requestUpdate();
-    }
-  );
-}
-
-
-
-public disconnectedCallback(): void {
-  if (this.unsubscribeMapLoader) {
-    this.unsubscribeMapLoader();
-    this.unsubscribeMapLoader = undefined;
-  }
-
-  super.disconnectedCallback();
-}
-
-
-
-
-private renderMapLoader() {
-  if (!this.isMapLoading) {
-    return nothing;
-  }
-
-  return html`
-    <div class="map-loader-overlay">
-      <div class="map-loader-box">
-        <div class="map-loader-spinner"></div>
-        <div class="map-loader-text">Loading map data...</div>
-      </div>
-    </div>
-  `;
-}
-
-
-
-protected render() {
-  return html`
-    <div class="arc-map-root">
-      <div id="mapViewDiv" class="arc-map-view"></div>
-
-      <slot></slot>
-
-      ${this.renderMapLoader()}
-    </div>
-  `;
-}
-
-
-
-
-
-
-static styles = css`
-  :host {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-
-  .arc-map-root {
-    position: relative;
-    width: 100%;
-    height: 100%;
-  }
-
-  .arc-map-view {
-    width: 100%;
-    height: 100%;
-  }
-
-  .map-loader-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 9999;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    background: rgba(255, 255, 255, 0.65);
-    pointer-events: auto;
-  }
-
-  .map-loader-box {
-    min-width: 180px;
-    padding: 18px 22px;
-
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-
-    border-radius: 8px;
-    background: #ffffff;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-  }
-
-  .map-loader-spinner {
-    width: 34px;
-    height: 34px;
-
-    border: 4px solid #d6d6d6;
-    border-top-color: #2f6fed;
-    border-radius: 50%;
-
-    animation: map-loader-spin 0.8s linear infinite;
-  }
-
-  .map-loader-text {
-    font-size: 14px;
-    font-weight: 500;
-    color: #222222;
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  @keyframes map-loader-spin {
-    from {
-      transform: rotate(0deg);
-    }
-
-    to {
-      transform: rotate(360deg);
-    }
-  }
-`;
-
-
-
-
-private async buildGeoJsonLayer(): Promise<void> {
-  const arcMapElement = this.closest('arc-map') as any;
-  const loaderManager = arcMapElement?.getLoaderManager?.();
-
-  if (!loaderManager) {
-    await this.createGeoJsonLayer();
-    return;
-  }
-
-  await loaderManager.run(async () => {
-    await this.createGeoJsonLayer();
-
-    if (this.view && this.featureLayer) {
-      await this.view.whenLayerView(this.featureLayer);
-    }
-  });
-}
-
-
-
-
-private async buildEsriLayer(): Promise<void> {
-  const arcMapElement = this.closest('arc-map') as any;
-  const loaderManager = arcMapElement?.getLoaderManager?.();
-
-  if (!loaderManager) {
-    await this.createEsriLayer();
-    return;
-  }
-
-  await loaderManager.run(async () => {
-    await this.createEsriLayer();
-
-    if (this.view && this.esriLayer) {
-      await this.view.whenLayerView(this.esriLayer);
-    }
-  });
 }
