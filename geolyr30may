@@ -1,12 +1,19 @@
-<script>
-  const map = document.getElementById('u');
+async firstUpdated(): Promise<void> {
+  await runWithMapLoader(this, async () => {
+    await this.createLayer();
 
-  setTimeout(() => {
-    console.log('Adding layer list after 5 seconds');
+    if (this.ancestorMap && this.featureLayer) {
+      const view = await this.ancestorMap.getViewInstance();
 
-    const layerList = document.createElement('layer-list');
-    layerList.id = 'testing';
+      if (view) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
 
-    map.appendChild(layerList);
-  }, 5000);
-</script>
+        try {
+          await view.whenLayerView(this.featureLayer);
+        } catch (error) {
+          console.warn('[point] Layer was added, but LayerView was not ready yet', error);
+        }
+      }
+    }
+  });
+}
