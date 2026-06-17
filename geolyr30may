@@ -1,19 +1,57 @@
+export async function runWithMapLoader(
+  layerElement: HTMLElement,
+  callback: () => Promise<void>
+): Promise<void> {
+  const ancestorMap = layerElement.closest('map') as any;
+  const loaderManager = ancestorMap?.getLoaderManager?.();
+
+  if (!loaderManager) {
+    await callback();
+    return;
+  }
+
+  await loaderManager.run(async () => {
+    await callback();
+  });
+}
+
+export async function waitForLayerView(
+  view: any,
+  layer: any,
+  logPrefix: string
+): Promise<void> {
+  if (!view || !layer) {
+    return;
+  }
+
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
+  try {
+    await view.whenLayerView(layer);
+  } catch (layerViewError) {
+    console.warn(
+      `${logPrefix} Layer was added, but LayerView was not ready yet`,
+      layerViewError
+    );
+  }
+}
+
+
+
+
 private async initializeAfterMapReady(): Promise<void> {
   try {
     await this.resolveAncestorMapAndView();
 
-    const loaderManager = this.ancestorMap?.getLoaderManager?.();
-
-    if (!loaderManager) {
+    await runWithMapLoader(this, async () => {
       await this.createLayer();
-      await this.waitForLayerView();
-      await this.registerViewHandles();
-      return;
-    }
 
-    await loaderManager.run(async () => {
-      await this.createLayer();
-      await this.waitForLayerView();
+      await waitForLayerView(
+        this.view,
+        this.featureLayer,
+        '[esri-feature-layer]'
+      );
+
       await this.registerViewHandles();
     });
   } catch (error) {
