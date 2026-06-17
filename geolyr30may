@@ -1,71 +1,36 @@
-private async componentDidLoad(): Promise<void> {
-  const ancestorMap = this.closest('map') || this.closest('upMap');
+private async resolveAndAttach(): Promise<void> {
+  const mapElement = this.resolveMapElement();
 
-  if (!ancestorMap) {
-    console.error('legend> must be inside <up-map>');
+  if (!mapElement) {
+    console.warn('<layer-list> could not find related <map>');
     return;
   }
 
-  const loaderManager = (ancestorMap as any)?.getLoaderManager?.();
+  const loaderManager = (mapElement as any)?.getLoaderManager?.();
 
-  const startLegendLoad = async (): Promise<void> => {
-    if (typeof (ancestorMap as any).getViewInstance !== 'function') {
-      return;
+  const attachLayerList = async (): Promise<void> => {
+    if (typeof (mapElement as any).componentOnReady === 'function') {
+      await (mapElement as any).componentOnReady();
     }
 
-    const view = await (ancestorMap as any).getViewInstance();
+    const view = await (mapElement as any).getViewInstance();
 
     if (!view) {
-      console.error('Could not resolve MapView from <up-map>');
+      console.warn('<layer-list> could not resolve MapView from <up-map>');
       return;
     }
 
     await view.when();
 
-    await this.updateComplete;
-
-    await customElements.whenDefined('arcgis-legend');
-
-    const legendEl = this.legendElement as any;
-
-    if (!legendEl) {
-      return;
-    }
-
-    legendEl.view = view;
-    legendEl.autoUpdate = true;
-
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-
-    legendEl.layerInfos = UpLegend.getLayerInfos(view);
-
-    const refreshLayers = (): void => {
-      if (!legendEl || !view) {
-        return;
-      }
-
-      legendEl.layerInfos = UpLegend.getLayerInfos(view);
-    };
-
-    if (view.map) {
-      this.eventHandles.add(
-        view.map.layers.on('change', refreshLayers),
-        'map-layers'
-      );
-
-      this.eventHandles.add(
-        view.map.allLayers.on('change', refreshLayers),
-        'all-layers'
-      );
-    }
+    this.attachToMapView(view);
   };
 
   if (!loaderManager) {
-    await startLegendLoad();
+    await attachLayerList();
     return;
   }
 
   await loaderManager.run(async () => {
-    await startLegendLoad();
+    await attachLayerList();
   });
 }
