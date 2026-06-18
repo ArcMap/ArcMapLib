@@ -1,6 +1,13 @@
-:host .esri-popup,
-:host .esri-popup__main-container,
-:host .esri-popup__content {
+.map-popup {
+  --calcite-color-foreground-1: transparent;
+  --calcite-color-foreground-2: transparent;
+  --calcite-color-foreground-3: transparent;
+  --calcite-shadow-sm: none;
+  --calcite-shadow-md: none;
+  --calcite-shadow-lg: none;
+}
+
+.up-map-popup::part(container),
+.up-map-popup::part(content) {
   box-shadow: none !important;
-  background: transparent !important;
 }
