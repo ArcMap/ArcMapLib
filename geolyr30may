@@ -1,13 +1,11 @@
-.map-popup {
-  --calcite-color-foreground-1: transparent;
-  --calcite-color-foreground-2: transparent;
-  --calcite-color-foreground-3: transparent;
+.up-map-popup {
   --calcite-shadow-sm: none;
   --calcite-shadow-md: none;
   --calcite-shadow-lg: none;
 }
 
 .up-map-popup::part(container),
-.up-map-popup::part(content) {
+.up-map-popup::part(content),
+.up-map-popup::part(main) {
   box-shadow: none !important;
 }
