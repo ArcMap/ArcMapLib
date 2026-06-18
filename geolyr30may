@@ -1,19 +1,6 @@
-async firstUpdated(): Promise<void> {
-  await runWithMapLoader(this, async () => {
-    await this.createLayer();
-
-    if (this.ancestorMap && this.featureLayer) {
-      const view = await this.ancestorMap.getViewInstance();
-
-      if (view) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-
-        try {
-          await view.whenLayerView(this.featureLayer);
-        } catch (error) {
-          console.warn('[point] Layer was added, but LayerView was not ready yet', error);
-        }
-      }
-    }
-  });
+:host .esri-popup,
+:host .esri-popup__main-container,
+:host .esri-popup__content {
+  box-shadow: none !important;
+  background: transparent !important;
 }
