@@ -1,17 +1,52 @@
-.widget-stack {
-  position: relative;
-  z-index: 0 !important;
+private applyPopupZIndexFix(): void {
+  const arcgisMap = this.renderRoot.querySelector("arcgis-map") as HTMLElement | null;
+
+  const styleId = "up-map-popup-z-index-fix";
+
+  const css = `
+    .esri-popup {
+      z-index: 10000 !important;
+    }
+
+    .esri-popup__main-container {
+      z-index: 10000 !important;
+    }
+
+    .esri-ui,
+    .esri-ui-corner,
+    .esri-ui-inner-container {
+      z-index: 1 !important;
+    }
+
+    .esri-ui .esri-widget {
+      z-index: 1 !important;
+    }
+  `;
+
+  const addStyle = (root: Document | ShadowRoot) => {
+    if (root.getElementById?.(styleId)) {
+      return;
+    }
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = css;
+    root.appendChild(style);
+  };
+
+  addStyle(document);
+
+  if (arcgisMap?.shadowRoot) {
+    addStyle(arcgisMap.shadowRoot);
+  }
 }
 
-.widget-stack arcgis-home,
-.widget-stack arcgis-locate,
-.widget-stack arcgis-zoom,
-.widget-stack arcgis-scale-bar {
-  position: relative;
-  z-index: 0 !important;
-}
 
-arcgis-popup[slot="popup"] {
-  position: relative;
-  z-index: 99999 !important;
+
+private handleArcgisMapReady(event: any): void {
+  // keep your existing code here
+
+  requestAnimationFrame(() => {
+    this.applyPopupZIndexFix();
+  });
 }
