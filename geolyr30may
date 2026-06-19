@@ -4,8 +4,17 @@
   --calcite-shadow-lg: none;
 }
 
-.up-map-popup::part(container),
-.up-map-popup::part(content),
+.up-map-popup::part(container) {
+  background-color: white !important;
+  opacity: 1 !important;
+}
+
+.up-map-popup::part(content) {
+  background-color: white !important;
+  opacity: 1 !important;
+}
+
 .up-map-popup::part(main) {
-  box-shadow: none !important;
+  background-color: white !important;
+  opacity: 1 !important;
 }
