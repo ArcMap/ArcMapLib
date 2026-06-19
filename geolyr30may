@@ -1,52 +1,24 @@
 private applyPopupZIndexFix(): void {
   const arcgisMap = this.renderRoot.querySelector("arcgis-map") as HTMLElement | null;
 
-  const styleId = "up-map-popup-z-index-fix";
-
   const css = `
     .esri-popup {
-      z-index: 10000 !important;
+      z-index: 99999 !important;
     }
 
     .esri-popup__main-container {
-      z-index: 10000 !important;
+      z-index: 99999 !important;
     }
 
-    .esri-ui,
+    .esri-ui-bottom-left,
     .esri-ui-corner,
-    .esri-ui-inner-container {
-      z-index: 1 !important;
-    }
-
-    .esri-ui .esri-widget {
+    .esri-ui {
       z-index: 1 !important;
     }
   `;
 
-  const addStyle = (root: Document | ShadowRoot) => {
-    if (root.getElementById?.(styleId)) {
-      return;
-    }
+  const style = document.createElement("style");
+  style.textContent = css;
 
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = css;
-    root.appendChild(style);
-  };
-
-  addStyle(document);
-
-  if (arcgisMap?.shadowRoot) {
-    addStyle(arcgisMap.shadowRoot);
-  }
-}
-
-
-
-private handleArcgisMapReady(event: any): void {
-  // keep your existing code here
-
-  requestAnimationFrame(() => {
-    this.applyPopupZIndexFix();
-  });
+  arcgisMap?.shadowRoot?.appendChild(style);
 }
