@@ -1,7 +1,21 @@
-arcgis-popup .esri-popup__content,
-.esri-popup__content {
-  max-height: 300px !important;
-  overflow-y: auto !important;
-  padding-bottom: 0 !important;
-  margin-bottom: 0 !important;
+arcgis-map::part(view) {
+  overflow: visible;
+}
+
+.up-map-popup {
+  z-index: 10000 !important;
+  pointer-events: auto;
+}
+
+.up-map-popup::part(container) {
+  z-index: 10000 !important;
+  box-shadow: none !important;
+}
+
+.widget-stack,
+arcgis-home,
+arcgis-locate,
+arcgis-zoom,
+arcgis-scale-bar {
+  z-index: 1 !important;
 }
