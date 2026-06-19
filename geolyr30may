@@ -1,21 +1,7 @@
-.up-map-popup {
-  --calcite-shadow-sm: none;
-  --calcite-shadow-md: none;
-  --calcite-shadow-lg: none;
-}
-
-.up-map-popup::part(container) {
-  box-shadow: none !important;
-  max-height: 420px !important;
-}
-
-.up-map-popup::part(content) {
+arcgis-popup .esri-popup__content,
+.esri-popup__content {
   max-height: 300px !important;
   overflow-y: auto !important;
   padding-bottom: 0 !important;
-}
-
-.up-map-popup::part(main) {
-  box-shadow: none !important;
-  min-height: auto !important;
+  margin-bottom: 0 !important;
 }
