@@ -1,24 +1,11 @@
-private applyPopupZIndexFix(): void {
-  const arcgisMap = this.renderRoot.querySelector("arcgis-map") as HTMLElement | null;
+:host {
+  display: block;
+  width: 100%;
+  height: 100vh;
+}
 
-  const css = `
-    .esri-popup {
-      z-index: 99999 !important;
-    }
-
-    .esri-popup__main-container {
-      z-index: 99999 !important;
-    }
-
-    .esri-ui-bottom-left,
-    .esri-ui-corner,
-    .esri-ui {
-      z-index: 1 !important;
-    }
-  `;
-
-  const style = document.createElement("style");
-  style.textContent = css;
-
-  arcgisMap?.shadowRoot?.appendChild(style);
+.map-container {
+  display: block;
+  width: 100%;
+  height: 100vh;
 }
