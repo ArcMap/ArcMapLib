@@ -1,21 +1,17 @@
-arcgis-map::part(view) {
-  overflow: visible;
+.widget-stack {
+  position: relative;
+  z-index: 0 !important;
 }
 
-.up-map-popup {
-  z-index: 10000 !important;
-  pointer-events: auto;
+.widget-stack arcgis-home,
+.widget-stack arcgis-locate,
+.widget-stack arcgis-zoom,
+.widget-stack arcgis-scale-bar {
+  position: relative;
+  z-index: 0 !important;
 }
 
-.up-map-popup::part(container) {
-  z-index: 10000 !important;
-  box-shadow: none !important;
-}
-
-.widget-stack,
-arcgis-home,
-arcgis-locate,
-arcgis-zoom,
-arcgis-scale-bar {
-  z-index: 1 !important;
+arcgis-popup[slot="popup"] {
+  position: relative;
+  z-index: 99999 !important;
 }
