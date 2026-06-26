@@ -1,10 +1,136 @@
-1. Create MapView
-2. Wait for view.when()
-3. Mark map ready
-4. Start layers/widgets
-5. Start business APIs separately
-6. If API is slow, map still loads
+lI need a code fix for ArcGIS map startup performance.
 
+Problem:
+After moving from ArcGIS 3.x to the newer ArcGIS SDK/library, the map sometimes does not load quickly when one application API request is pending for a long time. ArcGIS assets like sprite@2x.json, plus16.json, VectorTileServer?f=json, messages.en.json, basemaps.en.json, pbf files, fonts, etc. remain pending/stalled. I want the base map to load first and not be blocked by any business API.
 
+Do not focus on web tracking interceptor. Ignore that part.
 
-So the real fix is: make map loading independent from pending endpoints and reduce parallel requests during first map load.
+Required solution:
+1. MapView must be created immediately.
+2. Do not wait for business APIs before creating MapView.
+3. Wait only for view.when() to mark the map as ready.
+4. Emit a mapReady event after view.when().
+5. Load optional widgets only after mapReady.
+6. Load business APIs/layers after mapReady.
+7. Add timeout protection so a slow API does not block layer loading forever.
+8. Replace any Promise.all, forkJoin, combineLatest, or await flow that blocks map creation.
+9. Use Promise.allSettled for non-critical APIs after map is ready.
+10. If one API fails or times out, base map should still load.
+
+Expected flow:
+
+BAD:
+await loadConfig();
+await loadBusinessData();
+await initializeMap();
+
+GOOD:
+await initializeMap();
+loadBusinessDataAfterMapReady();
+
+Please update the code using this pattern:
+
+private async initializeMap(): Promise<void> {
+  this.map = new Map({
+    basemap: this.basemap || 'streets-vector'
+  });
+
+  this.view = new MapView({
+    container: this.mapContainer,
+    map: this.map,
+    center: this.center,
+    zoom: this.zoom
+  });
+
+  await this.view.when();
+
+  this.dispatchEvent(
+    new CustomEvent('mapReady', {
+      bubbles: true,
+      composed: true,
+      detail: {
+        view: this.view,
+        map: this.map
+      }
+    })
+  );
+
+  this.loadOptionalWidgetsAfterMapReady();
+}
+
+protected async firstUpdated(): Promise<void> {
+  await this.initializeMap();
+
+  void this.loadBusinessDataAfterMapReady();
+}
+
+private async withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T | null> {
+  let timeoutId: number | undefined;
+
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timeoutId = window.setTimeout(() => {
+      console.warn(timeoutMessage);
+      resolve(null);
+    }, timeoutMs);
+  });
+
+  const result = await Promise.race([
+    promise,
+    timeoutPromise
+  ]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  return result;
+}
+
+private async loadBusinessDataAfterMapReady(): Promise<void> {
+  const data = await this.withTimeout(
+    this.loadBusinessData(),
+    8000,
+    'Business data API is slow. Map already loaded, continuing without blocking.'
+  );
+
+  if (!data) {
+    return;
+  }
+
+  await this.addBusinessLayers(data);
+}
+
+private loadOptionalWidgetsAfterMapReady(): void {
+  window.setTimeout(() => {
+    this.loadLegendWidget();
+    this.loadLayerListWidget();
+    this.loadBasemapGalleryWidget();
+    this.loadMeasurementWidget();
+  }, 0);
+}
+
+Also replace this kind of startup code:
+
+await Promise.all([
+  this.loadBusinessData(),
+  this.loadConfig(),
+  this.loadPermissions()
+]);
+
+await this.initializeMap();
+
+With this:
+
+await this.initializeMap();
+
+void Promise.allSettled([
+  this.loadBusinessDataAfterMapReady(),
+  this.loadConfigAfterMapReady(),
+  this.loadPermissionsAfterMapReady()
+]);
+
+Please inspect my map startup code and give me the complete updated method bodies. Do not give partial snippets. Preserve my existing method names where possible.
