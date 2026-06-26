@@ -1,11 +1,10 @@
-:host {
-  display: block;
-  width: 100%;
-  height: 100vh;
-}
+1. Create MapView
+2. Wait for view.when()
+3. Mark map ready
+4. Start layers/widgets
+5. Start business APIs separately
+6. If API is slow, map still loads
 
-.map-container {
-  display: block;
-  width: 100%;
-  height: 100vh;
-}
+
+
+So the real fix is: make map loading independent from pending endpoints and reduce parallel requests during first map load.
