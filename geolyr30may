@@ -1,11 +1,18 @@
-Find the map startup methods. Update them so ArcGIS MapView is created first and no API/layer/widget request blocks base map loading.
+const originalFetch = window.fetch;
 
-Required:
-- firstUpdated should call initializeMap first.
-- Do not call API methods before initializeMap.
-- Do not await layer data before MapView is ready.
-- Move API/layer loading after view.when().
-- Load widgets after mapReady.
-- Use Promise.allSettled, not Promise.all, for non-critical post-map work.
-- Add timeout for slow APIs.
-- Give complete updated method bodies only.
+window.fetch = function (...args) {
+    const url = args[0].toString();
+
+    if (url.includes('getFa')) {
+        return new Promise((resolve, reject) => {
+            setTimeout(() => {
+                reject(new DOMException(
+                    'The operation was aborted.',
+                    'AbortError'
+                ));
+            }, 10000);
+        });
+    }
+
+    return originalFetch.apply(this, args);
+};
