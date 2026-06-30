@@ -1,19 +1,15 @@
 <calcite-list-item
-  [label]="isRenamingMap(map.id) ? '' : map.name"
-  noninteractive
+  [label]="isRenamingMap(map.id) ? renameMapName() : map.name"
 >
   @if (isRenamingMap(map.id)) {
-    <calcite-inline-editable
-      controls
-      [editingEnabled]="true"
-      (calciteInlineEditableEditConfirm)="confirmRenameInstance(map.id)"
-      (calciteInlineEditableEditCancel)="cancelRenameInstance()"
-    >
-      <calcite-input-text
-        [value]="renameMapName()"
-        (calciteInputTextInput)="onRenameMapNameInput($event)"
-      ></calcite-input-text>
-    </calcite-inline-editable>
+    <calcite-input-text
+      slot="content"
+      [value]="renameMapName()"
+      autofocus
+      (calciteInputTextInput)="onRenameMapNameInput($event)"
+      (keydown.enter)="confirmRenameInstance(map.id)"
+      (keydown.escape)="cancelRenameInstance()"
+    ></calcite-input-text>
   }
 
   <calcite-dropdown slot="actions-end" placement="auto-end">
@@ -24,15 +20,30 @@
       appearance="transparent"
     ></calcite-action>
 
-    <calcite-dropdown-group>
-      <calcite-dropdown-item (click)="renameInstance(map.id, map.name)">
+    <calcite-dropdown-group selection-mode="none">
+      <calcite-dropdown-item
+        icon-start="map-from-template"
+        (click)="openInstance(map.id)"
+      >
+        Open Instance
+      </calcite-dropdown-item>
+
+      <calcite-dropdown-item
+        icon-start="edit-attributes"
+        (click)="renameInstance(map.id, map.name)"
+      >
         Edit Name
+      </calcite-dropdown-item>
+
+      <calcite-dropdown-item
+        icon-start="download-to"
+        (click)="downloadInstance(map.id)"
+      >
+        Download
       </calcite-dropdown-item>
     </calcite-dropdown-group>
   </calcite-dropdown>
 </calcite-list-item>
-
-
 
 
 
