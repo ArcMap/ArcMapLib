@@ -1,3 +1,42 @@
+<calcite-list-item
+  [label]="isRenamingMap(map.id) ? '' : map.name"
+  noninteractive
+>
+  @if (isRenamingMap(map.id)) {
+    <calcite-inline-editable
+      controls
+      [editingEnabled]="true"
+      (calciteInlineEditableEditConfirm)="confirmRenameInstance(map.id)"
+      (calciteInlineEditableEditCancel)="cancelRenameInstance()"
+    >
+      <calcite-input-text
+        [value]="renameMapName()"
+        (calciteInputTextInput)="onRenameMapNameInput($event)"
+      ></calcite-input-text>
+    </calcite-inline-editable>
+  }
+
+  <calcite-dropdown slot="actions-end" placement="auto-end">
+    <calcite-action
+      slot="trigger"
+      icon="ellipsis"
+      scale="s"
+      appearance="transparent"
+    ></calcite-action>
+
+    <calcite-dropdown-group>
+      <calcite-dropdown-item (click)="renameInstance(map.id, map.name)">
+        Edit Name
+      </calcite-dropdown-item>
+    </calcite-dropdown-group>
+  </calcite-dropdown>
+</calcite-list-item>
+
+
+
+
+
+
 renameInstance(id: string, name: string): void {
   this.renamingMapId.set(id);
   this.renameMapName.set(name ?? '');
