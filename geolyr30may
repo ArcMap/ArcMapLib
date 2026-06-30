@@ -1,25 +1,63 @@
-<div class="rename-container">
+@if (isRenamingMap(map.id)) {
+  <div class="rename-row">
 
-  <calcite-input-text
-    class="rename-input"
-    [value]="renameMapName()"
-    (calciteInputTextInput)="onRenameMapNameInput($event)">
-  </calcite-input-text>
+    <calcite-input-text
+      class="rename-input"
+      [value]="renameMapName()"
+      (calciteInputTextInput)="onRenameMapNameInput($event)">
+    </calcite-input-text>
 
-  <div class="rename-actions">
     <calcite-button
       appearance="outline"
       scale="s"
+      width="auto"
+      icon-start="x"
+      title="Cancel"
       (click)="cancelRenameInstance()">
-      Cancel
     </calcite-button>
 
     <calcite-button
       appearance="solid"
       scale="s"
+      width="auto"
+      icon-start="check"
+      title="Save"
       (click)="confirmRenameInstance(map.id)">
-      Save
     </calcite-button>
-  </div>
 
-</div>
+  </div>
+}
+
+
+
+.rename-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 4px;
+}
+
+.rename-input {
+  flex: 1;
+}
+
+.rename-row calcite-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+}
+
+
+
+
+<calcite-button
+  appearance="outline"
+  icon-start="x"
+  (click)="cancelRenameInstance()">
+</calcite-button>
+
+<calcite-button
+  appearance="solid"
+  icon-start="check"
+  (click)="confirmRenameInstance(map.id)">
+</calcite-button>
