@@ -1,67 +1,29 @@
-<calcite-list-item
-  [label]="isRenamingMap(map.id) ? '' : map.name"
->
-  @if (isRenamingMap(map.id)) {
-    <div slot="content" class="rename-row">
-      <calcite-input-text
-        class="rename-input"
-        [value]="renameMapName()"
-        autofocus
-        (calciteInputTextInput)="onRenameMapNameInput($event)"
-        (keydown.enter)="confirmRenameInstance(map.id)"
-        (keydown.escape)="cancelRenameInstance()"
-      ></calcite-input-text>
+renameInstance(id: string, name: string): void {
+  this.renamingMapId.set(id);
+  this.renameMapName.set(name ?? '');
+}
 
-      <calcite-button
-        scale="s"
-        appearance="solid"
-        (click)="confirmRenameInstance(map.id)"
-      >
-        Save
-      </calcite-button>
+isRenamingMap(id: string): boolean {
+  return this.renamingMapId() === id;
+}
 
-      <calcite-button
-        scale="s"
-        appearance="outline"
-        kind="neutral"
-        (click)="cancelRenameInstance()"
-      >
-        Cancel
-      </calcite-button>
-    </div>
+onRenameMapNameInput(event: Event): void {
+  const input = event.target as HTMLCalciteInputTextElement;
+  this.renameMapName.set(input.value ?? '');
+}
+
+confirmRenameInstance(id: string): void {
+  const name = this.renameMapName().trim();
+
+  if (!name) {
+    return;
   }
 
-  @if (!isRenamingMap(map.id)) {
-    <calcite-dropdown slot="actions-end" placement="auto-end">
-      <calcite-action
-        slot="trigger"
-        icon="ellipsis"
-        scale="s"
-        appearance="transparent"
-      ></calcite-action>
+  this.savedMapFacade.renameUserMap(id, name);
+  this.cancelRenameInstance();
+}
 
-      <calcite-dropdown-group selection-mode="none">
-        <calcite-dropdown-item
-          icon-start="map-from-template"
-          (click)="openInstance(map.id)"
-        >
-          Open Instance
-        </calcite-dropdown-item>
-
-        <calcite-dropdown-item
-          icon-start="edit-attributes"
-          (click)="renameInstance(map.id, map.name)"
-        >
-          Edit Name
-        </calcite-dropdown-item>
-
-        <calcite-dropdown-item
-          icon-start="download-to"
-          (click)="downloadInstance(map.id)"
-        >
-          Download
-        </calcite-dropdown-item>
-      </calcite-dropdown-group>
-    </calcite-dropdown>
-  }
-</calcite-list-item>
+cancelRenameInstance(): void {
+  this.renamingMapId.set(null);
+  this.renameMapName.set('');
+}
