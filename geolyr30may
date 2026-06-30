@@ -1,88 +1,25 @@
-<calcite-list>
-  @for (map of savedMaps(); track map.id) {
+<div class="rename-container">
 
-    <calcite-list-item
-      [label]="isRenamingMap(map.id) ? '' : map.name"
-      noninteractive>
+  <calcite-input-text
+    class="rename-input"
+    [value]="renameMapName()"
+    (calciteInputTextInput)="onRenameMapNameInput($event)">
+  </calcite-input-text>
 
-      @if (isRenamingMap(map.id)) {
+  <div class="rename-actions">
+    <calcite-button
+      appearance="outline"
+      scale="s"
+      (click)="cancelRenameInstance()">
+      Cancel
+    </calcite-button>
 
-        <div class="rename-container">
-          <calcite-input-text
-            class="rename-input"
-            [value]="renameMapName()"
-            (calciteInputTextInput)="onRenameMapNameInput($event)">
-          </calcite-input-text>
+    <calcite-button
+      appearance="solid"
+      scale="s"
+      (click)="confirmRenameInstance(map.id)">
+      Save
+    </calcite-button>
+  </div>
 
-          <calcite-button
-            scale="s"
-            width="auto"
-            appearance="solid"
-            (click)="confirmRenameInstance(map.id)">
-            Save
-          </calcite-button>
-
-          <calcite-button
-            scale="s"
-            width="auto"
-            appearance="outline"
-            (click)="cancelRenameInstance()">
-            Cancel
-          </calcite-button>
-        </div>
-
-      } @else {
-
-        <calcite-dropdown
-          slot="actions-end"
-          placement="auto-end">
-
-          <calcite-action
-            slot="trigger"
-            icon="ellipsis"
-            scale="s"
-            appearance="transparent">
-          </calcite-action>
-
-          <calcite-dropdown-group selection-mode="none">
-
-            <calcite-dropdown-item
-              icon-start="edit-attributes"
-              (click)="renameInstance(map.id, map.name)">
-              Edit Name
-            </calcite-dropdown-item>
-
-            <calcite-dropdown-item
-              icon-start="trash"
-              (click)="deleteInstance(map.id)">
-              Delete
-            </calcite-dropdown-item>
-
-          </calcite-dropdown-group>
-
-        </calcite-dropdown>
-
-      }
-
-    </calcite-list-item>
-
-  }
-</calcite-list>
-
-
-
-
-.rename-container {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.rename-input {
-  flex: 1;
-}
-
-.rename-container calcite-button {
-  flex-shrink: 0;
-}
+</div>
