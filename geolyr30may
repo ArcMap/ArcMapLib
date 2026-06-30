@@ -1,18 +1,29 @@
-const originalFetch = window.fetch;
+renameInstance(id: string, name: string): void {
+  this.renamingMapId.set(id);
+  this.renameMapName.set(name ?? '');
+}
 
-window.fetch = function (...args) {
-    const url = args[0].toString();
+isRenamingMap(id: string): boolean {
+  return this.renamingMapId() === id;
+}
 
-    if (url.includes('getFa')) {
-        return new Promise((resolve, reject) => {
-            setTimeout(() => {
-                reject(new DOMException(
-                    'The operation was aborted.',
-                    'AbortError'
-                ));
-            }, 10000);
-        });
-    }
+onRenameMapNameInput(event: Event): void {
+  const input = event.target as HTMLCalciteInputTextElement;
+  this.renameMapName.set(input.value ?? '');
+}
 
-    return originalFetch.apply(this, args);
-};
+confirmRenameInstance(id: string): void {
+  const name = this.renameMapName().trim();
+
+  if (!name) {
+    return;
+  }
+
+  this.savedMapFacade.renameUserMap(id, name);
+  this.cancelRenameInstance();
+}
+
+cancelRenameInstance(): void {
+  this.renamingMapId.set(null);
+  this.renameMapName.set('');
+}
