@@ -1,29 +1,20 @@
-renameInstance(id: string, name: string): void {
-  this.renamingMapId.set(id);
-  this.renameMapName.set(name ?? '');
-}
+<div class="rename-row">
+  <calcite-input-text
+    class="rename-input"
+    [value]="renameMapName()"
+    (calciteInputTextInput)="onRenameMapNameInput($event)">
+  </calcite-input-text>
 
-isRenamingMap(id: string): boolean {
-  return this.renamingMapId() === id;
-}
+  <calcite-button
+    appearance="solid"
+    (click)="confirmRenameInstance(map.id)">
+    Save
+  </calcite-button>
 
-onRenameMapNameInput(event: Event): void {
-  const input = event.target as HTMLCalciteInputTextElement;
-  this.renameMapName.set(input.value ?? '');
-}
-
-confirmRenameInstance(id: string): void {
-  const name = this.renameMapName().trim();
-
-  if (!name) {
-    return;
-  }
-
-  this.savedMapFacade.renameUserMap(id, name);
-  this.cancelRenameInstance();
-}
-
-cancelRenameInstance(): void {
-  this.renamingMapId.set(null);
-  this.renameMapName.set('');
-}
+  <calcite-button
+    appearance="outline"
+    kind="neutral"
+    (click)="cancelRenameInstance()">
+    Cancel
+  </calcite-button>
+</div>
