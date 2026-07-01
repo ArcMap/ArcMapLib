@@ -1,96 +1,52 @@
-<calcite-list>
-  @for (map of savedMaps(); track map.id) {
-    <calcite-list-item
-      [label]="isRenamingMap(map.id) ? '' : map.name"
-      noninteractive
-    >
-      @if (isRenamingMap(map.id)) {
-        <div slot="content" class="rename-row">
-          <calcite-input-text
-            class="rename-input"
-            [value]="renameMapName()"
-            autofocus
-            (calciteInputTextInput)="onRenameMapNameInput($event)"
-            (keydown.enter)="confirmRenameInstance(map.id)"
-            (keydown.escape)="cancelRenameInstance()"
-          ></calcite-input-text>
+<div class="rename-row">
+  <calcite-input-text
+    class="rename-input"
+    [value]="renameMapName()"
+    (calciteInputTextInput)="onRenameMapNameInput($event)">
+  </calcite-input-text>
 
-          <calcite-action
-            class="rename-cancel"
-            icon="x"
-            scale="m"
-            text="Cancel"
-            appearance="outline"
-            (click)="cancelRenameInstance()"
-          ></calcite-action>
+  <calcite-action
+    class="rename-cancel"
+    icon="x"
+    (click)="cancelRenameInstance()">
+  </calcite-action>
 
-          <calcite-action
-            class="rename-save"
-            icon="check"
-            scale="m"
-            text="Save"
-            appearance="solid"
-            (click)="confirmRenameInstance(map.id)"
-          ></calcite-action>
-        </div>
-      } @else {
-        <calcite-dropdown slot="actions-end" placement="auto-end">
-          <calcite-action
-            slot="trigger"
-            icon="ellipsis"
-            scale="s"
-            appearance="transparent"
-          ></calcite-action>
-
-          <calcite-dropdown-group selection-mode="none">
-            <calcite-dropdown-item
-              icon-start="map-from-template"
-              (click)="openInstance(map.id)"
-            >
-              Open Instance
-            </calcite-dropdown-item>
-
-            <calcite-dropdown-item
-              icon-start="edit-attributes"
-              (click)="renameInstance(map.id, map.name)"
-            >
-              Edit Name
-            </calcite-dropdown-item>
-
-            <calcite-dropdown-item
-              icon-start="download-to"
-              (click)="downloadInstance(map.id)"
-            >
-              Download
-            </calcite-dropdown-item>
-          </calcite-dropdown-group>
-        </calcite-dropdown>
-      }
-    </calcite-list-item>
-  }
-</calcite-list>
-
-
+  <calcite-action
+    class="rename-save"
+    icon="check"
+    (click)="confirmRenameInstance(map.id)">
+  </calcite-action>
+</div>
 
 
 .rename-row {
-  display: grid;
-  grid-template-columns: 1fr 40px 40px;
+  display: flex;
   width: 100%;
   align-items: stretch;
 }
 
 .rename-input {
-  width: 100%;
+  flex: 1;
 }
 
 .rename-cancel,
 .rename-save {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  min-width: 36px;
+  border: 1px solid var(--calcite-color-border-1);
+  border-left: none;
+  background: white;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .rename-save {
-  --calcite-action-background-color: var(--calcite-color-brand);
-  --calcite-action-text-color: white;
+  background: var(--calcite-color-brand);
+  color: white;
+}
+
+.rename-cancel {
+  color: var(--calcite-color-text-2);
 }
