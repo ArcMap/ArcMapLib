@@ -1,68 +1,19 @@
-<calcite-dialog
-  [open]="open()"
-  heading="Generate map image (PNG)"
-  scale="s"
-  width="s"
-  (calciteDialogClose)="closed.emit()"
->
-  <div class="dialog-body">
-    <p class="dialog-note">
-      Note: World Street and World Navigation basemaps cannot be saved as an image
-    </p>
+<div class="rename-row">
+  <calcite-input-text
+    class="rename-input"
+    [value]="renameMapName()"
+    (calciteInputTextInput)="onRenameMapNameInput($event)">
+  </calcite-input-text>
 
-    <calcite-input-text
-      placeholder="Enter file name"
-      [value]="fileName()"
-      (calciteInputTextInput)="onFileNameInput($event)"
-    ></calcite-input-text>
+  <calcite-action
+    class="rename-cancel"
+    icon="x"
+    (click)="cancelRenameInstance()">
+  </calcite-action>
 
-    <calcite-label layout="inline" class="controls-toggle-label">
-      <calcite-switch
-        [checked]="includeMapControls()"
-        (calciteSwitchChange)="onControlsToggle($event)"
-      ></calcite-switch>
-      Enable map controls
-    </calcite-label>
-  </div>
-
-  <calcite-button
-    slot="footer-end"
-    appearance="solid"
-    scale="s"
-    [disabled]="fileName().trim().length === 0 || isDownloading()"
-    (click)="generateClicked.emit()"
-  >
-    Download
-  </calcite-button>
-</calcite-dialog>
-
-
-
-
-:host {
-  display: contents;
-}
-
-.dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 100%;
-}
-
-.dialog-note {
-  margin: 0;
-  font-size: var(--calcite-font-size--1, 12px);
-  color: var(--calcite-color-text-2, #6a6a6a);
-  font-style: italic;
-}
-
-.controls-toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-calcite-dialog {
-  --calcite-dialog-size-x: 410px;
-}
+  <calcite-action
+    class="rename-save"
+    icon="check"
+    (click)="confirmRenameInstance(map.id)">
+  </calcite-action>
+</div>
