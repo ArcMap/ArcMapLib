@@ -1,3 +1,27 @@
+<div slot="content" class="rename-row">
+  <calcite-input-text
+    class="rename-input"
+    [value]="renameMapName()"
+    (calciteInputTextInput)="onRenameMapNameInput($event)"
+  ></calcite-input-text>
+
+  <calcite-action
+    class="rename-cancel"
+    icon="x"
+    text="Cancel"
+    (click)="cancelRenameInstance()"
+  ></calcite-action>
+
+  <calcite-action
+    class="rename-save"
+    icon="check"
+    text="Save"
+    (click)="confirmRenameInstance(map.id)"
+  ></calcite-action>
+</div>
+
+
+
 .rename-row {
   display: flex;
   width: 100%;
@@ -27,8 +51,10 @@
 
 .rename-save {
   background: var(--calcite-color-brand);
-  color: white;
   border-color: var(--calcite-color-brand);
+  color: white;
+  --calcite-icon-color: white;
+  --calcite-color-text-1: white;
 }
 
 .rename-save::part(icon) {
