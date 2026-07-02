@@ -1,15 +1,59 @@
-private openDefaultArcGISMeasurementScreen(): void {
-  setTimeout(async () => {
-    const upMeasurementElement = this.upMeasurement?.nativeElement as any;
 
-    await customElements.whenDefined('up-measurement');
-    await upMeasurementElement.updateComplete;
 
-    const shadowRoot = upMeasurementElement.shadowRoot;
-    const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
+  private openMeasurementPanelByDefault(defaultTool: MeasurementTool): void {
+    setTimeout(async () => {
+      const upMeasurementElement = this.upMeasurement?.nativeElement as any;
 
-    if (distanceExpand) {
-      distanceExpand.expanded = true;
-    }
-  }, 500);
+      if (!upMeasurementElement) {
+        return;
+      }
+
+      await customElements.whenDefined('up-measurement');
+      await upMeasurementElement.updateComplete;
+
+      const shadowRoot = upMeasurementElement.shadowRoot;
+
+      if (!shadowRoot) {
+        return;
+      }
+
+      const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+      const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
+      const coordExpand = shadowRoot.querySelector('#coord-expand') as any;
+
+      if (coordExpand) {
+        coordExpand.expanded = false;
+        this.hideExpandIcon(coordExpand);
+      }
+
+      if (distanceExpand) {
+        distanceExpand.expanded = defaultTool === 'distance';
+        this.hideExpandIcon(distanceExpand);
+      }
+
+      if (areaExpand) {
+        areaExpand.expanded = defaultTool === 'area';
+        this.hideExpandIcon(areaExpand);
+      }
+    }, 700);
+  }
+
+  private hideExpandIcon(expandElement: any): void {
+    setTimeout(() => {
+      const expandShadowRoot = expandElement?.shadowRoot;
+
+      if (!expandShadowRoot) {
+        return;
+      }
+
+      const action =
+        expandShadowRoot.querySelector('calcite-action') ||
+        expandShadowRoot.querySelector('[slot="action"]') ||
+        expandShadowRoot.querySelector('button');
+
+      if (action instanceof HTMLElement) {
+        action.style.display = 'none';
+      }
+    }, 300);
+  }
 }
