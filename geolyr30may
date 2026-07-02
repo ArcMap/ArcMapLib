@@ -1,8 +1,14 @@
-private async openArcGisMeasurementPanel(): Promise<void> {
+private openDistanceMeasurementPopupOnLoad(): void {
 
   setTimeout(async () => {
 
-    const upMeasurement = this.upMeasurement.nativeElement as any;
+    const upMeasurement = this.upMeasurement?.nativeElement as any;
+
+    if (!upMeasurement) {
+
+      return;
+
+    }
 
     await customElements.whenDefined('up-measurement');
 
@@ -10,43 +16,63 @@ private async openArcGisMeasurementPanel(): Promise<void> {
 
     const root = upMeasurement.shadowRoot;
 
-    if (!root) return;
+    if (!root) {
 
-    const distExpand = root.querySelector('#dist-expand') as any;
+      return;
+
+    }
+
+    const distanceExpand = root.querySelector('#dist-expand') as any;
 
     const areaExpand = root.querySelector('#area-expand') as any;
 
     const coordExpand = root.querySelector('#coord-expand') as any;
 
-    if (coordExpand) coordExpand.expanded = false;
+    if (areaExpand) {
 
-    if (areaExpand) areaExpand.expanded = false;
+      areaExpand.expanded = false;
 
-    if (distExpand) {
-
-      distExpand.expanded = true;
-
-      this.hideExpandIconOnly(distExpand);
+      this.hideExpandIcon(areaExpand);
 
     }
 
-    this.hideExpandIconOnly(areaExpand);
+    if (coordExpand) {
 
-    this.hideExpandIconOnly(coordExpand);
+      coordExpand.expanded = false;
 
-  }, 700);
+      this.hideExpandIcon(coordExpand);
+
+    }
+
+    if (distanceExpand) {
+
+      distanceExpand.expanded = true;
+
+      this.hideExpandIcon(distanceExpand);
+
+    }
+
+  }, 800);
 
 }
 
-private hideExpandIconOnly(expandEl: any): void {
+private hideExpandIcon(expandElement: any): void {
 
-  if (!expandEl) return;
+  if (!expandElement) {
 
-  const apply = () => {
+    return;
 
-    const root = expandEl.shadowRoot;
+  }
 
-    if (!root) return;
+  const applyHide = () => {
+
+    const root = expandElement.shadowRoot;
+
+    if (!root) {
+
+      return;
+
+    }
 
     const style = document.createElement('style');
 
@@ -62,6 +88,14 @@ private hideExpandIconOnly(expandEl: any): void {
 
         min-width: 0 !important;
 
+        height: 0 !important;
+
+        min-height: 0 !important;
+
+        padding: 0 !important;
+
+        margin: 0 !important;
+
         pointer-events: none !important;
 
       }
@@ -72,48 +106,8 @@ private hideExpandIconOnly(expandEl: any): void {
 
   };
 
-  apply();
+  applyHide();
 
-  setTimeout(apply, 500);
+  setTimeout(applyHide, 300);
 
-}
-
-async onNewMeasurement(): Promise<void> {
-
-  const upMeasurement = this.upMeasurement.nativeElement as any;
-
-  const root = upMeasurement.shadowRoot;
-
-  if (!root) return;
-
-  const distExpand = root.querySelector('#dist-expand') as any;
-
-  const areaExpand = root.querySelector('#area-expand') as any;
-
-  const distanceEl = root.querySelector('arcgis-distance-measurement-2d') as any;
-
-  const areaEl = root.querySelector('arcgis-area-measurement-2d') as any;
-
-  if (this.mode === 'distance') {
-
-    if (areaExpand) areaExpand.expanded = false;
-
-    if (distExpand) distExpand.expanded = true;
-
-    await distanceEl?.componentOnReady?.();
-
-    distanceEl?.start?.();
-
-    return;
-
-  }
-
-  if (distExpand) distExpand.expanded = false;
-
-  if (areaExpand) areaExpand.expanded = true;
-
-  await areaEl?.componentOnReady?.();
-
-  areaEl?.start?.();
-
-}
+  setTimeout(applyHide, 800
