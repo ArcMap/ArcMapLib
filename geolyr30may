@@ -1,5 +1,46 @@
-@ViewChild('measurementEl', { static: false })
-measurementEl!: ElementRef<HTMLElement>;
+<div class="measure-panel">
+  <div class="measure-mode">
+    <calcite-segmented-control width="full" (calciteSegmentedControlChange)="onModeChange($event)">
+      <calcite-segmented-control-item value="distance" [checked]="mode() === 'distance'">
+        Measure Distance
+      </calcite-segmented-control-item>
+
+      <calcite-segmented-control-item value="area" [checked]="mode() === 'area'">
+        Measure Area
+      </calcite-segmented-control-item>
+    </calcite-segmented-control>
+  </div>
+
+  <div class="measure-instructions">
+    <calcite-icon icon="cursor-click" scale="s"></calcite-icon>
+    <span>Click on the map to add points. Double-click to finish.</span>
+  </div>
+
+  <up-measurement
+    #upMeasurement
+    class="hidden-up-measurement"
+    map-id="u"
+    tools="distance,area"
+    default-tool="distance">
+  </up-measurement>
+
+  <calcite-button appearance="solid" width="full" icon-start="measure">
+    New Measurement
+  </calcite-button>
+
+  <calcite-button appearance="outline" width="full" icon-start="reset" (click)="onReset()">
+    Clear
+  </calcite-button>
+</div>
+
+
+
+
+
+@ViewChild('upMeasurement', { static: false })
+upMeasurement!: ElementRef<HTMLElement>;
+
+readonly mode = signal<'distance' | 'area'>('distance');
 
 ngAfterViewInit(): void {
   this.openMeasurementScreenByDefault();
@@ -7,7 +48,7 @@ ngAfterViewInit(): void {
 
 private openMeasurementScreenByDefault(): void {
   setTimeout(async () => {
-    const upMeasurement = this.measurementEl?.nativeElement as any;
+    const upMeasurement = this.upMeasurement?.nativeElement as any;
 
     if (!upMeasurement) {
       return;
@@ -23,9 +64,78 @@ private openMeasurementScreenByDefault(): void {
     }
 
     const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
+    const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+
     const distanceMeasurement = shadowRoot.querySelector(
       'arcgis-distance-measurement-2d'
     ) as any;
+
+    const areaMeasurement = shadowRoot.querySelector(
+      'arcgis-area-measurement-2d'
+    ) as any;
+
+    if (areaExpand) {
+      areaExpand.expanded = false;
+      areaExpand.style.display = 'none';
+    }
+
+    if (distanceExpand) {
+      distanceExpand.expanded = true;
+      distanceExpand.style.display = 'none';
+    }
+
+    if (areaMeasurement) {
+      await areaMeasurement.componentOnReady?.();
+      areaMeasurement.clear?.();
+    }
+
+    if (distanceMeasurement) {
+      await distanceMeasurement.componentOnReady?.();
+      distanceMeasurement.start?.();
+    }
+  }, 500);
+}
+
+onModeChange(event: Event): void {
+  const selectedValue = (event.target as HTMLCalciteSegmentedControlElement).value as 'distance' | 'area';
+  this.mode.set(selectedValue);
+
+  if (selectedValue === 'distance') {
+    this.startDistanceMeasurement();
+    return;
+  }
+
+  this.startAreaMeasurement();
+}
+
+private startDistanceMeasurement(): void {
+  setTimeout(async () => {
+    const upMeasurement = this.upMeasurement?.nativeElement as any;
+    const shadowRoot = upMeasurement?.shadowRoot;
+
+    if (!shadowRoot) {
+      return;
+    }
+
+    const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
+    const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+
+    const distanceMeasurement = shadowRoot.querySelector(
+      'arcgis-distance-measurement-2d'
+    ) as any;
+
+    const areaMeasurement = shadowRoot.querySelector(
+      'arcgis-area-measurement-2d'
+    ) as any;
+
+    if (areaExpand) {
+      areaExpand.expanded = false;
+    }
+
+    if (areaMeasurement) {
+      await areaMeasurement.componentOnReady?.();
+      areaMeasurement.clear?.();
+    }
 
     if (distanceExpand) {
       distanceExpand.expanded = true;
@@ -35,5 +145,72 @@ private openMeasurementScreenByDefault(): void {
       await distanceMeasurement.componentOnReady?.();
       distanceMeasurement.start?.();
     }
-  }, 500);
+  }, 100);
+}
+
+private startAreaMeasurement(): void {
+  setTimeout(async () => {
+    const upMeasurement = this.upMeasurement?.nativeElement as any;
+    const shadowRoot = upMeasurement?.shadowRoot;
+
+    if (!shadowRoot) {
+      return;
+    }
+
+    const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
+    const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+
+    const distanceMeasurement = shadowRoot.querySelector(
+      'arcgis-distance-measurement-2d'
+    ) as any;
+
+    const areaMeasurement = shadowRoot.querySelector(
+      'arcgis-area-measurement-2d'
+    ) as any;
+
+    if (distanceExpand) {
+      distanceExpand.expanded = false;
+    }
+
+    if (distanceMeasurement) {
+      await distanceMeasurement.componentOnReady?.();
+      distanceMeasurement.clear?.();
+    }
+
+    if (areaExpand) {
+      areaExpand.expanded = true;
+    }
+
+    if (areaMeasurement) {
+      await areaMeasurement.componentOnReady?.();
+      areaMeasurement.start?.();
+    }
+  }, 100);
+}
+
+onReset(): void {
+  const upMeasurement = this.upMeasurement?.nativeElement as any;
+  const shadowRoot = upMeasurement?.shadowRoot;
+
+  if (!shadowRoot) {
+    return;
+  }
+
+  const distanceMeasurement = shadowRoot.querySelector(
+    'arcgis-distance-measurement-2d'
+  ) as any;
+
+  const areaMeasurement = shadowRoot.querySelector(
+    'arcgis-area-measurement-2d'
+  ) as any;
+
+  distanceMeasurement?.clear?.();
+  areaMeasurement?.clear?.();
+
+  if (this.mode() === 'distance') {
+    this.startDistanceMeasurement();
+    return;
+  }
+
+  this.startAreaMeasurement();
 }
