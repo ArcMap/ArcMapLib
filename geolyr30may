@@ -1,87 +1,20 @@
-import { AfterViewInit, Component, ElementRef, ViewChild } from '@angular/core';
+ngAfterViewInit(): void {
+  setTimeout(async () => {
+    const el = this.upMeasurement.nativeElement as any;
 
-@Component({
-  selector: 'app-measure-panel',
-  templateUrl: './measure-panel.component.html',
-  styleUrls: ['./measure-panel.component.scss']
-})
-export class MeasurePanelComponent implements AfterViewInit {
-  @ViewChild('upMeasurement', { static: false })
-  upMeasurement!: ElementRef<HTMLElement>;
+    await customElements.whenDefined('up-measurement');
+    await el.updateComplete;
 
-  ngAfterViewInit(): void {
-    this.openUpDistancePopupOnLoad();
-  }
+    const root = el.shadowRoot;
+    const distExpand = root?.querySelector('#dist-expand') as any;
+    const areaExpand = root?.querySelector('#area-expand') as any;
 
-  private openUpDistancePopupOnLoad(): void {
-    setTimeout(async () => {
-      const upMeasurement = this.upMeasurement?.nativeElement as any;
-
-      if (!upMeasurement) {
-        return;
-      }
-
-      await customElements.whenDefined('up-measurement');
-      await upMeasurement.updateComplete;
-
-      const root = upMeasurement.shadowRoot;
-
-      if (!root) {
-        return;
-      }
-
-      const distanceExpand = root.querySelector('#dist-expand') as any;
-      const areaExpand = root.querySelector('#area-expand') as any;
-      const coordExpand = root.querySelector('#coord-expand') as any;
-
-      if (areaExpand) {
-        areaExpand.expanded = false;
-      }
-
-      if (coordExpand) {
-        coordExpand.expanded = false;
-      }
-
-      if (distanceExpand) {
-        distanceExpand.expanded = true;
-        this.hideExpandIcon(distanceExpand);
-      }
-    }, 800);
-  }
-
-  private hideExpandIcon(expandElement: any): void {
-    if (!expandElement) {
-      return;
+    if (areaExpand) {
+      areaExpand.expanded = false;
     }
 
-    const applyStyle = () => {
-      const root = expandElement.shadowRoot;
-
-      if (!root || root.querySelector('#hide-up-measurement-icon-style')) {
-        return;
-      }
-
-      const style = document.createElement('style');
-      style.id = 'hide-up-measurement-icon-style';
-      style.textContent = `
-        calcite-action,
-        button {
-          opacity: 0 !important;
-          width: 0 !important;
-          min-width: 0 !important;
-          height: 0 !important;
-          min-height: 0 !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          pointer-events: none !important;
-        }
-      `;
-
-      root.appendChild(style);
-    };
-
-    applyStyle();
-    setTimeout(applyStyle, 300);
-    setTimeout(applyStyle, 800);
-  }
+    if (distExpand) {
+      distExpand.expanded = true;
+    }
+  }, 800);
 }
