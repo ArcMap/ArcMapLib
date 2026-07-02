@@ -1,22 +1,30 @@
-<up-measurement
-  map-id="upMap"
-  tools="distance,area,location"
-  default-tool="distance">
-</up-measurement>
+export const upMeasurementStyles = css`
 
+:host {
+    position: relative;
+}
 
+.widget-stack {
+    position: absolute;
+    left: 21px;
+    bottom: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 1;
+}
 
-<up-measurement
-  map-id="upMap"
-  tools="distance,area"
-  default-tool="distance"
-  open-by-default>
-</up-measurement>
+.measurement-panel-mode {
+    position: absolute;
+    left: 20px;
+    top: 120px;
+    width: 220px;
+    z-index: 1000;
+}
 
-
-<up-measurement
-  map-id="upMap"
-  tools="distance"
-  default-tool="distance"
-  display-mode="panel">
-</up-measurement>
+arcgis-distance-measurement-2d,
+arcgis-area-measurement-2d {
+    display: block;
+    width: 220px;
+}
+`;
