@@ -1,119 +1,79 @@
-private openMeasurementWithoutIcon(): void {
+private async openMeasurementPanelWithoutIcon(): Promise<void> {
+  const upMeasurement = this.upMeasurement.nativeElement as any;
 
-  setTimeout(async () => {
+  await customElements.whenDefined('up-measurement');
+  await upMeasurement.updateComplete;
 
-    const upMeasurement = this.upMeasurement.nativeElement as any;
+  const shadowRoot = upMeasurement.shadowRoot;
+  if (!shadowRoot) return;
 
-    await customElements.whenDefined('up-measurement');
+  const distExpand = shadowRoot.querySelector('#dist-expand') as any;
+  const areaExpand = shadowRoot.querySelector('#area-expand') as any;
 
-    await upMeasurement.updateComplete;
-
-    const shadowRoot = upMeasurement.shadowRoot;
-
-    if (!shadowRoot) {
-
-      return;
-
-    }
-
-    const areaExpand = shadowRoot.querySelector('#area-expand') as any;
-
-    const distExpand = shadowRoot.querySelector('#dist-expand') as any;
-
-    const coordExpand = shadowRoot.querySelector('#coord-expand') as any;
-
-    this.hideExpandIcon(areaExpand);
-
+  if (distExpand) {
+    distExpand.expanded = true;
     this.hideExpandIcon(distExpand);
+  }
 
-    this.hideExpandIcon(coordExpand);
-
-    if (distExpand) {
-
-      distExpand.expanded = false;
-
-    }
-
-    if (coordExpand) {
-
-      coordExpand.expanded = false;
-
-    }
-
-    if (areaExpand) {
-
-      areaExpand.expanded = true;
-
-    }
-
-  }, 1000);
-
+  if (areaExpand) {
+    areaExpand.expanded = false;
+    this.hideExpandIcon(areaExpand);
+  }
 }
 
 private hideExpandIcon(expandElement: any): void {
+  if (!expandElement?.shadowRoot) return;
 
-  if (!expandElement) {
+  const style = document.createElement('style');
+  style.textContent = `
+    calcite-action,
+    button {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  `;
 
+  expandElement.shadowRoot.appendChild(style);
+}
+
+async onNewMeasurement(): Promise<void> {
+  const upMeasurement = this.upMeasurement.nativeElement as any;
+  const shadowRoot = upMeasurement.shadowRoot;
+  if (!shadowRoot) return;
+
+  const distExpand = shadowRoot.querySelector('#dist-expand') as any;
+  const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+
+  const distanceEl = shadowRoot.querySelector(
+    'arcgis-distance-measurement-2d'
+  ) as any;
+
+  const areaEl = shadowRoot.querySelector(
+    'arcgis-area-measurement-2d'
+  ) as any;
+
+  if (this.mode() === 'distance') {
+    areaExpand.expanded = false;
+    distExpand.expanded = true;
+
+    await distanceEl.componentOnReady?.();
+    distanceEl.start?.();
     return;
-
   }
 
-  expandElement.style.position = 'static';
+  distExpand.expanded = false;
+  areaExpand.expanded = true;
 
-  const applyHide = () => {
-
-    const shadowRoot = expandElement.shadowRoot;
-
-    if (!shadowRoot) {
-
-      return;
-
-    }
-
-    const style = document.createElement('style');
-
-    style.textContent = `
-
-      calcite-action,
-
-      button,
-
-      [slot="action"],
-
-      .toggle,
-
-      .action,
-
-      .expand-toggle {
-
-        display: none !important;
-
-        width: 0 !important;
-
-        height: 0 !important;
-
-        min-width: 0 !important;
-
-        padding: 0 !important;
-
-        margin: 0 !important;
-
-        opacity: 0 !important;
-
-        pointer-events: none !important;
-
-      }
-
-    `;
-
-    shadowRoot.appendChild(style);
-
-  };
-
-  applyHide();
-
-  setTimeout(applyHide, 300);
-
-  setTimeout(applyHide, 800);
-
+  await areaEl.componentOnReady?.();
+  areaEl.start?.();
 }
+
+
+
+
+<calcite-button width="full" (click)="onNewMeasurement()">
+  New Measurement
+</calcite-button>
