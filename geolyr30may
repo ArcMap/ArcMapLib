@@ -1,20 +1,201 @@
-ngAfterViewInit(): void {
-  setTimeout(async () => {
-    const el = this.upMeasurement.nativeElement as any;
+@property({ type: String, attribute: "display-mode" })
+displayMode: "icon" | "panel" = "icon";
 
-    await customElements.whenDefined('up-measurement');
-    await el.updateComplete;
+@property({ type: Boolean, attribute: "open-by-default" })
+openByDefault = false;
 
-    const root = el.shadowRoot;
-    const distExpand = root?.querySelector('#dist-expand') as any;
-    const areaExpand = root?.querySelector('#area-expand') as any;
+@property({ type: String, attribute: "default-tool" })
+defaultTool: "distance" | "area" | "location" = "distance";
 
-    if (areaExpand) {
-      areaExpand.expanded = false;
-    }
 
-    if (distExpand) {
-      distExpand.expanded = true;
-    }
-  }, 800);
+
+async componentDidLoad() {
+  await this.updateComplete;
+
+  await this.bindMeasurementComponents();
+
+  if (this.displayMode === "panel") {
+    await this.activatePanelDefaultTool();
+    return;
+  }
+
+  if (this.openByDefault) {
+    await this.openDefaultExpandPopup();
+  }
 }
+
+
+
+private async bindMeasurementComponents(): Promise<void> {
+  const areaEl = this.shadowRoot?.querySelector(
+    "arcgis-area-measurement-2d"
+  ) as any;
+
+  const distEl = this.shadowRoot?.querySelector(
+    "arcgis-distance-measurement-2d"
+  ) as any;
+
+  const coordEl = this.shadowRoot?.querySelector(
+    "arcgis-coordinate-conversion"
+  ) as any;
+
+  if (areaEl) {
+    areaEl.view = this.view;
+  }
+
+  if (distEl) {
+    distEl.view = this.view;
+  }
+
+  if (coordEl) {
+    coordEl.view = this.view;
+  }
+}
+
+private async openDefaultExpandPopup(): Promise<void> {
+  const areaExpand = this.shadowRoot?.querySelector("#area-expand") as any;
+  const distExpand = this.shadowRoot?.querySelector("#dist-expand") as any;
+  const coordExpand = this.shadowRoot?.querySelector("#coord-expand") as any;
+
+  if (areaExpand) {
+    areaExpand.expanded = false;
+  }
+
+  if (distExpand) {
+    distExpand.expanded = false;
+  }
+
+  if (coordExpand) {
+    coordExpand.expanded = false;
+  }
+
+  if (this.defaultTool === "area" && areaExpand) {
+    await areaExpand.componentOnReady?.();
+    areaExpand.expanded = true;
+    return;
+  }
+
+  if (this.defaultTool === "location" && coordExpand) {
+    await coordExpand.componentOnReady?.();
+    coordExpand.expanded = true;
+    return;
+  }
+
+  if (distExpand) {
+    await distExpand.componentOnReady?.();
+    distExpand.expanded = true;
+  }
+}
+
+private async activatePanelDefaultTool(): Promise<void> {
+  const areaEl = this.shadowRoot?.querySelector(
+    "arcgis-area-measurement-2d"
+  ) as any;
+
+  const distEl = this.shadowRoot?.querySelector(
+    "arcgis-distance-measurement-2d"
+  ) as any;
+
+  if (this.defaultTool === "area" && areaEl) {
+    await areaEl.componentOnReady?.();
+    return;
+  }
+
+  if (distEl) {
+    await distEl.componentOnReady?.();
+  }
+}
+
+private shouldShow(tool: "area" | "distance" | "location"): boolean {
+  if (!this.tools) {
+    return true;
+  }
+
+  return this.tools
+    .split(",")
+    .map((toolName) => toolName.trim())
+    .includes(tool);
+}
+
+
+
+render() {
+  if (this.displayMode === "panel") {
+    return html`
+      <div class="measurement-panel-mode">
+        ${this.defaultTool === "area"
+          ? html`
+              ${this.shouldShow("area")
+                ? html`
+                    <arcgis-area-measurement-2d id="area-measurement-panel">
+                    </arcgis-area-measurement-2d>
+                  `
+                : null}
+            `
+          : html`
+              ${this.shouldShow("distance")
+                ? html`
+                    <arcgis-distance-measurement-2d id="distance-measurement-panel">
+                    </arcgis-distance-measurement-2d>
+                  `
+                : null}
+            `}
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="widget-stack" slot="bottom-left">
+      <arcgis-expand
+        class="${this.shouldShow("area") ? "" : "hidden"}"
+        id="area-expand"
+        expand-icon="measure-area"
+        expanded-icon="measure-area"
+        expand-tooltip="Area Measurement">
+        <arcgis-area-measurement-2d></arcgis-area-measurement-2d>
+      </arcgis-expand>
+
+      <arcgis-expand
+        class="${this.shouldShow("distance") ? "" : "hidden"}"
+        id="dist-expand"
+        expand-icon="measure-line"
+        expanded-icon="measure-line"
+        expand-tooltip="Distance Measurement">
+        <arcgis-distance-measurement-2d></arcgis-distance-measurement-2d>
+      </arcgis-expand>
+
+      <arcgis-expand
+        class="${this.shouldShow("location") ? "" : "hidden"}"
+        id="coord-expand"
+        expand-icon="pin-plus"
+        expanded-icon="pin-plus"
+        expand-tooltip="Capture Location">
+        <arcgis-coordinate-conversion></arcgis-coordinate-conversion>
+      </arcgis-expand>
+    </div>
+  `;
+}
+
+
+<!-- 1. Existing behavior: show icon, user clicks -->
+<up-measurement
+  map-id="upMap"
+  tools="distance,area"
+  default-tool="distance">
+</up-measurement>
+
+<!-- 2. Open popup by default, still using ArcGIS expand popup -->
+<up-measurement
+  map-id="upMap"
+  tools="distance,area"
+  default-tool="distance"
+  open-by-default>
+</up-measurement>
+
+<!-- 3. Stable panel mode, no icon/popup -->
+<up-measurement
+  map-id="upMap"
+  tools="distance,area"
+  default-tool="distance"
+  display-mode="panel">
+</up-measurement>
