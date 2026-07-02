@@ -1,79 +1,119 @@
-private async openMeasurementPanelWithoutIcon(): Promise<void> {
-  const upMeasurement = this.upMeasurement.nativeElement as any;
+private async openArcGisMeasurementPanel(): Promise<void> {
 
-  await customElements.whenDefined('up-measurement');
-  await upMeasurement.updateComplete;
+  setTimeout(async () => {
 
-  const shadowRoot = upMeasurement.shadowRoot;
-  if (!shadowRoot) return;
+    const upMeasurement = this.upMeasurement.nativeElement as any;
 
-  const distExpand = shadowRoot.querySelector('#dist-expand') as any;
-  const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+    await customElements.whenDefined('up-measurement');
 
-  if (distExpand) {
-    distExpand.expanded = true;
-    this.hideExpandIcon(distExpand);
-  }
+    await upMeasurement.updateComplete;
 
-  if (areaExpand) {
-    areaExpand.expanded = false;
-    this.hideExpandIcon(areaExpand);
-  }
+    const root = upMeasurement.shadowRoot;
+
+    if (!root) return;
+
+    const distExpand = root.querySelector('#dist-expand') as any;
+
+    const areaExpand = root.querySelector('#area-expand') as any;
+
+    const coordExpand = root.querySelector('#coord-expand') as any;
+
+    if (coordExpand) coordExpand.expanded = false;
+
+    if (areaExpand) areaExpand.expanded = false;
+
+    if (distExpand) {
+
+      distExpand.expanded = true;
+
+      this.hideExpandIconOnly(distExpand);
+
+    }
+
+    this.hideExpandIconOnly(areaExpand);
+
+    this.hideExpandIconOnly(coordExpand);
+
+  }, 700);
+
 }
 
-private hideExpandIcon(expandElement: any): void {
-  if (!expandElement?.shadowRoot) return;
+private hideExpandIconOnly(expandEl: any): void {
 
-  const style = document.createElement('style');
-  style.textContent = `
-    calcite-action,
-    button {
-      display: none !important;
-      width: 0 !important;
-      height: 0 !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-  `;
+  if (!expandEl) return;
 
-  expandElement.shadowRoot.appendChild(style);
+  const apply = () => {
+
+    const root = expandEl.shadowRoot;
+
+    if (!root) return;
+
+    const style = document.createElement('style');
+
+    style.textContent = `
+
+      calcite-action,
+
+      button {
+
+        opacity: 0 !important;
+
+        width: 0 !important;
+
+        min-width: 0 !important;
+
+        pointer-events: none !important;
+
+      }
+
+    `;
+
+    root.appendChild(style);
+
+  };
+
+  apply();
+
+  setTimeout(apply, 500);
+
 }
 
 async onNewMeasurement(): Promise<void> {
+
   const upMeasurement = this.upMeasurement.nativeElement as any;
-  const shadowRoot = upMeasurement.shadowRoot;
-  if (!shadowRoot) return;
 
-  const distExpand = shadowRoot.querySelector('#dist-expand') as any;
-  const areaExpand = shadowRoot.querySelector('#area-expand') as any;
+  const root = upMeasurement.shadowRoot;
 
-  const distanceEl = shadowRoot.querySelector(
-    'arcgis-distance-measurement-2d'
-  ) as any;
+  if (!root) return;
 
-  const areaEl = shadowRoot.querySelector(
-    'arcgis-area-measurement-2d'
-  ) as any;
+  const distExpand = root.querySelector('#dist-expand') as any;
 
-  if (this.mode() === 'distance') {
-    areaExpand.expanded = false;
-    distExpand.expanded = true;
+  const areaExpand = root.querySelector('#area-expand') as any;
 
-    await distanceEl.componentOnReady?.();
-    distanceEl.start?.();
+  const distanceEl = root.querySelector('arcgis-distance-measurement-2d') as any;
+
+  const areaEl = root.querySelector('arcgis-area-measurement-2d') as any;
+
+  if (this.mode === 'distance') {
+
+    if (areaExpand) areaExpand.expanded = false;
+
+    if (distExpand) distExpand.expanded = true;
+
+    await distanceEl?.componentOnReady?.();
+
+    distanceEl?.start?.();
+
     return;
+
   }
 
-  distExpand.expanded = false;
-  areaExpand.expanded = true;
+  if (distExpand) distExpand.expanded = false;
 
-  await areaEl.componentOnReady?.();
-  areaEl.start?.();
+  if (areaExpand) areaExpand.expanded = true;
+
+  await areaEl?.componentOnReady?.();
+
+  areaEl?.start?.();
+
 }
-
-
-
-
-<calcite-button width="full" (click)="onNewMeasurement()">
-  New Measurement
-</calcite-button>
