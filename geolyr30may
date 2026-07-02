@@ -1,61 +1,3 @@
-private openDistanceMeasurementPopupOnLoad(): void {
-
-  setTimeout(async () => {
-
-    const upMeasurement = this.upMeasurement?.nativeElement as any;
-
-    if (!upMeasurement) {
-
-      return;
-
-    }
-
-    await customElements.whenDefined('up-measurement');
-
-    await upMeasurement.updateComplete;
-
-    const root = upMeasurement.shadowRoot;
-
-    if (!root) {
-
-      return;
-
-    }
-
-    const distanceExpand = root.querySelector('#dist-expand') as any;
-
-    const areaExpand = root.querySelector('#area-expand') as any;
-
-    const coordExpand = root.querySelector('#coord-expand') as any;
-
-    if (areaExpand) {
-
-      areaExpand.expanded = false;
-
-      this.hideExpandIcon(areaExpand);
-
-    }
-
-    if (coordExpand) {
-
-      coordExpand.expanded = false;
-
-      this.hideExpandIcon(coordExpand);
-
-    }
-
-    if (distanceExpand) {
-
-      distanceExpand.expanded = true;
-
-      this.hideExpandIcon(distanceExpand);
-
-    }
-
-  }, 800);
-
-}
-
 private hideExpandIcon(expandElement: any): void {
 
   if (!expandElement) {
@@ -64,7 +6,7 @@ private hideExpandIcon(expandElement: any): void {
 
   }
 
-  const applyHide = () => {
+  const applyStyle = () => {
 
     const root = expandElement.shadowRoot;
 
@@ -74,7 +16,17 @@ private hideExpandIcon(expandElement: any): void {
 
     }
 
+    const existingStyle = root.querySelector('#hide-expand-icon-style');
+
+    if (existingStyle) {
+
+      return;
+
+    }
+
     const style = document.createElement('style');
+
+    style.id = 'hide-expand-icon-style';
 
     style.textContent = `
 
@@ -106,8 +58,8 @@ private hideExpandIcon(expandElement: any): void {
 
   };
 
-  applyHide();
+  applyStyle();
 
-  setTimeout(applyHide, 300);
+  setTimeout(applyStyle, 300);
 
-  setTimeout(applyHide, 800
+  setTimeout(applyStyle, 800);
