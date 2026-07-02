@@ -1,30 +1,22 @@
-export const upMeasurementStyles = css`
+private async activatePanelDefaultTool(): Promise<void> {
+  const areaEl = this.shadowRoot?.querySelector(
+    "arcgis-area-measurement-2d"
+  ) as any;
 
-:host {
-    position: relative;
-}
+  const distEl = this.shadowRoot?.querySelector(
+    "arcgis-distance-measurement-2d"
+  ) as any;
 
-.widget-stack {
-    position: absolute;
-    left: 21px;
-    bottom: 340px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    z-index: 1;
-}
+  if (this.defaultTool === "area" && areaEl) {
+    await areaEl.componentOnReady?.();
+    areaEl.clear?.();
+    areaEl.start?.();
+    return;
+  }
 
-.measurement-panel-mode {
-    position: absolute;
-    left: 20px;
-    top: 120px;
-    width: 220px;
-    z-index: 1000;
+  if (distEl) {
+    await distEl.componentOnReady?.();
+    distEl.clear?.();
+    distEl.start?.();
+  }
 }
-
-arcgis-distance-measurement-2d,
-arcgis-area-measurement-2d {
-    display: block;
-    width: 220px;
-}
-`;
