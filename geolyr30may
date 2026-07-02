@@ -1,75 +1,15 @@
-setTimeout(async () => {
+private openDefaultArcGISMeasurementScreen(): void {
+  setTimeout(async () => {
+    const upMeasurementElement = this.upMeasurement?.nativeElement as any;
 
-      const upMeasurementElement = this.upMeasurement?.nativeElement as any;
+    await customElements.whenDefined('up-measurement');
+    await upMeasurementElement.updateComplete;
 
-      if (!upMeasurementElement) {
+    const shadowRoot = upMeasurementElement.shadowRoot;
+    const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
 
-        return;
-
-      }
-
-      await customElements.whenDefined('up-measurement');
-
-      await upMeasurementElement.updateComplete;
-
-      const shadowRoot = upMeasurementElement.shadowRoot;
-
-      if (!shadowRoot) {
-
-        return;
-
-      }
-
-      const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
-
-      const areaExpand = shadowRoot.querySelector('#area-expand') as any;
-
-      const coordExpand = shadowRoot.querySelector('#coord-expand') as any;
-
-      const distanceMeasurement = shadowRoot.querySelector(
-
-        'arcgis-distance-measurement-2d'
-
-      ) as any;
-
-      const areaMeasurement = shadowRoot.querySelector(
-
-        'arcgis-area-measurement-2d'
-
-      ) as any;
-
-      if (areaExpand) {
-
-        areaExpand.expanded = false;
-
-      }
-
-      if (coordExpand) {
-
-        coordExpand.expanded = false;
-
-      }
-
-      if (distanceExpand) {
-
-        distanceExpand.expanded = true;
-
-      }
-
-      if (areaMeasurement) {
-
-        await areaMeasurement.componentOnReady?.();
-
-        areaMeasurement.clear?.();
-
-      }
-
-      if (distanceMeasurement) {
-
-        await distanceMeasurement.componentOnReady?.();
-
-        distanceMeasurement.start?.();
-
-      }
-
-    }, 500);
+    if (distanceExpand) {
+      distanceExpand.expanded = true;
+    }
+  }, 500);
+}
