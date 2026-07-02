@@ -1,78 +1,28 @@
-<up-measurement
-  #upMeasurement
-  tools="distance"
-  id="defaultMeasurement">
-</up-measurement>
-
-
-private openDistanceMeasurementByDefault(): void {
-  setTimeout(async () => {
-    const measurementEl = this.upMeasurement?.nativeElement as any;
-
-    if (!measurementEl) {
-      return;
-    }
-
-    await customElements.whenDefined('up-measurement');
-    await measurementEl.updateComplete;
-
-    const shadowRoot = measurementEl.shadowRoot;
-
-    if (!shadowRoot) {
-      return;
-    }
-
-    const distanceExpand = shadowRoot.querySelector(
-      '#dist-expand'
-    ) as HTMLElement & { expanded?: boolean };
-
-    const distanceMeasurement = shadowRoot.querySelector(
-      'arcgis-distance-measurement-2d'
-    ) as any;
-
-    if (distanceExpand) {
-      distanceExpand.style.display = 'none';
-      distanceExpand.expanded = true;
-    }
-
-    if (distanceMeasurement) {
-      await distanceMeasurement.componentOnReady?.();
-      distanceMeasurement.start?.();
-    }
-  }, 500);
-}
-
-
-
-
-@ViewChild('upMeasurement', { static: false })
-upMeasurement!: ElementRef<HTMLElement>;
+@ViewChild('measurementEl', { static: false })
+measurementEl!: ElementRef<HTMLElement>;
 
 ngAfterViewInit(): void {
-  this.openDistanceMeasurementByDefault();
+  this.openMeasurementScreenByDefault();
 }
 
-private openDistanceMeasurementByDefault(): void {
+private openMeasurementScreenByDefault(): void {
   setTimeout(async () => {
-    const measurementEl = this.upMeasurement?.nativeElement as any;
+    const upMeasurement = this.measurementEl?.nativeElement as any;
 
-    if (!measurementEl) {
+    if (!upMeasurement) {
       return;
     }
 
     await customElements.whenDefined('up-measurement');
-    await measurementEl.updateComplete;
+    await upMeasurement.updateComplete;
 
-    const shadowRoot = measurementEl.shadowRoot;
+    const shadowRoot = upMeasurement.shadowRoot;
 
     if (!shadowRoot) {
       return;
     }
 
-    const distanceExpand = shadowRoot.querySelector(
-      '#dist-expand'
-    ) as any;
-
+    const distanceExpand = shadowRoot.querySelector('#dist-expand') as any;
     const distanceMeasurement = shadowRoot.querySelector(
       'arcgis-distance-measurement-2d'
     ) as any;
