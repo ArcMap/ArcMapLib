@@ -1,3 +1,185 @@
+ngAfterViewInit(): void {
+
+  this.openDistanceOnLoad();
+
+}
+
+private async getMeasurementRoot(): Promise<ShadowRoot | null> {
+
+  const upMeasurement = this.upMeasurement?.nativeElement as any;
+
+  if (!upMeasurement) {
+
+    return null;
+
+  }
+
+  await customElements.whenDefined('up-measurement');
+
+  await upMeasurement.updateComplete;
+
+  return upMeasurement.shadowRoot ?? null;
+
+}
+
+private async openDistanceOnLoad(): Promise<void> {
+
+  setTimeout(async () => {
+
+    await this.activateDistanceTool(false);
+
+  }, 800);
+
+}
+
+async onDistanceClick(): Promise<void> {
+
+  this.activeTool = 'distance';
+
+  await this.activateDistanceTool(true);
+
+}
+
+async onAreaClick(): Promise<void> {
+
+  this.activeTool = 'area';
+
+  await this.activateAreaTool(true);
+
+}
+
+private async activateDistanceTool(startDrawing: boolean): Promise<void> {
+
+  const root = await this.getMeasurementRoot();
+
+  if (!root) {
+
+    return;
+
+  }
+
+  const distExpand = root.querySelector('#dist-expand') as any;
+
+  const areaExpand = root.querySelector('#area-expand') as any;
+
+  const distanceEl = root.querySelector(
+
+    'arcgis-distance-measurement-2d'
+
+  ) as any;
+
+  const areaEl = root.querySelector(
+
+    'arcgis-area-measurement-2d'
+
+  ) as any;
+
+  if (areaEl) {
+
+    await areaEl.componentOnReady?.();
+
+    areaEl.clear?.();
+
+  }
+
+  if (areaExpand) {
+
+    areaExpand.expanded = false;
+
+    this.hideExpandIcon(areaExpand);
+
+  }
+
+  if (distExpand) {
+
+    distExpand.expanded = true;
+
+    this.hideExpandIcon(distExpand);
+
+  }
+
+  if (distanceEl) {
+
+    await distanceEl.componentOnReady?.();
+
+    if (startDrawing) {
+
+      distanceEl.clear?.();
+
+      distanceEl.start?.();
+
+    }
+
+  }
+
+}
+
+private async activateAreaTool(startDrawing: boolean): Promise<void> {
+
+  const root = await this.getMeasurementRoot();
+
+  if (!root) {
+
+    return;
+
+  }
+
+  const distExpand = root.querySelector('#dist-expand') as any;
+
+  const areaExpand = root.querySelector('#area-expand') as any;
+
+  const distanceEl = root.querySelector(
+
+    'arcgis-distance-measurement-2d'
+
+  ) as any;
+
+  const areaEl = root.querySelector(
+
+    'arcgis-area-measurement-2d'
+
+  ) as any;
+
+  if (distanceEl) {
+
+    await distanceEl.componentOnReady?.();
+
+    distanceEl.clear?.();
+
+  }
+
+  if (distExpand) {
+
+    distExpand.expanded = false;
+
+    this.hideExpandIcon(distExpand);
+
+  }
+
+  if (areaExpand) {
+
+    areaExpand.expanded = true;
+
+    this.hideExpandIcon(areaExpand);
+
+  }
+
+  if (areaEl) {
+
+    await areaEl.componentOnReady?.();
+
+    if (startDrawing) {
+
+      areaEl.clear?.();
+
+      areaEl.start?.();
+
+    }
+
+  }
+
+}
+
 private hideExpandIcon(expandElement: any): void {
 
   if (!expandElement) {
@@ -16,9 +198,7 @@ private hideExpandIcon(expandElement: any): void {
 
     }
 
-    const existingStyle = root.querySelector('#hide-expand-icon-style');
-
-    if (existingStyle) {
+    if (root.querySelector('#hide-expand-icon-style')) {
 
       return;
 
@@ -60,6 +240,4 @@ private hideExpandIcon(expandElement: any): void {
 
   applyStyle();
 
-  setTimeout(applyStyle, 300);
-
-  setTimeout(applyStyle, 800);
+  setTimeout(applyStyle, 300}
