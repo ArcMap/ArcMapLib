@@ -1,22 +1,33 @@
 private async activatePanelDefaultTool(): Promise<void> {
-  const areaEl = this.shadowRoot?.querySelector(
-    "arcgis-area-measurement-2d"
-  ) as any;
+    const distEl = this.shadowRoot?.querySelector(
+        "arcgis-distance-measurement-2d"
+    ) as any;
 
-  const distEl = this.shadowRoot?.querySelector(
-    "arcgis-distance-measurement-2d"
-  ) as any;
+    if (!distEl) {
+        return;
+    }
 
-  if (this.defaultTool === "area" && areaEl) {
-    await areaEl.componentOnReady?.();
-    areaEl.clear?.();
-    areaEl.start?.();
-    return;
-  }
-
-  if (distEl) {
     await distEl.componentOnReady?.();
-    distEl.clear?.();
-    distEl.start?.();
-  }
+
+    setTimeout(() => {
+        distEl.clear?.();
+        distEl.start?.();
+    }, 300);
+}
+
+
+
+.measurement-panel-mode {
+    position: absolute;
+    left: 20px;
+    top: 100px;
+    width: 230px;
+    z-index: 1000;
+    background: white;
+}
+
+arcgis-distance-measurement-2d {
+    display: block;
+    width: 230px;
+    min-height: 140px;
 }
