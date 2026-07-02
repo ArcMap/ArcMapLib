@@ -1,3 +1,26 @@
+.hidden-up-measurement {
+  display: none;
+}
+
+.measure-panel {
+  padding: 12px;
+}
+
+.measure-mode {
+  margin-bottom: 12px;
+}
+
+.measure-instructions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+
+
+
+
 <div class="measure-panel">
   <div class="measure-mode">
     <calcite-segmented-control width="full" (calciteSegmentedControlChange)="onModeChange($event)">
