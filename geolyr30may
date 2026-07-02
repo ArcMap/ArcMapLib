@@ -1,19 +1,89 @@
-<div class="rename-row">
-  <calcite-input-text
-    class="rename-input"
-    [value]="renameMapName()"
-    (calciteInputTextInput)="onRenameMapNameInput($event)">
-  </calcite-input-text>
+<up-measurement
+  #upMeasurement
+  tools="distance"
+  id="defaultMeasurement">
+</up-measurement>
 
-  <calcite-action
-    class="rename-cancel"
-    icon="x"
-    (click)="cancelRenameInstance()">
-  </calcite-action>
 
-  <calcite-action
-    class="rename-save"
-    icon="check"
-    (click)="confirmRenameInstance(map.id)">
-  </calcite-action>
-</div>
+private openDistanceMeasurementByDefault(): void {
+  setTimeout(async () => {
+    const measurementEl = this.upMeasurement?.nativeElement as any;
+
+    if (!measurementEl) {
+      return;
+    }
+
+    await customElements.whenDefined('up-measurement');
+    await measurementEl.updateComplete;
+
+    const shadowRoot = measurementEl.shadowRoot;
+
+    if (!shadowRoot) {
+      return;
+    }
+
+    const distanceExpand = shadowRoot.querySelector(
+      '#dist-expand'
+    ) as HTMLElement & { expanded?: boolean };
+
+    const distanceMeasurement = shadowRoot.querySelector(
+      'arcgis-distance-measurement-2d'
+    ) as any;
+
+    if (distanceExpand) {
+      distanceExpand.style.display = 'none';
+      distanceExpand.expanded = true;
+    }
+
+    if (distanceMeasurement) {
+      await distanceMeasurement.componentOnReady?.();
+      distanceMeasurement.start?.();
+    }
+  }, 500);
+}
+
+
+
+
+@ViewChild('upMeasurement', { static: false })
+upMeasurement!: ElementRef<HTMLElement>;
+
+ngAfterViewInit(): void {
+  this.openDistanceMeasurementByDefault();
+}
+
+private openDistanceMeasurementByDefault(): void {
+  setTimeout(async () => {
+    const measurementEl = this.upMeasurement?.nativeElement as any;
+
+    if (!measurementEl) {
+      return;
+    }
+
+    await customElements.whenDefined('up-measurement');
+    await measurementEl.updateComplete;
+
+    const shadowRoot = measurementEl.shadowRoot;
+
+    if (!shadowRoot) {
+      return;
+    }
+
+    const distanceExpand = shadowRoot.querySelector(
+      '#dist-expand'
+    ) as any;
+
+    const distanceMeasurement = shadowRoot.querySelector(
+      'arcgis-distance-measurement-2d'
+    ) as any;
+
+    if (distanceExpand) {
+      distanceExpand.expanded = true;
+    }
+
+    if (distanceMeasurement) {
+      await distanceMeasurement.componentOnReady?.();
+      distanceMeasurement.start?.();
+    }
+  }, 500);
+}
