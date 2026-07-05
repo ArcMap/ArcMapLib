@@ -1,3 +1,5 @@
+import { css } from "lit";
+
 export const upMeasurementStyles = css`
   :host {
     position: relative;
@@ -18,28 +20,24 @@ export const upMeasurementStyles = css`
     position: absolute;
     left: 20px;
     top: 100px;
-    width: 220px;
+    width: 320px;
+    min-width: 320px;
     z-index: 1000;
-    background: transparent;
-    overflow: hidden;
+    background: white;
+    overflow: visible;
   }
 
   arcgis-distance-measurement-2d,
   arcgis-area-measurement-2d {
     display: block;
-    width: 220px;
-    max-height: 48px;
-    overflow: hidden;
+    width: 320px;
+    min-width: 320px;
+    max-height: 420px;
+    overflow: visible;
   }
 
-  .measurement-panel-mode.active arcgis-distance-measurement-2d,
-  .measurement-panel-mode.active arcgis-area-measurement-2d {
-    max-height: 260px;
+  .measurement-panel-mode calcite-button,
+  .measurement-panel-mode calcite-select {
+    width: 100%;
   }
 `;
-
-
-<div class="measurement-panel-mode ${this.autoStart ? 'active' : ''}">
-  <arcgis-distance-measurement-2d id="distance-measurement-panel">
-  </arcgis-distance-measurement-2d>
-</div>
