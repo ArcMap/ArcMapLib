@@ -2,41 +2,38 @@ import {
   ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
-  ElementRef,
+  inject,
   OnInit,
-  ViewChild,
   signal,
 } from '@angular/core';
 
 type MeasureMode = 'distance' | 'area';
 
-interface ArcMeasurementElement extends HTMLElement {
-  reset?: () => void | Promise<void>;
-  clear?: () => void | Promise<void>;
-  startMeasurement?: (tool: MeasureMode) => void | Promise<void>;
-}
-
 @Component({
   selector: 'measure-panel',
-  standalone: true,
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './measure-panel.component.html',
   styleUrls: ['./measure-panel.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class MeasurePanelComponent implements OnInit {
-  readonly mode = signal<MeasureMode>('distance');
+  private readonly toolHost = inject(MapToolHost);
 
-  /**
-   * Determines whether the external Clear button is visible.
-   */
+  readonly mode = signal<MeasureMode>('distance');
   readonly hasDrawing = signal(false);
 
-  @ViewChild('arcMeasurement', { read: ElementRef })
-  private arcMeasurementRef?: ElementRef<ArcMeasurementElement>;
+  private readonly toolId = 'measure';
+
+  private get tool(): MeasureTool | null {
+    return this.toolHost.getActiveTool<MeasureTool>(this.toolId);
+  }
 
   ngOnInit(): void {
-    // Keep your existing initialization here.
+    const activeTool = this.tool;
+
+    if (activeTool) {
+      this.mode.set(activeTool.getMode());
+    }
   }
 
   onModeChange(event: Event): void {
@@ -50,75 +47,48 @@ export class MeasurePanelComponent implements OnInit {
       return;
     }
 
-    void this.changeMeasurementMode(value);
+    this.onModeSelect(value);
   }
 
-  private async changeMeasurementMode(
-    newMode: MeasureMode,
-  ): Promise<void> {
+  onModeSelect(newMode: MeasureMode): void {
     if (newMode === this.mode()) {
       return;
     }
 
-    await this.resetMeasurement();
+    this.onReset();
 
     this.mode.set(newMode);
-
-    // Angular recreates arc-measurement because of the @if block.
-    // Allow the new custom element to render.
-    queueMicrotask(() => {
-      const element = this.arcMeasurementRef?.nativeElement;
-
-      if (typeof element?.startMeasurement === 'function') {
-        void element.startMeasurement(newMode);
-      }
-    });
+    this.tool?.setMode(newMode);
   }
 
   /**
-   * Call when the user begins drawing on the map.
+   * Call this when drawing actually starts.
    */
   onMeasurementStart(): void {
     this.hasDrawing.set(true);
   }
 
   /**
-   * Call when Arc Measurement reports a completed result.
+   * Call this when drawing finishes.
    */
   onMeasurementComplete(): void {
     this.hasDrawing.set(true);
   }
 
-  async onReset(): Promise<void> {
-    await this.resetMeasurement();
-  }
+  onReset(): void {
+    const activeTool = this.tool;
 
-  private async resetMeasurement(): Promise<void> {
-    const element = this.arcMeasurementRef?.nativeElement;
-
-    if (!element) {
-      console.warn('arc-measurement is not available.');
+    if (!activeTool) {
+      console.warn('Measure tool is not active.');
       this.hasDrawing.set(false);
       return;
     }
 
     try {
-      if (typeof element.reset === 'function') {
-        await element.reset();
-      } else if (typeof element.clear === 'function') {
-        await element.clear();
-      } else {
-        console.error(
-          'arc-measurement does not expose reset() or clear().',
-          element,
-        );
-
-        return;
-      }
-
+      activeTool.reset();
       this.hasDrawing.set(false);
     } catch (error) {
-      console.error('Failed to clear Arc Measurement.', error);
+      console.error('Failed to clear measurement.', error);
     }
   }
 }
