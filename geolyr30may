@@ -2,44 +2,29 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  gap: 8px;
-  padding: 12px;
   box-sizing: border-box;
-  overflow: visible;
 }
 
 .measurement-host {
   position: relative;
-  display: block;
   width: 100%;
-
-  /* Remove the fixed empty space */
-  min-height: 0;
-  height: auto;
-  overflow: visible;
+  min-height: 210px;
 }
 
 up-measurement {
   display: block;
   width: 100%;
-
-  /* Remove the 320px forced height */
-  min-height: 0;
-  height: auto;
-  overflow: visible;
 }
 
 .measure-actions {
   position: relative;
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  padding: 0;
-  box-sizing: border-box;
   z-index: 20;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 12px;
+  background: var(--calcite-color-foreground-1);
 }
 
 .measure-actions calcite-button {
-  display: block;
   width: 100%;
 }
