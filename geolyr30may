@@ -1,67 +1,45 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  CUSTOM_ELEMENTS_SCHEMA,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
+.measure-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: visible;
+}
 
-type MeasureMode = 'distance' | 'area';
+.measurement-host {
+  position: relative;
+  display: block;
+  width: 100%;
 
-@Component({
-  selector: 'measure-panel',
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  templateUrl: './measure-panel.component.html',
-  styleUrls: ['./measure-panel.component.scss'],
-})
-export class MeasurePanelComponent implements OnInit {
-  private readonly toolHost = inject(MapToolHost);
+  /* Remove the fixed empty space */
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+}
 
-  readonly mode = signal<MeasureMode>('distance');
+up-measurement {
+  display: block;
+  width: 100%;
 
-  private readonly toolId = 'measure';
+  /* Remove the 320px forced height */
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+}
 
-  private get tool(): MeasureTool | null {
-    return this.toolHost.getActiveTool<MeasureTool>(this.toolId);
-  }
+.measure-actions {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 0;
+  box-sizing: border-box;
+  z-index: 20;
+}
 
-  ngOnInit(): void {
-    const activeTool = this.tool;
-
-    if (activeTool) {
-      this.mode.set(activeTool.getMode());
-    }
-  }
-
-  onModeSelect(newMode: MeasureMode): void {
-    if (newMode === this.mode()) {
-      return;
-    }
-
-    // Clear the previous distance/area measurement.
-    this.tool?.reset();
-
-    this.mode.set(newMode);
-    this.tool?.setMode(newMode);
-  }
-
-  onClear(): void {
-    const activeTool = this.tool;
-
-    if (!activeTool) {
-      console.warn(
-        `MeasureTool was not found for tool ID: ${this.toolId}`,
-      );
-      return;
-    }
-
-    try {
-      activeTool.reset();
-      console.log('Measurement cleared');
-    } catch (error) {
-      console.error('Failed to clear measurement.', error);
-    }
-  }
+.measure-actions calcite-button {
+  display: block;
+  width: 100%;
 }
