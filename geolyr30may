@@ -1,75 +1,124 @@
-<div class="measure-panel" [class.has-drawing]="hasDrawing()">
-  <div class="measure-instructions">
-    <calcite-icon icon="cursor-click" scale="s"></calcite-icon>
-    <span>Click on the map to add points. Double-click to finish.</span>
-  </div>
+import {
+  ChangeDetectionStrategy,
+  Component,
+  CUSTOM_ELEMENTS_SCHEMA,
+  ElementRef,
+  OnInit,
+  ViewChild,
+  signal,
+} from '@angular/core';
 
-  <div class="measurement-host">
-    @if (mode() === 'distance') {
-      <measurement
-        #
-        map-id="upMap"
-        tools="distance"
-        default-tool="distance"
-        display-mode="panel"
-      ></measurement>
-    } @else {
-      <measurement
-        #
-        map-id="upMap"
-        tools="area"
-        default-tool="area"
-        display-mode="panel"
-      ></umeasurement>
+type MeasureMode = 'distance' | 'area';
+
+interface ArcMeasurementElement extends HTMLElement {
+  reset?: () => void | Promise<void>;
+  clear?: () => void | Promise<void>;
+  startMeasurement?: (tool: MeasureMode) => void | Promise<void>;
+}
+
+@Component({
+  selector: 'measure-panel',
+  standalone: true,
+  templateUrl: './measure-panel.component.html',
+  styleUrls: ['./measure-panel.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+})
+export class MeasurePanelComponent implements OnInit {
+  readonly mode = signal<MeasureMode>('distance');
+
+  /**
+   * Determines whether the external Clear button is visible.
+   */
+  readonly hasDrawing = signal(false);
+
+  @ViewChild('arcMeasurement', { read: ElementRef })
+  private arcMeasurementRef?: ElementRef<ArcMeasurementElement>;
+
+  ngOnInit(): void {
+    // Keep your existing initialization here.
+  }
+
+  onModeChange(event: Event): void {
+    const target = event.target as HTMLElement & {
+      value?: string;
+    };
+
+    const value = target.getAttribute('value') ?? target.value;
+
+    if (value !== 'distance' && value !== 'area') {
+      return;
     }
 
-    @if (hasDrawing()) {
-      <div class="measure-actions">
-        <calcite-button
-          appearance="outline"
-          width="full"
-          icon-start="reset"
-          (click)="onClear()"
-        >
-          Clear
-        </calcite-button>
-      </div>
+    void this.changeMeasurementMode(value);
+  }
+
+  private async changeMeasurementMode(
+    newMode: MeasureMode,
+  ): Promise<void> {
+    if (newMode === this.mode()) {
+      return;
     }
-  </div>
-</d
 
+    await this.resetMeasurement();
 
+    this.mode.set(newMode);
 
+    // Angular recreates arc-measurement because of the @if block.
+    // Allow the new custom element to render.
+    queueMicrotask(() => {
+      const element = this.arcMeasurementRef?.nativeElement;
 
+      if (typeof element?.startMeasurement === 'function') {
+        void element.startMeasurement(newMode);
+      }
+    });
+  }
 
-.measure-panel {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-}
+  /**
+   * Call when the user begins drawing on the map.
+   */
+  onMeasurementStart(): void {
+    this.hasDrawing.set(true);
+  }
 
-.measurement-host {
-  position: relative;
-  width: 100%;
-  min-height: 170px;
-}
+  /**
+   * Call when Arc Measurement reports a completed result.
+   */
+  onMeasurementComplete(): void {
+    this.hasDrawing.set(true);
+  }
 
-up-measurement {
-  display: block;
-  width: 100%;
-  position: relative;
-  z-index: 1;
-}
+  async onReset(): Promise<void> {
+    await this.resetMeasurement();
+  }
 
-.measure-actions {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 118px;
-  z-index: 20;
-  background: var(--calcite-color-foreground-1);
-}
+  private async resetMeasurement(): Promise<void> {
+    const element = this.arcMeasurementRef?.nativeElement;
 
-.measure-actions calcite-button {
-  width: 100%;
+    if (!element) {
+      console.warn('arc-measurement is not available.');
+      this.hasDrawing.set(false);
+      return;
+    }
+
+    try {
+      if (typeof element.reset === 'function') {
+        await element.reset();
+      } else if (typeof element.clear === 'function') {
+        await element.clear();
+      } else {
+        console.error(
+          'arc-measurement does not expose reset() or clear().',
+          element,
+        );
+
+        return;
+      }
+
+      this.hasDrawing.set(false);
+    } catch (error) {
+      console.error('Failed to clear Arc Measurement.', error);
+    }
+  }
 }
