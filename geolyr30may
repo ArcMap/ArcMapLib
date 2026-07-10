@@ -20,7 +20,6 @@ export class MeasurePanelComponent implements OnInit {
   private readonly toolHost = inject(MapToolHost);
 
   readonly mode = signal<MeasureMode>('distance');
-  readonly hasDrawing = signal(false);
 
   private readonly toolId = 'measure';
 
@@ -36,57 +35,31 @@ export class MeasurePanelComponent implements OnInit {
     }
   }
 
-  onModeChange(event: Event): void {
-    const target = event.target as HTMLElement & {
-      value?: string;
-    };
-
-    const value = target.getAttribute('value') ?? target.value;
-
-    if (value !== 'distance' && value !== 'area') {
-      return;
-    }
-
-    this.onModeSelect(value);
-  }
-
   onModeSelect(newMode: MeasureMode): void {
     if (newMode === this.mode()) {
       return;
     }
 
-    this.onReset();
+    // Clear the previous distance/area measurement.
+    this.tool?.reset();
 
     this.mode.set(newMode);
     this.tool?.setMode(newMode);
   }
 
-  /**
-   * Call this when drawing actually starts.
-   */
-  onMeasurementStart(): void {
-    this.hasDrawing.set(true);
-  }
-
-  /**
-   * Call this when drawing finishes.
-   */
-  onMeasurementComplete(): void {
-    this.hasDrawing.set(true);
-  }
-
-  onReset(): void {
+  onClear(): void {
     const activeTool = this.tool;
 
     if (!activeTool) {
-      console.warn('Measure tool is not active.');
-      this.hasDrawing.set(false);
+      console.warn(
+        `MeasureTool was not found for tool ID: ${this.toolId}`,
+      );
       return;
     }
 
     try {
       activeTool.reset();
-      this.hasDrawing.set(false);
+      console.log('Measurement cleared');
     } catch (error) {
       console.error('Failed to clear measurement.', error);
     }
