@@ -2,9 +2,6 @@ private async initializeMap(): Promise<void> {
   this.upMapInstance =
     this.upMapElement().nativeElement as UpMap;
 
-  // Capture the deep-link extent before waiting for MapView.
-  const deepLinkExtent = this.mapFacade.state().extent;
-
   try {
     const mapView = await this.upMapInstance.getMapView();
     this.mapFacade.setMapView(mapView);
@@ -18,12 +15,15 @@ private async initializeMap(): Promise<void> {
 
   this.setBasemap(defaultBasemap);
 
-  // URL extent has priority over the default extent.
+  // Read it here, after the map has initialized.
+  const deepLinkExtent = this.mapFacade.state().extent;
+
+  console.log('Deep-link extent after map initialization:', deepLinkExtent);
+
   if (deepLinkExtent && this.isValidExtent(deepLinkExtent)) {
     this.setExtent(deepLinkExtent);
   } else {
     this.setExtent(defaultExtent);
-    this.mapFacade.setExtent(defaultExtent);
   }
 
   this.setZoom(this.upMapInstance.zoom);
