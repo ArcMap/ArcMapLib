@@ -1,47 +1,31 @@
-private async applyExtent(parsed: ParsedDeepLink): Promise<void> {
-  if (!parsed.extent) return;
+private async initializeMap(): Promise<void> {
+  this.upMapInstance =
+    this.upMapElement().nativeElement as UpMap;
 
-  const { xmin, ymin, xmax, ymax, wkid = 4326 } = parsed.extent;
+  // Capture the deep-link extent before waiting for MapView.
+  const deepLinkExtent = this.mapFacade.state().extent;
 
-  await this.mapFacade.setExtent({
-    leftLongitude: xmin,
-    bottomLatitude: ymin,
-    rightLongitude: xmax,
-    topLatitude: ymax,
-    wkid
-  });
-}
-
-
-
-
-if (parsed.extent) {
-  await this.applyExtent(parsed);
-} else {
-  await this.applyLatLon(parsed);
-}
-
-
-
-async setExtent(extent: UpMapExtent): Promise<void> {
-  const view = this.mapService.getView();
-
-  if (!view) {
-    console.error('MapView is not initialized');
-    return;
+  try {
+    const mapView = await this.upMapInstance.getMapView();
+    this.mapFacade.setMapView(mapView);
+  } catch (error) {
+    console.error('Failed to get MapView from up-map', error);
+    this.mapFacade.setMapView(null);
   }
 
-  await view.when();
+  const defaultBasemap = MAP_CONFIG.basemap;
+  const defaultExtent: UpMapExtent = MAP_CONFIG.initialExtent;
 
-  await view.goTo({
-    xmin: extent.leftLongitude,
-    ymin: extent.bottomLatitude,
-    xmax: extent.rightLongitude,
-    ymax: extent.topLatitude,
-    spatialReference: {
-      wkid: extent.wkid ?? 4326
-    }
-  }, {
-    animate: false
-  });
+  this.setBasemap(defaultBasemap);
+
+  // URL extent has priority over the default extent.
+  if (deepLinkExtent && this.isValidExtent(deepLinkExtent)) {
+    this.setExtent(deepLinkExtent);
+  } else {
+    this.setExtent(defaultExtent);
+    this.mapFacade.setExtent(defaultExtent);
+  }
+
+  this.setZoom(this.upMapInstance.zoom);
+  this.upMapInstance.showZoom = false;
 }
