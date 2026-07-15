@@ -1,31 +1,22 @@
-private async initializeMap(): Promise<void> {
-  this.upMapInstance =
-    this.upMapElement().nativeElement as UpMap;
+private syncExtentFromMapFacade(
+  extent: UpMapExtent | null
+): void {
+  const currentExtent =
+    typeof this.upMapInstance.extent === 'string'
+      ? null
+      : this.upMapInstance.extent;
 
-  try {
-    const mapView = await this.upMapInstance.getMapView();
-    this.mapFacade.setMapView(mapView);
-  } catch (error) {
-    console.error('Failed to get MapView from up-map', error);
-    this.mapFacade.setMapView(null);
+  if (this.extentsEqual(currentExtent, extent)) {
+    return;
   }
 
-  const defaultBasemap = MAP_CONFIG.basemap;
-  const defaultExtent: UpMapExtent = MAP_CONFIG.initialExtent;
-
-  this.setBasemap(defaultBasemap);
-
-  // Read it here, after the map has initialized.
-  const deepLinkExtent = this.mapFacade.state().extent;
-
-  console.log('Deep-link extent after map initialization:', deepLinkExtent);
-
-  if (deepLinkExtent && this.isValidExtent(deepLinkExtent)) {
-    this.setExtent(deepLinkExtent);
-  } else {
-    this.setExtent(defaultExtent);
+  if (extent !== null && !this.isValidExtent(extent)) {
+    console.warn(
+      '[MapViewComponent] Skipping invalid extent:',
+      extent
+    );
+    return;
   }
 
-  this.setZoom(this.upMapInstance.zoom);
-  this.upMapInstance.showZoom = false;
+  this.upMapInstance.extent = extent;
 }
