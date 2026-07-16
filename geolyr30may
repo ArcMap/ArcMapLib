@@ -1,5 +1,14 @@
-.rename-cancel:hover,
-.rename-cancel:focus,
-.rename-cancel:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--calcite-color-border-2);
+public async setZoom(zoom: number): Promise<void> {
+  const view = this.mapView;
+
+  if (!view) {
+    return;
+  }
+
+  await view.when();
+
+  await view.goTo(
+    { zoom },
+    { animate: false }
+  );
 }
