@@ -1,42 +1,45 @@
-private async initializeMap(): Promise<void> {
-  this.upMapInstance =
-    this.upMapElement().nativeElement as UpMap;
+setTimeout(() => {
+  const upMapElement =
+    this.upMapElement().nativeElement as HTMLElement;
 
-  try {
-    const mapView = await this.upMapInstance.getMapView();
-    this.mapFacade.setMapView(mapView);
+  const searchRoot =
+    upMapElement.shadowRoot ?? upMapElement;
 
-    setTimeout(() => {
-      const upMapElement =
-        this.upMapElement().nativeElement as HTMLElement;
+  const elements =
+    searchRoot.querySelectorAll<HTMLElement>('*');
 
-      upMapElement
-        .querySelectorAll<HTMLElement>('[class], up-esri-feature-layer, up-image-service-layer')
-        .forEach((element) => {
-          if (!element.tagName.toLowerCase().startsWith('up-')) {
-            return;
-          }
+  console.log(
+    '[MapViewComponent.initializeMap] Search root:',
+    searchRoot,
+  );
 
-          element.dispatchEvent(
-            new CustomEvent('upMapDeferredReady', {
-              detail: {
-                map: mapView.map,
-                view: mapView,
-              },
-              bubbles: false,
-              composed: true,
-            }),
-          );
-        });
-    });
-  } catch (error) {
-    console.error(
-      '[MapViewComponent.initializeMap] Failed to initialize map',
-      error,
+  console.log(
+    '[MapViewComponent.initializeMap] Elements found:',
+    elements.length,
+  );
+
+  elements.forEach((element) => {
+    const tagName = element.tagName.toLowerCase();
+
+    if (!tagName.startsWith('up-')) {
+      return;
+    }
+
+    console.log(
+      '[MapViewComponent.initializeMap] Dispatching to:',
+      tagName,
+      element,
     );
 
-    this.mapFacade.setMapView(null);
-  }
-
-  // Keep the remaining existing initializeMap() logic here.
-}
+    element.dispatchEvent(
+      new CustomEvent('upMapDeferredReady', {
+        detail: {
+          map: mapView.map,
+          view: mapView,
+        },
+        bubbles: false,
+        composed: true,
+      }),
+    );
+  });
+}, 0);
