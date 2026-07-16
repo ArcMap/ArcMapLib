@@ -1,22 +1,27 @@
-private syncExtentFromMapFacade(
-  extent: UpMapExtent | null
-): void {
-  const currentExtent =
-    typeof this.upMapInstance.extent === 'string'
-      ? null
-      : this.upMapInstance.extent;
-
-  if (this.extentsEqual(currentExtent, extent)) {
+private readonly extentChangedHandler = (event: Event): void => {
+  if (this.ignoreExtentChange) {
     return;
   }
 
-  if (extent !== null && !this.isValidExtent(extent)) {
-    console.warn(
-      '[MapViewComponent] Skipping invalid extent:',
-      extent
-    );
+  const extent =
+    (event as CustomEvent<UpMapExtent>).detail;
+
+  if (!extent || !this.isValidExtent(extent)) {
     return;
   }
 
-  this.upMapInstance.extent = extent;
-}
+  const current = this.mapFacade.state().extent;
+
+  if (this.extentsEqual(current, extent)) {
+    return;
+  }
+
+  this.mapFacade.setExtent(extent);
+};
+
+
+
+
+setTimeout(() => {
+  this.ignoreExtentChange = false;
+}, 500);
