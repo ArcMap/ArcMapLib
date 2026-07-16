@@ -1,49 +1,43 @@
-private initializeRenderedUpMapChildren(): void {
+private notifyDeferredChildrenReady(): void {
   if (!this.upMapInstance) {
     return;
   }
 
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const upMapWithDeferredInitialization =
-        this.upMapInstance as unknown as {
-          initializeDeferredChildren?: () => Promise<void>;
-        };
+  const mapElement =
+    this.upMapElement().nativeElement as HTMLElement;
+
+  const view = this.mapFacade.mapView();
+  const map = view?.map;
+
+  if (!view || !map) {
+    console.warn(
+      '[MapViewComponent.notifyDeferredChildrenReady] ' +
+        'Map or MapView is unavailable.',
+    );
+    return;
+  }
+
+  mapElement
+    .querySelectorAll<HTMLElement>('*')
+    .forEach((element) => {
+      const tagName = element.tagName.toLowerCase();
 
       if (
-        typeof upMapWithDeferredInitialization
-          .initializeDeferredChildren !== 'function'
+        !tagName.startsWith('up-') ||
+        tagName === 'up-map'
       ) {
-        console.error(
-          '[MapViewComponent.initializeRenderedUpMapChildren] ' +
-            'UPMap initializeDeferredChildren() is unavailable.',
-        );
         return;
       }
 
-      void upMapWithDeferredInitialization
-        .initializeDeferredChildren();
+      element.dispatchEvent(
+        new CustomEvent('upMapDeferredReady', {
+          detail: {
+            map,
+            view,
+          },
+          bubbles: false,
+          composed: true,
+        }),
+      );
     });
-  });
-}
-
-
-
-constructor() {
-  afterNextRender(() => {
-    void this.initializeMap();
-  });
-
-  effect(() => {
-    const layers = this.mapVisibleLayers();
-
-    if (
-      !this.upMapInstance ||
-      layers.length === 0
-    ) {
-      return;
-    }
-
-    this.initializeRenderedUpMapChildren();
-  });
 }
