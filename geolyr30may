@@ -1,32 +1,49 @@
-requestAnimationFrame(() => {
-  const upMapElement =
-    this.upMapElement().nativeElement as HTMLElement;
+private initializeRenderedUpMapChildren(): void {
+  if (!this.upMapInstance) {
+    return;
+  }
 
-  const featureLayers =
-    upMapElement.querySelectorAll<HTMLElement>(
-      'up-esri-feature-layer',
-    );
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const upMapWithDeferredInitialization =
+        this.upMapInstance as unknown as {
+          initializeDeferredChildren?: () => Promise<void>;
+        };
 
-  console.log(
-    '[MapViewComponent.initializeMap] Feature layers found:',
-    featureLayers.length,
-  );
+      if (
+        typeof upMapWithDeferredInitialization
+          .initializeDeferredChildren !== 'function'
+      ) {
+        console.error(
+          '[MapViewComponent.initializeRenderedUpMapChildren] ' +
+            'UPMap initializeDeferredChildren() is unavailable.',
+        );
+        return;
+      }
 
-  featureLayers.forEach((layer) => {
-    console.log(
-      '[MapViewComponent.initializeMap] Dispatching to layer:',
-      layer,
-    );
-
-    layer.dispatchEvent(
-      new CustomEvent('upMapDeferredReady', {
-        detail: {
-          map: mapView.map,
-          view: mapView,
-        },
-        bubbles: false,
-        composed: true,
-      }),
-    );
+      void upMapWithDeferredInitialization
+        .initializeDeferredChildren();
+    });
   });
-});
+}
+
+
+
+constructor() {
+  afterNextRender(() => {
+    void this.initializeMap();
+  });
+
+  effect(() => {
+    const layers = this.mapVisibleLayers();
+
+    if (
+      !this.upMapInstance ||
+      layers.length === 0
+    ) {
+      return;
+    }
+
+    this.initializeRenderedUpMapChildren();
+  });
+}
