@@ -1,27 +1,23 @@
-private readonly extentChangedHandler = (event: Event): void => {
-  if (this.ignoreExtentChange) {
+private async applyLatLon(
+  parsed: ParsedDeepLink
+): Promise<void> {
+  if (
+    parsed.lat === undefined ||
+    parsed.lon === undefined
+  ) {
     return;
   }
 
-  const extent =
-    (event as CustomEvent<UpMapExtent>).detail;
+  await this.mapFacade.goToLatLon(
+    parsed.lat,
+    parsed.lon,
+    parsed.zoom
+  );
 
-  if (!extent || !this.isValidExtent(extent)) {
-    return;
+  if (parsed.label) {
+    console.log(
+      '[DeepLinkFacade.applyLatLon] Label:',
+      parsed.label
+    );
   }
-
-  const current = this.mapFacade.state().extent;
-
-  if (this.extentsEqual(current, extent)) {
-    return;
-  }
-
-  this.mapFacade.setExtent(extent);
-};
-
-
-
-
-setTimeout(() => {
-  this.ignoreExtentChange = false;
-}, 500);
+}
