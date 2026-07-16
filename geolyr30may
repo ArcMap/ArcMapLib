@@ -1,104 +1,47 @@
-private async syncCenterAndZoomFromMapFacade(
-  extent: UpMapExtent,
-  zoom: number
-): Promise<void> {
-  if (
-    !this.isValidExtent(extent) ||
-    this.centerZoomNavigationInProgress
-  ) {
-    return;
-  }
+private async initializeMapView(): Promise<void> {
+  await this.view.when();
 
-  const centerLongitude =
-    (extent.leftLongitude + extent.rightLongitude) / 2;
-
-  const centerLatitude =
-    (extent.bottomLatitude + extent.topLatitude) / 2;
-
-  const view = (
-    this.upMapInstance as unknown as ZoomableMapViewHost
-  ).view;
-
-  if (!view || typeof view.goTo !== 'function') {
-    return;
-  }
-
-  const currentLongitude = view.center?.longitude;
-  const currentLatitude = view.center?.latitude;
-  const currentZoom = view.zoom;
-
-  const alreadyAtTarget =
-    typeof currentLongitude === 'number' &&
-    typeof currentLatitude === 'number' &&
-    typeof currentZoom === 'number' &&
-    Math.abs(currentLongitude - centerLongitude) < 0.00001 &&
-    Math.abs(currentLatitude - centerLatitude) < 0.00001 &&
-    Math.abs(currentZoom - zoom) < 0.01;
-
-  if (alreadyAtTarget) {
-    return;
-  }
-
-  this.centerZoomNavigationInProgress = true;
-
-  try {
-    await view.goTo(
-      {
-        center: [
-          centerLongitude,
-          centerLatitude
-        ] as [number, number],
-        zoom
+  this.dispatchEvent(
+    new CustomEvent("arcgisViewReadyChange", {
+      detail: {
+        ready: true,
+        map: this.map,
+        view: this.view,
       },
-      {
-        animate: false
-      }
-    );
-  } catch (error: unknown) {
-    // ArcGIS may reject an interrupted navigation.
-    console.warn(
-      '[MapViewComponent.syncCenterAndZoomFromMapFacade] Navigation failed:',
-      error
-    );
-  } finally {
-    this.centerZoomNavigationInProgress = false;
-  }
+      bubbles: true,
+      composed: true,
+    }),
+  );
+
+  await this.initializeDeferredChildren();
 }
 
 
-interface ZoomableMapViewHost {
-  view?: {
-    center?: {
-      longitude?: number;
-      latitude?: number;
-    };
+private async initializeDeferredChildren(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 
-    zoom?: number;
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 
-    goTo(
-      target: {
-        center?: [number, number];
-        zoom?: number;
-      },
-      options?: {
-        animate?: boolean;
-        duration?: number;
-      }
-    ): Promise<void>;
+  const detail = {
+    map: this.map,
+    view: this.view,
   };
-}
 
+  const children = Array.from(this.children);
 
-if (
-  extent &&
-  zoom !== null &&
-  zoom !== undefined
-) {
-  void this.syncCenterAndZoomFromMapFacade(extent, zoom);
-} else {
-  this.syncExtentFromMapFacade(extent);
+  children.forEach((child: Element) => {
+    child.dispatchEvent(
+      new CustomEvent("upMapDeferredReady", {
+        detail,
+        bubbles: false,
+        composed: true,
+      }),
+    );
+  });
 
-  if (zoom !== null && zoom !== undefined) {
-    this.syncZoomFromMapFacade(zoom);
-  }
+  this.resolveDeferredChildrenReady?.();
 }
