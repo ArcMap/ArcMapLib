@@ -1,4 +1,22 @@
-public async setZoom(zoom: number): Promise<void> {
+private async applyLatLon(parsed: ParsedDeepLink): Promise<void> {
+  if (parsed.lat === undefined || parsed.lon === undefined) {
+    return;
+  }
+
+  await this.mapFacade.navigateToLocation({
+    latitude: parsed.lat,
+    longitude: parsed.lon,
+    zoom: parsed.zoom
+  });
+}
+
+
+
+public async navigateToLocation(target: {
+  latitude: number;
+  longitude: number;
+  zoom?: number;
+}): Promise<void> {
   const view = this.mapView;
 
   if (!view) {
@@ -8,7 +26,12 @@ public async setZoom(zoom: number): Promise<void> {
   await view.when();
 
   await view.goTo(
-    { zoom },
-    { animate: false }
+    {
+      center: [target.longitude, target.latitude],
+      zoom: target.zoom
+    },
+    {
+      animate: false
+    }
   );
 }
