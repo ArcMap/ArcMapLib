@@ -1,37 +1,14 @@
-private syncCenterAndZoomFromMapFacade(
-  extent: UpMapExtent,
-  zoom: number
-): void {
-  if (!this.isValidExtent(extent)) {
-    return;
-  }
-
-  const centerLongitude =
-    (extent.leftLongitude + extent.rightLongitude) / 2;
-
-  const centerLatitude =
-    (extent.bottomLatitude + extent.topLatitude) / 2;
-
-  const view = (
-    this.upMapInstance as unknown as ZoomableMapViewHost
-  ).view;
-
-  if (!view || typeof view.goTo !== 'function') {
-    return;
-  }
-
-  void view.goTo(
-    {
-      center: [centerLongitude, centerLatitude],
-      zoom
-    },
-    {
-      animate: false
-    }
-  ).catch((error: unknown) => {
-    console.error(
-      '[MapViewComponent.syncCenterAndZoomFromMapFacade] Navigation failed:',
-      error
-    );
-  });
+linterface ZoomableMapViewHost {
+  view?: {
+    goTo(
+      target: {
+        center?: [number, number];
+        zoom?: number;
+      },
+      options?: {
+        animate?: boolean;
+        duration?: number;
+      }
+    ): Promise<void>;
+  };
 }
