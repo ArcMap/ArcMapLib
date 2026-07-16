@@ -1,5 +1,80 @@
-linterface ZoomableMapViewHost {
+private async syncCenterAndZoomFromMapFacade(
+  extent: UpMapExtent,
+  zoom: number
+): Promise<void> {
+  if (
+    !this.isValidExtent(extent) ||
+    this.centerZoomNavigationInProgress
+  ) {
+    return;
+  }
+
+  const centerLongitude =
+    (extent.leftLongitude + extent.rightLongitude) / 2;
+
+  const centerLatitude =
+    (extent.bottomLatitude + extent.topLatitude) / 2;
+
+  const view = (
+    this.upMapInstance as unknown as ZoomableMapViewHost
+  ).view;
+
+  if (!view || typeof view.goTo !== 'function') {
+    return;
+  }
+
+  const currentLongitude = view.center?.longitude;
+  const currentLatitude = view.center?.latitude;
+  const currentZoom = view.zoom;
+
+  const alreadyAtTarget =
+    typeof currentLongitude === 'number' &&
+    typeof currentLatitude === 'number' &&
+    typeof currentZoom === 'number' &&
+    Math.abs(currentLongitude - centerLongitude) < 0.00001 &&
+    Math.abs(currentLatitude - centerLatitude) < 0.00001 &&
+    Math.abs(currentZoom - zoom) < 0.01;
+
+  if (alreadyAtTarget) {
+    return;
+  }
+
+  this.centerZoomNavigationInProgress = true;
+
+  try {
+    await view.goTo(
+      {
+        center: [
+          centerLongitude,
+          centerLatitude
+        ] as [number, number],
+        zoom
+      },
+      {
+        animate: false
+      }
+    );
+  } catch (error: unknown) {
+    // ArcGIS may reject an interrupted navigation.
+    console.warn(
+      '[MapViewComponent.syncCenterAndZoomFromMapFacade] Navigation failed:',
+      error
+    );
+  } finally {
+    this.centerZoomNavigationInProgress = false;
+  }
+}
+
+
+interface ZoomableMapViewHost {
   view?: {
+    center?: {
+      longitude?: number;
+      latitude?: number;
+    };
+
+    zoom?: number;
+
     goTo(
       target: {
         center?: [number, number];
@@ -11,4 +86,19 @@ linterface ZoomableMapViewHost {
       }
     ): Promise<void>;
   };
+}
+
+
+if (
+  extent &&
+  zoom !== null &&
+  zoom !== undefined
+) {
+  void this.syncCenterAndZoomFromMapFacade(extent, zoom);
+} else {
+  this.syncExtentFromMapFacade(extent);
+
+  if (zoom !== null && zoom !== undefined) {
+    this.syncZoomFromMapFacade(zoom);
+  }
 }
