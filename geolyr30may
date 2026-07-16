@@ -1,37 +1,42 @@
-private dispatchDeferredReady(): void {
-  const upMapElement =
-    this.upMapElement().nativeElement as HTMLElement;
+private async initializeMap(): Promise<void> {
+  this.upMapInstance =
+    this.upMapElement().nativeElement as UpMap;
 
-  const view = this.mapFacade.mapView();
-  const map = view?.map;
+  try {
+    const mapView = await this.upMapInstance.getMapView();
+    this.mapFacade.setMapView(mapView);
 
-  if (!view || !map) {
-    return;
+    setTimeout(() => {
+      const upMapElement =
+        this.upMapElement().nativeElement as HTMLElement;
+
+      upMapElement
+        .querySelectorAll<HTMLElement>('[class], up-esri-feature-layer, up-image-service-layer')
+        .forEach((element) => {
+          if (!element.tagName.toLowerCase().startsWith('up-')) {
+            return;
+          }
+
+          element.dispatchEvent(
+            new CustomEvent('upMapDeferredReady', {
+              detail: {
+                map: mapView.map,
+                view: mapView,
+              },
+              bubbles: false,
+              composed: true,
+            }),
+          );
+        });
+    });
+  } catch (error) {
+    console.error(
+      '[MapViewComponent.initializeMap] Failed to initialize map',
+      error,
+    );
+
+    this.mapFacade.setMapView(null);
   }
 
-  upMapElement
-    .querySelectorAll<HTMLElement>(':scope > *')
-    .forEach((child) => {
-      child.dispatchEvent(
-        new CustomEvent('upMapDeferredReady', {
-          detail: {
-            map,
-            view,
-          },
-          bubbles: false,
-          composed: true,
-        }),
-      );
-    });
+  // Keep the remaining existing initializeMap() logic here.
 }
-
-
-
-const mapView = await this.upMapInstance.getMapView();
-
-this.mapFacade.setMapView(mapView);
-this.mapReady.set(true);
-
-requestAnimationFrame(() => {
-  this.dispatchDeferredReady();
-});
