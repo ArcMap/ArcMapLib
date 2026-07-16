@@ -1,47 +1,37 @@
-private async initializeMapView(): Promise<void> {
-  await this.view.when();
+private dispatchDeferredReady(): void {
+  const upMapElement =
+    this.upMapElement().nativeElement as HTMLElement;
 
-  this.dispatchEvent(
-    new CustomEvent("arcgisViewReadyChange", {
-      detail: {
-        ready: true,
-        map: this.map,
-        view: this.view,
-      },
-      bubbles: true,
-      composed: true,
-    }),
-  );
+  const view = this.mapFacade.mapView();
+  const map = view?.map;
 
-  await this.initializeDeferredChildren();
+  if (!view || !map) {
+    return;
+  }
+
+  upMapElement
+    .querySelectorAll<HTMLElement>(':scope > *')
+    .forEach((child) => {
+      child.dispatchEvent(
+        new CustomEvent('upMapDeferredReady', {
+          detail: {
+            map,
+            view,
+          },
+          bubbles: false,
+          composed: true,
+        }),
+      );
+    });
 }
 
 
-private async initializeDeferredChildren(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
-  });
 
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
-  });
+const mapView = await this.upMapInstance.getMapView();
 
-  const detail = {
-    map: this.map,
-    view: this.view,
-  };
+this.mapFacade.setMapView(mapView);
+this.mapReady.set(true);
 
-  const children = Array.from(this.children);
-
-  children.forEach((child: Element) => {
-    child.dispatchEvent(
-      new CustomEvent("upMapDeferredReady", {
-        detail,
-        bubbles: false,
-        composed: true,
-      }),
-    );
-  });
-
-  this.resolveDeferredChildrenReady?.();
-}
+requestAnimationFrame(() => {
+  this.dispatchDeferredReady();
+});
