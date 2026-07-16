@@ -1,37 +1,24 @@
-setTimeout(() => {
+requestAnimationFrame(() => {
   const upMapElement =
     this.upMapElement().nativeElement as HTMLElement;
 
-  const searchRoot =
-    upMapElement.shadowRoot ?? upMapElement;
-
-  const elements =
-    searchRoot.querySelectorAll<HTMLElement>('*');
-
-  console.log(
-    '[MapViewComponent.initializeMap] Search root:',
-    searchRoot,
-  );
-
-  console.log(
-    '[MapViewComponent.initializeMap] Elements found:',
-    elements.length,
-  );
-
-  elements.forEach((element) => {
-    const tagName = element.tagName.toLowerCase();
-
-    if (!tagName.startsWith('up-')) {
-      return;
-    }
-
-    console.log(
-      '[MapViewComponent.initializeMap] Dispatching to:',
-      tagName,
-      element,
+  const featureLayers =
+    upMapElement.querySelectorAll<HTMLElement>(
+      'up-esri-feature-layer',
     );
 
-    element.dispatchEvent(
+  console.log(
+    '[MapViewComponent.initializeMap] Feature layers found:',
+    featureLayers.length,
+  );
+
+  featureLayers.forEach((layer) => {
+    console.log(
+      '[MapViewComponent.initializeMap] Dispatching to layer:',
+      layer,
+    );
+
+    layer.dispatchEvent(
       new CustomEvent('upMapDeferredReady', {
         detail: {
           map: mapView.map,
@@ -42,4 +29,4 @@ setTimeout(() => {
       }),
     );
   });
-}, 0);
+});
