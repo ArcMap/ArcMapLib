@@ -8,7 +8,7 @@ it('applies map by ID and opens maps-layers panel', async () => {
 
     parserSpy.parse.mockReturnValue({ map: 'map-1' });
     parserSpy.isEmpty.mockReturnValue(false);
-    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS — was missing
+    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS LINE
     mapsApiSpy.readUserMaps.mockReturnValue(of([mapDto]));
     mapsApiSpy.readBookmarks.mockReturnValue(of([]));
 
@@ -17,41 +17,3 @@ it('applies map by ID and opens maps-layers panel', async () => {
     expect(mapFacadeSpy.applySavedMap).toHaveBeenCalledWith('{"basemap":"streets"}');
     expect(navStateSpy.openPanel).toHaveBeenCalledWith('maps-layers');
 });
-
-
-
-it('sets extent and zoom when lat/lon/zoom are provided', async () => {
-    parserSpy.parse.mockReturnValue({ lat: 41.5, lon: -104.2, zoom: 12 });
-    parserSpy.isEmpty.mockReturnValue(false);
-    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS
-    mapsApiSpy.readUserMaps.mockReturnValue(of([]));
-    mapsApiSpy.readBookmarks.mockReturnValue(of([]));
-
-    await facade.applyFromParams(emptyParams);
-
-    expect(mapFacadeSpy.setZoom).toHaveBeenCalledWith(12);
-    expect(mapFacadeSpy.setExtent).toHaveBeenCalledWith(
-        expect.objectContaining({
-            leftLongitude: -104.25,   // ← CHANGED: -104.2 - 0.05
-            bottomLatitude: 41.45,    // ← CHANGED: 41.5 - 0.05
-            rightLongitude: -104.15,  // ← ADD: -104.2 + 0.05
-            topLatitude: 41.55,       // ← ADD: 41.5 + 0.05
-        }),
-    );
-});
-
-
-
-it('should update query params when a selected layer is toggled', async () => { // ← ADD async
-    component.toggleLayer(component.layers()[0]);
-
-    await fixture.whenStable(); // ← ADD THIS — waits for async navigate to complete
-    fixture.detectChanges();
-
-    expect(routerMock.navigate).toHaveBeenCalledWith(['/'], {
-        queryParams: {
-            layers: null,
-        },
-    });
-});
-
