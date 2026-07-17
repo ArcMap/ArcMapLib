@@ -1,33 +1,100 @@
-beforeEach(async () => {
-    userFacadeSpy = createSpyFromClass(UserFacade);
-    deepLinkFacadeSpy = createSpyFromClass(DeepLinkFacade);
-    navStateSpy = createSpyFromClass(NavStateService);
+describe('AppShellComponent', () => {
+    let userFacadeSpy: Spy<UserFacade>;
+    let userContextSignal: ReturnType<typeof signal<UserContext | null>>;
+    let routerMock: {
+        url: string;
+        parseUrl: ReturnType<typeof vi.fn>;
+    };
+    let deepLinkFacadeSpy: Spy<DeepLinkFacade>;
+    let navStateSpy: Spy<NavStateService>;
 
-    // ← ADD THIS — override with real signal since createSpyFromClass
-    // cannot replicate Angular signals
-    (navStateSpy as any).activePanel = signal<string | null>(null);
+    // ← ADD THIS — real signal shared across tests
+    let activePanelSignal: ReturnType<typeof signal<string | null>>;
 
-    // Make openPanel update the signal so activeMode() reflects it
-    navStateSpy.openPanel.mockImplementation((panel: string) => {
-        (navStateSpy as any).activePanel.set(panel);
+    beforeEach(async () => {
+        // ← ADD THIS — create a fresh signal before each test
+        activePanelSignal = signal<string | null>(null);
+
+        userFacadeSpy = createSpyFromClass(UserFacade);
+        userContextSignal = signal<UserContext | null>(null);
+        userFacadeSpy.userContext$ = userContextSignal;
+
+        deepLinkFacadeSpy = createSpyFromClass(DeepLinkFacade);
+        navStateSpy = createSpyFromClass(NavStateService);
+
+        // ← ADD THESE THREE — override signal + wire openPanel/closePanel
+        (navStateSpy as any).activePanel = activePanelSignal;
+        navStateSpy.openPanel.mockImplementation((panel: string) => {
+            activePanelSignal.set(panel);
+        });
+        navStateSpy.closePanel.mockImplementation(() => {
+            activePanelSignal.set(null);
+        });
+
+        routerMock = {
+            url: '/',
+            parseUrl: vi.fn((url: string) => {
+                const u = new URL(url, 'http://localhost');
+                const queryParams: Record<string, string> = {};
+                u.searchParams.forEach((v, k) => (queryParams[k] = v));
+                return { queryParams };
+            }),
+        };
+
+        vi.mock('up-map', () => ({
+            apPage: class {},
+        }));
+
+        await TestBed.configureTestingModule({
+            imports: [AppShellComponent],
+            providers: [
+                { provide: UserFacade, useValue: userFacadeSpy },
+                { provide: Router, useValue: routerMock },
+                { provide: DeepLinkFacade, useValue: deepLinkFacadeSpy },
+                { provide: NavStateService, useValue: navStateSpy },
+            ],
+            schemas: [NO_ERRORS_SCHEMA],
+        })
+            .overrideComponent(ContextPanelHostComponent, { set: { template: '', imports: [] } })
+            .overrideComponent(MapViewComponent, { set: { template: '', imports: [] } })
+            .compileComponents();
     });
-    navStateSpy.closePanel.mockImplementation(() => {
-        (navStateSpy as any).activePanel.set(null);
+
+    // ─── Test 1 ───────────────────────────────────────────────────────────────
+
+    it('should default activeMode to none', () => {
+        const fixture = TestBed.createComponent(AppShellComponent);
+        fixture.detectChanges();
+
+        expect(fixture.componentInstance.activeMode()).toBe('none'); // ← () added
     });
 
-    // ... rest of your existing beforeEach
+    // ─── Test 2 ───────────────────────────────────────────────────────────────
+
+    it('should update activeMode on onModeChange', () => {
+        const fixture = TestBed.createComponent(AppShellComponent);
+        fixture.detectChanges();
+
+        fixture.componentInstance.onModeChange('maps-layers');
+
+        expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // ← () added
+    });
+
+    // ─── Test 3 ───────────────────────────────────────────────────────────────
+
+    it('should block restricted modes for limited users', () => {
+        userContextSignal.set({
+            userId: 'test-user',
+            isAdmin: false,
+            isLimitedUser: true,
+            preferences: {},
+        });
+
+        const fixture = TestBed.createComponent(AppShellComponent);
+        fixture.detectChanges();
+
+        fixture.componentInstance.onModeChange('maps-layers');
+
+        expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // ← () added
+    });
 });
-
-
-
-
-if ((navStateSpy as any).activePanel?.set) {
-    (navStateSpy as any).activePanel.set(null);
-}
-
-
-
-
-expect(fixture.componentInstance.activeMode()).toBe('none');       // test 1
-expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // test 2
-expect(fixture.componentInstance.activeMode()).toBe('none');        // test 3
