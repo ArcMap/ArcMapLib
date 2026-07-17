@@ -1,31 +1,27 @@
-private syncZoomFromMapFacade(zoom: number, onSettled?: () => void): void {
-  console.log('syncZoomFromMapFacade', zoom);
-  if (this.upMapInstance.zoom === zoom) {
-    onSettled?.();
-    return;
-  }
-  const view = (this.upMapInstance as unknown as ZoomableMapViewHost).view;
-  if (view && typeof view.goTo === 'function') {
-    view.goTo({ zoom }, { animate: true, duration: 200 })
-      .catch(() => {})
-      .finally(() => onSettled?.());
-  } else {
-    onSettled?.();
-  }
-  this.upMapInstance.zoom = zoom;
-}
-
-
-
-
-setTimeout(() => {
-  this.ignoreExtentChange = false;
-
-  if (deepLinkZoom !== null) {
-    this.syncZoomFromMapFacade(deepLinkZoom, () => {
-      this.ignoreZoomChange = false;   // only unblock once OUR animation is done
+private applyLatLon(parsed: ParsedDeepLink): void {
+  if (parsed.lat !== undefined && parsed.lon !== undefined) {
+    const DELTA = 0.05;
+    this.mapFacade.setExtent({
+      leftLongitude: parsed.lon - DELTA,
+      bottomLatitude: parsed.lat - DELTA,
+      rightLongitude: parsed.lon + DELTA,
+      topLatitude: parsed.lat + DELTA,
     });
-  } else {
-    this.ignoreZoomChange = false;
+
+    // Reuse the existing search-highlight pipeline to mark the point.
+    this.mapFacade.setSearchHighlights([
+      {
+        geometry: { x: parsed.lon, y: parsed.lat },
+        name: parsed.label ?? 'Deep-link location',
+      } as SearchResult,
+    ]);
   }
-}, 500);
+
+  if (parsed.zoom !== undefined) {
+    this.mapFacade.setZoom(parsed.zoom);
+  }
+
+  if (parsed.label) {
+    console.log('[DeepLinkFacade] lat/lon label:', parsed.label);
+  }
+}
