@@ -1,63 +1,57 @@
-it('should open Maps & Layers panel when layers query param exists', async () => {
-    routerMock.url = '/?layers=someLayer';
+it('applies map by ID and opens maps-layers panel', async () => {
+    const mapDto: UserMapDto = {
+        mapID: 'map-1',
+        mapName: 'Test Map',
+        userID: 'user',
+        mapLayerInfo: '{"basemap":"streets"}',
+    };
 
-    // ← ADD: make applyFromParams call openPanel for this test
-    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
-        navStateSpy.openPanel('maps-layers');
-    });
+    parserSpy.parse.mockReturnValue({ map: 'map-1' });
+    parserSpy.isEmpty.mockReturnValue(false);
+    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS — was missing
+    mapsApiSpy.readUserMaps.mockReturnValue(of([mapDto]));
+    mapsApiSpy.readBookmarks.mockReturnValue(of([]));
 
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+    await facade.applyFromParams(emptyParams);
 
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+    expect(mapFacadeSpy.applySavedMap).toHaveBeenCalledWith('{"basemap":"streets"}');
+    expect(navStateSpy.openPanel).toHaveBeenCalledWith('maps-layers');
 });
 
-it('should prefer Maps & Layers panel when both userMap and layers query params exist', async () => {
-    routerMock.url = '/?userMap=Bridge%20Construction&layers=someLayer';
 
-    // ← ADD: make applyFromParams call openPanel for this test
-    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
-        navStateSpy.openPanel('maps-layers');
-    });
 
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+it('sets extent and zoom when lat/lon/zoom are provided', async () => {
+    parserSpy.parse.mockReturnValue({ lat: 41.5, lon: -104.2, zoom: 12 });
+    parserSpy.isEmpty.mockReturnValue(false);
+    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS
+    mapsApiSpy.readUserMaps.mockReturnValue(of([]));
+    mapsApiSpy.readBookmarks.mockReturnValue(of([]));
 
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+    await facade.applyFromParams(emptyParams);
+
+    expect(mapFacadeSpy.setZoom).toHaveBeenCalledWith(12);
+    expect(mapFacadeSpy.setExtent).toHaveBeenCalledWith(
+        expect.objectContaining({
+            leftLongitude: -104.25,   // ← CHANGED: -104.2 - 0.05
+            bottomLatitude: 41.45,    // ← CHANGED: 41.5 - 0.05
+            rightLongitude: -104.15,  // ← ADD: -104.2 + 0.05
+            topLatitude: 41.55,       // ← ADD: 41.5 + 0.05
+        }),
+    );
 });
 
-it('should open Maps & Layers panel when layer query param exists', async () => {
-    routerMock.url = '/?layer=someLayer';
 
-    // ← ADD: make applyFromParams call openPanel for this test
-    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
-        navStateSpy.openPanel('maps-layers');
+
+it('should update query params when a selected layer is toggled', async () => { // ← ADD async
+    component.toggleLayer(component.layers()[0]);
+
+    await fixture.whenStable(); // ← ADD THIS — waits for async navigate to complete
+    fixture.detectChanges();
+
+    expect(routerMock.navigate).toHaveBeenCalledWith(['/'], {
+        queryParams: {
+            layers: null,
+        },
     });
-
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
 });
 
-it('should open Maps & Layers panel from browser URL when Router.url has no params yet', async () => {
-    routerMock.url = '/';
-
-    // ← ADD: make applyFromParams call openPanel for this test
-    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
-        navStateSpy.openPanel('maps-layers');
-    });
-
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
-});
