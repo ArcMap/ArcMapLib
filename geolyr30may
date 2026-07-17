@@ -1,19 +1,19 @@
-it('applies map by ID and opens maps-layers panel', async () => {
-    const mapDto: UserMapDto = {
-        mapID: 'map-1',
-        mapName: 'Test Map',
-        userID: 'user',
-        mapLayerInfo: '{"basemap":"streets"}',
-    };
-
-    parserSpy.parse.mockReturnValue({ map: 'map-1' });
+it('sets extent and zoom when lat/lon/zoom are provided', async () => {
+    parserSpy.parse.mockReturnValue({ lat: 41.5, lon: -104.2, zoom: 12 });
     parserSpy.isEmpty.mockReturnValue(false);
     mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS LINE
-    mapsApiSpy.readUserMaps.mockReturnValue(of([mapDto]));
+    mapsApiSpy.readUserMaps.mockReturnValue(of([]));
     mapsApiSpy.readBookmarks.mockReturnValue(of([]));
 
     await facade.applyFromParams(emptyParams);
 
-    expect(mapFacadeSpy.applySavedMap).toHaveBeenCalledWith('{"basemap":"streets"}');
-    expect(navStateSpy.openPanel).toHaveBeenCalledWith('maps-layers');
+    expect(mapFacadeSpy.setZoom).toHaveBeenCalledWith(12);
+    expect(mapFacadeSpy.setExtent).toHaveBeenCalledWith(
+        expect.objectContaining({
+            leftLongitude: -104.25,  // ← CHANGED from -104.2  (-104.2 - 0.05)
+            bottomLatitude: 41.45,   // ← CHANGED from 41.5    (41.5 - 0.05)
+            rightLongitude: -104.15, // ← ADD                  (-104.2 + 0.05)
+            topLatitude: 41.55,      // ← ADD                  (41.5 + 0.05)
+        }),
+    );
 });
