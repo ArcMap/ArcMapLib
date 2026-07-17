@@ -1,27 +1,15 @@
-private applyLatLon(parsed: ParsedDeepLink): void {
-  if (parsed.lat !== undefined && parsed.lon !== undefined) {
-    const DELTA = 0.05;
-    this.mapFacade.setExtent({
-      leftLongitude: parsed.lon - DELTA,
-      bottomLatitude: parsed.lat - DELTA,
-      rightLongitude: parsed.lon + DELTA,
-      topLatitude: parsed.lat + DELTA,
-    });
-
-    // Reuse the existing search-highlight pipeline to mark the point.
-    this.mapFacade.setSearchHighlights([
-      {
-        geometry: { x: parsed.lon, y: parsed.lat },
-        name: parsed.label ?? 'Deep-link location',
-      } as SearchResult,
-    ]);
-  }
-
-  if (parsed.zoom !== undefined) {
-    this.mapFacade.setZoom(parsed.zoom);
-  }
-
-  if (parsed.label) {
-    console.log('[DeepLinkFacade] lat/lon label:', parsed.label);
-  }
-}
+this.mapFacade.setSearchHighlights([
+  {
+    id: 'deep-link-point',
+    layerId: 'deep-link',
+    layerName: 'Deep Link',
+    serviceUrl: '',
+    attributes: {},
+    geometry: { x: parsed.lon, y: parsed.lat },
+    displayValue: parsed.label ?? 'Deep-link location',
+    location: {
+      latitude: parsed.lat,
+      longitude: parsed.lon,
+    },
+  },
+]);
