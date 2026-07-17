@@ -1,43 +1,33 @@
-import { signal } from '@angular/core';
+beforeEach(async () => {
+    userFacadeSpy = createSpyFromClass(UserFacade);
+    deepLinkFacadeSpy = createSpyFromClass(DeepLinkFacade);
+    navStateSpy = createSpyFromClass(NavStateService);
 
-// Fix the navState mock — activePanel must be a signal/function
-const navStateMock = {
-    activePanel: signal<string | null>(null),   // ← must be a signal
-    openPanel: jasmine.createSpy('openPanel').and.callFake((panel: string) => {
-        navStateMock.activePanel.set(panel);
-    }),
-    closePanel: jasmine.createSpy('closePanel').and.callFake(() => {
-        navStateMock.activePanel.set(null);
-    }),
-};
+    // ← ADD THIS — override with real signal since createSpyFromClass
+    // cannot replicate Angular signals
+    (navStateSpy as any).activePanel = signal<string | null>(null);
 
+    // Make openPanel update the signal so activeMode() reflects it
+    navStateSpy.openPanel.mockImplementation((panel: string) => {
+        (navStateSpy as any).activePanel.set(panel);
+    });
+    navStateSpy.closePanel.mockImplementation(() => {
+        (navStateSpy as any).activePanel.set(null);
+    });
 
-
-// Test 1
-it('should default activeMode to none', () => {
-    const fixture = TestBed.createComponent(AppShellComponent);
-    expect(fixture.componentInstance.activeMode()).toBe('none');  // ← add ()
-});
-
-// Test 2
-it('should update activeMode on onModeChange', () => {
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.componentInstance.onModeChange('maps-layers');
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');  // ← add ()
-});
-
-// Test 3
-it('should block restricted modes for limited users', () => {
-    const fixture = TestBed.createComponent(AppShellComponent);
-    fixture.componentInstance.onModeChange('maps-layers');
-    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');  // ← add ()
+    // ... rest of your existing beforeEach
 });
 
 
 
 
-beforeEach(() => {
-    navStateMock.activePanel.set(null);  // reset signal before each test
-    navStateMock.openPanel.calls.reset();
-    navStateMock.closePanel.calls.reset();
-});
+if ((navStateSpy as any).activePanel?.set) {
+    (navStateSpy as any).activePanel.set(null);
+}
+
+
+
+
+expect(fixture.componentInstance.activeMode()).toBe('none');       // test 1
+expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // test 2
+expect(fixture.componentInstance.activeMode()).toBe('none');        // test 3
