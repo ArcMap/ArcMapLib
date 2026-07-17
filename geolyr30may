@@ -1,37 +1,25 @@
-private async applyLatLon(parsed: ParsedDeepLink): Promise<void> {
-  if (parsed.lat === undefined || parsed.lon === undefined) {
+private handleStationaryChange(stationary: boolean): void {
+  if (!stationary) {
     return;
   }
 
-  await this.mapFacade.navigateToLocation({
-    latitude: parsed.lat,
-    longitude: parsed.lon,
-    zoom: parsed.zoom
-  });
+  const pendingZoom = this.mapFacade.consumePendingDeepLinkZoom();
+
+  if (pendingZoom !== undefined) {
+    this.setZoom(pendingZoom);
+  }
 }
 
 
 
-public async navigateToLocation(target: {
-  latitude: number;
-  longitude: number;
-  zoom?: number;
-}): Promise<void> {
-  const view = this.mapView;
+private pendingDeepLinkZoom: number | undefined;
 
-  if (!view) {
-    return;
-  }
+setPendingDeepLinkZoom(zoom: number): void {
+  this.pendingDeepLinkZoom = zoom;
+}
 
-  await view.when();
-
-  await view.goTo(
-    {
-      center: [target.longitude, target.latitude],
-      zoom: target.zoom
-    },
-    {
-      animate: false
-    }
-  );
+consumePendingDeepLinkZoom(): number | undefined {
+  const zoom = this.pendingDeepLinkZoom;
+  this.pendingDeepLinkZoom = undefined;
+  return zoom;
 }
