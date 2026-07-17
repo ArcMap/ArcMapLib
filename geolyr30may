@@ -1,36 +1,50 @@
-private applyLatLon(parsed: ParsedDeepLink): void {
-  if (parsed.lat !== undefined && parsed.lon !== undefined) {
-    const DELTA = 0.05;
-    this.mapFacade.setExtent({
-      leftLongitude: parsed.lon - DELTA,
-      bottomLatitude: parsed.lat - DELTA,
-      rightLongitude: parsed.lon + DELTA,
-      topLatitude: parsed.lat + DELTA,
-    });
+let deepLinkFacadeSpy: Spy<DeepLinkFacade>;
+let navStateSpy: Spy<NavStateService>;
 
-    this.mapFacade.setSearchHighlights([
+beforeEach(async () => {
+  // ...existing setup...
+
+  deepLinkFacadeSpy = createSpyFromClass(DeepLinkFacade);
+  navStateSpy = createSpyFromClass(NavStateService);
+
+  await TestBed.configureTestingModule({
+    imports: [AppShellComponent],
+    providers: [
+      { provide: UserFacade, useValue: userFacadeSpy },
+      { provide: Router, useValue: routerMock },
+      { provide: DeepLinkFacade, useValue: deepLinkFacadeSpy },   // ← add
+      { provide: NavStateService, useValue: navStateSpy },         // ← add
       {
-        id: 'deep-link-point',
-        layerId: 'deep-link',
-        layerName: 'Deep Link',
-        serviceUrl: '',
-        attributes: parsed.label ? { name: parsed.label } : {},
-        geometry: { x: parsed.lon, y: parsed.lat },
-        displayValue: parsed.label,           // undefined if no label — no fake name
-        location: {
-          latitude: parsed.lat,
-          longitude: parsed.lon,
-        },
+        provide: ActivatedRoute,
+        useValue: { snapshot: { queryParamMap: convertToParamMap({}) }, queryParamMap: of(convertToParamMap({})) },
       },
-    ]);
-  }
+    ],
+    schemas: [NO_ERRORS_SCHEMA],
+  })
+    .overrideComponent(ContextPanelHostComponent, { set: { template: '', imports: [] } })
+    .overrideComponent(MapViewComponent, { set: { template: '', imports: [] } })
+    .compileComponents();
+});
 
-  // — Zoom is fully independent of lat/lon and label.
-  if (parsed.zoom !== undefined) {
-    this.mapFacade.setZoom(parsed.zoom);
-  }
 
-  if (parsed.label) {
-    console.log('[DeepLinkFacade] lat/lon label:', parsed.label);
-  }
-}
+
+it('should open Maps & Layers panel when userMap query param exists', async () => {
+  routerMock.url = '/?userMap=Bridge%20Construction';
+  deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
+    navStateSpy.openPanel('maps-layers');
+  });
+
+  const fixture = TestBed.createComponent(AppShellComponent);
+  fixture.detectChanges();
+  await fixture.whenStable();
+  fixture.detectChanges();
+
+  expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+});
+
+
+
+const panelSignal = signal<PanelId | null>(null);
+navStateSpy.activePanel.mockReturnValue(panelSignal());
+navStateSpy.openPanel.mockImplementation((id) => panelSignal.set(id));
+Object.defineProperty(navStateSpy, 'activePanel', { value: panelSignal });
