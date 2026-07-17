@@ -1,57 +1,31 @@
-private applyLatLon(parsed: ParsedDeepLink): void {
-  if (parsed.lat !== undefined && parsed.lon !== undefined) {
-    const DELTA = 0.05;
-    this.mapFacade.setExtent({
-      leftLongitude: parsed.lon - DELTA,
-      bottomLatitude: parsed.lat - DELTA,
-      rightLongitude: parsed.lon + DELTA,
-      topLatitude: parsed.lat + DELTA,
-    });
+private syncZoomFromMapFacade(zoom: number, onSettled?: () => void): void {
+  console.log('syncZoomFromMapFacade', zoom);
+  if (this.upMapInstance.zoom === zoom) {
+    onSettled?.();
+    return;
   }
-
-  if (parsed.zoom !== undefined) {
-    this.mapFacade.setZoom(parsed.zoom);
+  const view = (this.upMapInstance as unknown as ZoomableMapViewHost).view;
+  if (view && typeof view.goTo === 'function') {
+    view.goTo({ zoom }, { animate: true, duration: 200 })
+      .catch(() => {})
+      .finally(() => onSettled?.());
+  } else {
+    onSettled?.();
   }
-
-  if (parsed.label) {
-    console.log('[DeepLinkFacade] lat/lon label:', parsed.label);
-  }
+  this.upMapInstance.zoom = zoom;
 }
 
 
-private ignoreZoomChange = true;
 
-private readonly zoomHandler = (event: Event): void => {
-  if (this.ignoreZoomChange) return;
-  const customEvent = event as CustomEvent<number>;
-  const zoom = customEvent.detail;
-  if (typeof zoom === 'number') {
-    this.mapFacade.setZoom(zoom);
-    const scale = this.upMapInstance.view?.scale;
-    if (typeof scale === 'number') {
-      this.mapFacade.setScale(scale);
-    }
-  }
-};
-
-
-
-const deepLinkExtent = this.mapFacade.state().extent;
-const deepLinkZoom = this.mapFacade.state().zoom;
-
-if (deepLinkExtent && this.isValidExtent(deepLinkExtent)) {
-  this.setExtent(deepLinkExtent);
-} else {
-  this.setExtent(defaultExtent);
-}
 
 setTimeout(() => {
   this.ignoreExtentChange = false;
-  this.ignoreZoomChange = false;
 
-  // Native zoom events during settling were suppressed above, so
-  // re-push the deep-link zoom now that the view has stabilized.
   if (deepLinkZoom !== null) {
-    this.syncZoomFromMapFacade(deepLinkZoom);
+    this.syncZoomFromMapFacade(deepLinkZoom, () => {
+      this.ignoreZoomChange = false;   // only unblock once OUR animation is done
+    });
+  } else {
+    this.ignoreZoomChange = false;
   }
 }, 500);
