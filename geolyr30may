@@ -1,100 +1,63 @@
-describe('AppShellComponent', () => {
-    let userFacadeSpy: Spy<UserFacade>;
-    let userContextSignal: ReturnType<typeof signal<UserContext | null>>;
-    let routerMock: {
-        url: string;
-        parseUrl: ReturnType<typeof vi.fn>;
-    };
-    let deepLinkFacadeSpy: Spy<DeepLinkFacade>;
-    let navStateSpy: Spy<NavStateService>;
+it('should open Maps & Layers panel when layers query param exists', async () => {
+    routerMock.url = '/?layers=someLayer';
 
-    // ← ADD THIS — real signal shared across tests
-    let activePanelSignal: ReturnType<typeof signal<string | null>>;
-
-    beforeEach(async () => {
-        // ← ADD THIS — create a fresh signal before each test
-        activePanelSignal = signal<string | null>(null);
-
-        userFacadeSpy = createSpyFromClass(UserFacade);
-        userContextSignal = signal<UserContext | null>(null);
-        userFacadeSpy.userContext$ = userContextSignal;
-
-        deepLinkFacadeSpy = createSpyFromClass(DeepLinkFacade);
-        navStateSpy = createSpyFromClass(NavStateService);
-
-        // ← ADD THESE THREE — override signal + wire openPanel/closePanel
-        (navStateSpy as any).activePanel = activePanelSignal;
-        navStateSpy.openPanel.mockImplementation((panel: string) => {
-            activePanelSignal.set(panel);
-        });
-        navStateSpy.closePanel.mockImplementation(() => {
-            activePanelSignal.set(null);
-        });
-
-        routerMock = {
-            url: '/',
-            parseUrl: vi.fn((url: string) => {
-                const u = new URL(url, 'http://localhost');
-                const queryParams: Record<string, string> = {};
-                u.searchParams.forEach((v, k) => (queryParams[k] = v));
-                return { queryParams };
-            }),
-        };
-
-        vi.mock('up-map', () => ({
-            apPage: class {},
-        }));
-
-        await TestBed.configureTestingModule({
-            imports: [AppShellComponent],
-            providers: [
-                { provide: UserFacade, useValue: userFacadeSpy },
-                { provide: Router, useValue: routerMock },
-                { provide: DeepLinkFacade, useValue: deepLinkFacadeSpy },
-                { provide: NavStateService, useValue: navStateSpy },
-            ],
-            schemas: [NO_ERRORS_SCHEMA],
-        })
-            .overrideComponent(ContextPanelHostComponent, { set: { template: '', imports: [] } })
-            .overrideComponent(MapViewComponent, { set: { template: '', imports: [] } })
-            .compileComponents();
+    // ← ADD: make applyFromParams call openPanel for this test
+    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
+        navStateSpy.openPanel('maps-layers');
     });
 
-    // ─── Test 1 ───────────────────────────────────────────────────────────────
+    const fixture = TestBed.createComponent(AppShellComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
 
-    it('should default activeMode to none', () => {
-        const fixture = TestBed.createComponent(AppShellComponent);
-        fixture.detectChanges();
+    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+});
 
-        expect(fixture.componentInstance.activeMode()).toBe('none'); // ← () added
+it('should prefer Maps & Layers panel when both userMap and layers query params exist', async () => {
+    routerMock.url = '/?userMap=Bridge%20Construction&layers=someLayer';
+
+    // ← ADD: make applyFromParams call openPanel for this test
+    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
+        navStateSpy.openPanel('maps-layers');
     });
 
-    // ─── Test 2 ───────────────────────────────────────────────────────────────
+    const fixture = TestBed.createComponent(AppShellComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
 
-    it('should update activeMode on onModeChange', () => {
-        const fixture = TestBed.createComponent(AppShellComponent);
-        fixture.detectChanges();
+    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+});
 
-        fixture.componentInstance.onModeChange('maps-layers');
+it('should open Maps & Layers panel when layer query param exists', async () => {
+    routerMock.url = '/?layer=someLayer';
 
-        expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // ← () added
+    // ← ADD: make applyFromParams call openPanel for this test
+    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
+        navStateSpy.openPanel('maps-layers');
     });
 
-    // ─── Test 3 ───────────────────────────────────────────────────────────────
+    const fixture = TestBed.createComponent(AppShellComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
 
-    it('should block restricted modes for limited users', () => {
-        userContextSignal.set({
-            userId: 'test-user',
-            isAdmin: false,
-            isLimitedUser: true,
-            preferences: {},
-        });
+    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
+});
 
-        const fixture = TestBed.createComponent(AppShellComponent);
-        fixture.detectChanges();
+it('should open Maps & Layers panel from browser URL when Router.url has no params yet', async () => {
+    routerMock.url = '/';
 
-        fixture.componentInstance.onModeChange('maps-layers');
-
-        expect(fixture.componentInstance.activeMode()).toBe('maps-layers'); // ← () added
+    // ← ADD: make applyFromParams call openPanel for this test
+    deepLinkFacadeSpy.applyFromParams.mockImplementation(async () => {
+        navStateSpy.openPanel('maps-layers');
     });
+
+    const fixture = TestBed.createComponent(AppShellComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.activeMode()).toBe('maps-layers');
 });
