@@ -1,25 +1,57 @@
-private handleStationaryChange(stationary: boolean): void {
-  if (!stationary) {
-    return;
+private applyLatLon(parsed: ParsedDeepLink): void {
+  if (parsed.lat !== undefined && parsed.lon !== undefined) {
+    const DELTA = 0.05;
+    this.mapFacade.setExtent({
+      leftLongitude: parsed.lon - DELTA,
+      bottomLatitude: parsed.lat - DELTA,
+      rightLongitude: parsed.lon + DELTA,
+      topLatitude: parsed.lat + DELTA,
+    });
   }
 
-  const pendingZoom = this.mapFacade.consumePendingDeepLinkZoom();
+  if (parsed.zoom !== undefined) {
+    this.mapFacade.setZoom(parsed.zoom);
+  }
 
-  if (pendingZoom !== undefined) {
-    this.setZoom(pendingZoom);
+  if (parsed.label) {
+    console.log('[DeepLinkFacade] lat/lon label:', parsed.label);
   }
 }
 
 
+private ignoreZoomChange = true;
 
-private pendingDeepLinkZoom: number | undefined;
+private readonly zoomHandler = (event: Event): void => {
+  if (this.ignoreZoomChange) return;
+  const customEvent = event as CustomEvent<number>;
+  const zoom = customEvent.detail;
+  if (typeof zoom === 'number') {
+    this.mapFacade.setZoom(zoom);
+    const scale = this.upMapInstance.view?.scale;
+    if (typeof scale === 'number') {
+      this.mapFacade.setScale(scale);
+    }
+  }
+};
 
-setPendingDeepLinkZoom(zoom: number): void {
-  this.pendingDeepLinkZoom = zoom;
+
+
+const deepLinkExtent = this.mapFacade.state().extent;
+const deepLinkZoom = this.mapFacade.state().zoom;
+
+if (deepLinkExtent && this.isValidExtent(deepLinkExtent)) {
+  this.setExtent(deepLinkExtent);
+} else {
+  this.setExtent(defaultExtent);
 }
 
-consumePendingDeepLinkZoom(): number | undefined {
-  const zoom = this.pendingDeepLinkZoom;
-  this.pendingDeepLinkZoom = undefined;
-  return zoom;
-}
+setTimeout(() => {
+  this.ignoreExtentChange = false;
+  this.ignoreZoomChange = false;
+
+  // Native zoom events during settling were suppressed above, so
+  // re-push the deep-link zoom now that the view has stabilized.
+  if (deepLinkZoom !== null) {
+    this.syncZoomFromMapFacade(deepLinkZoom);
+  }
+}, 500);
