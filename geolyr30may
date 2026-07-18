@@ -1,9 +1,29 @@
-console.log(
-  '[AppShellComponent] Browser URL at startup:',
-  window.location.href
-);
+ngOnInit(): void {
+  console.log('[AppShellComponent.ngOnInit] window.location.href', window.location.href);
+  console.log('[AppShellComponent.ngOnInit] router.url', this.router.url);
 
-console.log(
-  '[AppShellComponent] Angular Router URL at startup:',
-  this.router.url
-);
+  const parsedUrl = this.router.parseUrl(this.router.url);
+
+  console.log('[AppShellComponent.ngOnInit] parsedUrl', parsedUrl);
+
+  let queryParams = { ...parsedUrl.queryParams };
+
+  console.log('[AppShellComponent.ngOnInit] router queryParams', queryParams);
+
+  if (
+    Object.keys(queryParams).length === 0 &&
+    typeof window !== 'undefined'
+  ) {
+    console.log('[AppShellComponent.ngOnInit] Falling back to window.location.search', window.location.search);
+
+    new URLSearchParams(window.location.search).forEach((value, key) => {
+      queryParams[key] = value;
+    });
+
+    console.log('[AppShellComponent.ngOnInit] queryParams after fallback', queryParams);
+  }
+
+  console.log('[AppShellComponent.ngOnInit] Calling applyFromParams()', queryParams);
+
+  this.deepLinkFacade.applyFromParams(convertToParamMap(queryParams));
+}
