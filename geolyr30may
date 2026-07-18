@@ -1,8 +1,89 @@
-beforeEach(() => {
-  activatedRouteSpy = createSpyFromClass(ActivatedRoute);
+import { ActivatedRoute, Router } from '@angular/router';
+import { of } from 'rxjs';
+import {
+  createSpyFromClass,
+  Spy
+} from 'jasmine-auto-spies';
 
-  activatedRouteSpy.queryParams = of({});
-  activatedRouteSpy.paramMap = of({
-    get: () => null
-  } as any);
+describe('SavedMapsPanelComponent', () => {
+  let fixture: ComponentFixture<SavedMapsPanelComponent>;
+  let component: SavedMapsPanelComponent;
+
+  let routerSpy: Spy<Router>;
+  let activatedRouteSpy: Spy<ActivatedRoute>;
+
+  beforeEach(async () => {
+    routerSpy = createSpyFromClass(Router);
+    activatedRouteSpy = createSpyFromClass(ActivatedRoute);
+
+    // The component only needs ActivatedRoute as the relative route
+    // for router.navigate([], { relativeTo: ... }).
+    //
+    // These observable values are enough unless the component directly
+    // reads activatedRoute.snapshot.
+    Object.defineProperty(activatedRouteSpy, 'queryParams', {
+      value: of({}),
+      configurable: true
+    });
+
+    Object.defineProperty(activatedRouteSpy, 'paramMap', {
+      value: of({
+        get: () => null
+      }),
+      configurable: true
+    });
+
+    routerSpy.navigate.and.resolveTo(true);
+
+    await TestBed.configureTestingModule({
+      imports: [SavedMapsPanelComponent],
+      providers: [
+        {
+          provide: Router,
+          useValue: routerSpy
+        },
+        {
+          provide: ActivatedRoute,
+          useValue: activatedRouteSpy
+        }
+
+        // Keep your other existing providers here.
+      ]
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(SavedMapsPanelComponent);
+    component = fixture.componentInstance;
+
+    fixture.detectChanges();
+  });
+
+  it('should select, load, and update legacy URL params on openMap', () => {
+    const savedMap = {
+      id: 1,
+      mapId: '1',
+      userId: '1',
+      name: 'Test Map',
+      type: 'user',
+      createdAt: 'now',
+      layers: [
+        {
+          uniqueLayerId: 101,
+          isChecked: true
+        }
+      ]
+    } as SavedMap;
+
+    component.openMap(savedMap);
+
+    expect(routerSpy.navigate).toHaveBeenCalledWith([], {
+      relativeTo: activatedRouteSpy,
+      queryParams: {
+        layers: '101',
+        userMap: 'Test Map',
+        bookmarkId: null
+      },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
+  });
 });
