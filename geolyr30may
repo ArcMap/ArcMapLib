@@ -1,41 +1,8 @@
-import { ActivatedRoute } from '@angular/router';
-import { createSpyFromClass } from 'jasmine-auto-spies';
-import { of } from 'rxjs';
+beforeEach(() => {
+  activatedRouteSpy = createSpyFromClass(ActivatedRoute);
 
-const activatedRouteSpy = createSpyFromClass(ActivatedRoute);
-
-// Mock snapshot
-activatedRouteSpy.snapshot = {
-  queryParams: {},
-  paramMap: {
+  activatedRouteSpy.queryParams = of({});
+  activatedRouteSpy.paramMap = of({
     get: () => null
-  }
-} as ActivatedRoute['snapshot'];
-
-// Mock observables
-activatedRouteSpy.queryParams = of({});
-activatedRouteSpy.paramMap = of({
-  get: () => null
-} as any);
-
-
-
-providers: [
-  {
-    provide: ActivatedRoute,
-    useValue: activatedRouteSpy
-  }
-]
-
-
-
-expect(routerMock.navigate).toHaveBeenCalledWith([], {
-  relativeTo: activatedRouteSpy,
-  queryParams: {
-    layers: '101',
-    userMap: 'Test Map',
-    bookmarkId: null
-  },
-  queryParamsHandling: 'merge',
-  replaceUrl: true
+  } as any);
 });
