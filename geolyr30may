@@ -1,19 +1,41 @@
-it('sets extent and zoom when lat/lon/zoom are provided', async () => {
-    parserSpy.parse.mockReturnValue({ lat: 41.5, lon: -104.2, zoom: 12 });
-    parserSpy.isEmpty.mockReturnValue(false);
-    mapsApiSpy.readPredefinedMaps.mockReturnValue(of([])); // ← ADD THIS LINE
-    mapsApiSpy.readUserMaps.mockReturnValue(of([]));
-    mapsApiSpy.readBookmarks.mockReturnValue(of([]));
+import { ActivatedRoute } from '@angular/router';
+import { createSpyFromClass } from 'jasmine-auto-spies';
+import { of } from 'rxjs';
 
-    await facade.applyFromParams(emptyParams);
+const activatedRouteSpy = createSpyFromClass(ActivatedRoute);
 
-    expect(mapFacadeSpy.setZoom).toHaveBeenCalledWith(12);
-    expect(mapFacadeSpy.setExtent).toHaveBeenCalledWith(
-        expect.objectContaining({
-            leftLongitude: -104.25,  // ← CHANGED from -104.2  (-104.2 - 0.05)
-            bottomLatitude: 41.45,   // ← CHANGED from 41.5    (41.5 - 0.05)
-            rightLongitude: -104.15, // ← ADD                  (-104.2 + 0.05)
-            topLatitude: 41.55,      // ← ADD                  (41.5 + 0.05)
-        }),
-    );
+// Mock snapshot
+activatedRouteSpy.snapshot = {
+  queryParams: {},
+  paramMap: {
+    get: () => null
+  }
+} as ActivatedRoute['snapshot'];
+
+// Mock observables
+activatedRouteSpy.queryParams = of({});
+activatedRouteSpy.paramMap = of({
+  get: () => null
+} as any);
+
+
+
+providers: [
+  {
+    provide: ActivatedRoute,
+    useValue: activatedRouteSpy
+  }
+]
+
+
+
+expect(routerMock.navigate).toHaveBeenCalledWith([], {
+  relativeTo: activatedRouteSpy,
+  queryParams: {
+    layers: '101',
+    userMap: 'Test Map',
+    bookmarkId: null
+  },
+  queryParamsHandling: 'merge',
+  replaceUrl: true
 });
