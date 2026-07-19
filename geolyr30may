@@ -1,34 +1,16 @@
-private suppressNextDeepLinkApply = false;
+if (setAsDefault) {
+  this.addFavoriteMapId(saved.mapID);
 
-private initializeMapItemsAndDeepLinking(): Promise<void> {
-  ...
-  this.activatedRoute.queryParamMap
-    .pipe(takeUntilDestroyed(this.destroyRef))
-    .subscribe((queryParams) => {
-      if (this.suppressNextDeepLinkApply) {
-        this.suppressNextDeepLinkApply = false;
-        return;
-      }
-      this.tryApplyDeepLinkedMap(queryParams);
-    });
-}
-
-
-
-private updateSelectedMapQueryParams(): void {
-  const selectedMap = this.selectedMapItem();
-  if (!selectedMap) return;
-
-  const visibleLayerIds = this.layersFacade.visibleLayers().map((l) => l.id);
-
-  this.suppressNextDeepLinkApply = true;
-  void this.router.navigate(['/'], {
-    queryParams: {
-      layers: visibleLayerIds.length > 0 ? visibleLayerIds.join(',') : null,
-      userMap: selectedMap.name,
-      bookmarkId: null,
-    },
-    queryParamsHandling: 'merge',
-    replaceUrl: true,
+  // Also save as a predefined map
+  this.savePredefinedMap({
+    id: saved.mapID,
+    name: trimmedName,
+    layers: this.parseMapLayerInfo(mapLayerInfo),
+  }).subscribe({
+    error: (err) =>
+      console.error('[SavedMapFacade] savePredefinedMap failed', err),
   });
+
+  // Persist as user preference
+  this.userContextFacade.setPreference('userDefaultSavedMap', saved.mapID);
 }
