@@ -1,22 +1,20 @@
-if (checked) {
-  this.addFavoriteMapId(currentMapId);
+loadUserMaps(): void {
+  this.mapsApi.readUserMaps().subscribe({
+    next: (dtos) => {
+      const maps = this.applyFavoriteMapFlags(
+        dtos
+          .filter((dto) => dto.userID !== 'predefined')
+          .map((dto) => this.mapDtoToSavedMap(dto)),
+      );
 
-  const savedMap = this.savedMaps().find((map) => map.id === currentMapId);
-  if (savedMap) {
-    this.savePredefinedMap({
-      id: currentMapId,
-      name: savedMap.name,
-      layers: savedMap.layers.map((layer, index) => ({
-        layerId: layer.layerId,
-        visible: layer.visible,
-        order: index,
-      })),
-    }).subscribe({
-      error: (err) =>
-        console.error('[SavedMapFacade] savePredefinedMap failed', err),
-    });
-  }
+      this.savedMaps.set(maps);
 
-  this.userFacade.setPreference('userDefaultSavedMap', currentMapId);
-  return;
+      // NEW: auto-load the default map at startup
+      const defaultMap = maps.find((map) => map.isDefault);
+      if (defaultMap) {
+        this.loadSavedMap(defaultMap.id);
+      }
+    },
+    error: (err) => console.error('[SavedMapFacade] loadUserMaps failed', err),
+  });
 }
