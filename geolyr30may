@@ -1,16 +1,30 @@
-if (setAsDefault) {
-  this.addFavoriteMapId(saved.mapID);
+setCurrentSavedMapAsDefault(checked: boolean): void {
+  const currentMapId = this.currentSavedMapId();
+  this.saveAsDefaultForNextSave.set(checked);
 
-  // Also save as a predefined map
-  this.savePredefinedMap({
-    id: saved.mapID,
-    name: trimmedName,
-    layers: this.parseMapLayerInfo(mapLayerInfo),
-  }).subscribe({
-    error: (err) =>
-      console.error('[SavedMapFacade] savePredefinedMap failed', err),
-  });
+  if (!currentMapId) {
+    console.warn('[SavedMapFacade] setCurrentSavedMapAsDefault skipped: no saved map is open');
+    return;
+  }
 
-  // Persist as user preference
-  this.userContextFacade.setPreference('userDefaultSavedMap', saved.mapID);
+  if (checked) {
+    this.addFavoriteMapId(currentMapId);
+
+    const savedMap = this.savedMaps().find((map) => map.id === currentMapId);
+    if (savedMap) {
+      this.savePredefinedMap({
+        id: currentMapId,
+        name: savedMap.name,
+        layers: savedMap.layers,
+      }).subscribe({
+        error: (err) =>
+          console.error('[SavedMapFacade] savePredefinedMap failed', err),
+      });
+    }
+
+    this.userFacade.setPreference('userDefaultSavedMap', currentMapId);
+    return;
+  }
+
+  this.removeFavoriteMapId(currentMapId);
 }
