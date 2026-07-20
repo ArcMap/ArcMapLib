@@ -1,4 +1,17 @@
-export const routes: Routes = [
-  { path: 'index.html', redirectTo: '', pathMatch: 'full' }, // absorb the bad segment
-  { path: '', component: AppShellComponent },                 // your actual root
-];
+private applyLayers(parsed: ParsedDeepLink): void {
+  if (!parsed.layers?.length) return;
+
+  const catalogIds = new Set(this.mapFacade.getAllLayerIds()); // or however the full catalog is exposed
+  const matchedIds = parsed.layers.filter((id) => catalogIds.has(id));
+
+  if (matchedIds.length === 0) {
+    console.warn('[DeepLinkFacade] none of the requested layer IDs matched the catalog — keeping default layers');
+    return; // leave whatever the default map already applied untouched
+  }
+
+  for (const layerId of matchedIds) {
+    this.mapFacade.setLayerVisibility(layerId, true);
+  }
+
+  this.navState.openPanel('maps-layers');
+}
