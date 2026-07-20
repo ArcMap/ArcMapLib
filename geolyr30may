@@ -1,15 +1,18 @@
-// in LayersFacade
-serializeDisplayedLayers(): string {
-  const displayedLayers = this.selectedMapLayers().map((layer) => ({
-    uniqueLayerId: layer.id,            // numeric id → 13040, 13050, ...
-    isChecked: layer.visible === true,  // on/off, matches legacy
-  }));
-  return JSON.stringify({ displayedLayers });
+loadUserMaps(): void {
+  this.mapsApi.readUserMaps().subscribe({
+    next: (dtos) => {
+      const maps = dtos
+        .filter((dto) => dto.userID !== 'predefined')
+        .map((dto) => this.mapDtoToSavedMap(dto));
+
+      this.savedMaps.set(maps);
+
+      // NEW: load the default saved map on startup
+      const defaultMapId = this.userFacade.getPreference('userDefaultSavedMap');
+      if (defaultMapId && maps.some((m) => m.id === defaultMapId)) {
+        this.loadSavedMap(defaultMapId);
+      }
+    },
+    error: (err) => console.error('[SavedMapFacade] loadUserMaps failed', err),
+  });
 }
-
-
-
-// was:
-const mapLayerInfo = this.mapFacade.serializeMapState();
-// now:
-const mapLayerInfo = this.layersFacade.serializeDisplayedLayers();
