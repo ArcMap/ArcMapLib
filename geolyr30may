@@ -1,20 +1,29 @@
-loadUserMaps(): void {
-  this.mapsApi.readUserMaps().subscribe({
-    next: (dtos) => {
-      const maps = this.applyFavoriteMapFlags(
-        dtos
-          .filter((dto) => dto.userID !== 'predefined')
-          .map((dto) => this.mapDtoToSavedMap(dto)),
-      );
+private mapDtoToSavedMap(dto: UserMapDto): SavedMap {
+  const parsedLayers = this.parseMapLayerInfo(dto.mapLayerInfo);
 
-      this.savedMaps.set(maps);
+  // Legacy marks the default map via isChecked on its displayed layers
+  const isDefault = parsedLayers.some((layer) => layer.visible === true);
 
-      // NEW: auto-load the default map at startup
-      const defaultMap = maps.find((map) => map.isDefault);
-      if (defaultMap) {
-        this.loadSavedMap(defaultMap.id);
-      }
-    },
-    error: (err) => console.error('[SavedMapFacade] loadUserMaps failed', err),
-  });
+  const layers = parsedLayers.map((layer) => ({
+    layerId: layer.layerId,
+    visible: layer.visible,
+  }));
+
+  return {
+    id: dto.mapID,
+    name: dto.mapName,
+    userId: dto.userID,
+    layers,
+    createdAt: 'unknown',
+    isDefault,
+    rawMapLayerInfo: dto.mapLayerInfo,
+  };
+}
+
+
+
+const defaultMap = maps.find((m) => m.isDefault);
+if (defaultMap) {
+  this.currentSavedMapId.set(defaultMap.id);
+  this.loadSavedMap(defaultMap.id);
 }
