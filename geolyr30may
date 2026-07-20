@@ -1,18 +1,4 @@
-loadUserMaps(): void {
-  this.mapsApi.readUserMaps().subscribe({
-    next: (dtos) => {
-      const maps = dtos
-        .filter((dto) => dto.userID !== 'predefined')
-        .map((dto) => this.mapDtoToSavedMap(dto));
-
-      this.savedMaps.set(maps);
-
-      // NEW: load the default saved map on startup
-      const defaultMapId = this.userFacade.getPreference('userDefaultSavedMap');
-      if (defaultMapId && maps.some((m) => m.id === defaultMapId)) {
-        this.loadSavedMap(defaultMapId);
-      }
-    },
-    error: (err) => console.error('[SavedMapFacade] loadUserMaps failed', err),
-  });
+lconst defaultMapId = this.userFacade.getPreference('userDefaultSearchLayer');
+if (defaultMapId && maps.some((m) => String(m.id) === String(defaultMapId))) {
+  this.loadSavedMap(String(defaultMapId));
 }
