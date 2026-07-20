@@ -1,24 +1,35 @@
-private updateMapQueryParams(map: MapSelectionItem): void {
-  const checkedLayerIds = (map.layers ?? [])
-    .filter((layer) => layer.isChecked === true)
-    .map((layer) => layer.uniqueLayerId)
-    .filter(
-      (layerId): layerId is number =>
-        layerId !== null && layerId !== undefined,
-    );
+applySelectedLayerIds(layerIds: number[], isDefaultView = false): void {
+  const selectedMap = this.selectedMap();
+  if (!selectedMap) return;
 
-  this.suppressNextDeepLinkApply = true;
+  const selectedLayerIds = new Set(layerIds);
 
-  void this.router.navigate(['/'], {
-    queryParams: {
-      layers:
-        checkedLayerIds.length > 0
-          ? checkedLayerIds.join(',')
-          : null,
-      userMap: map.name,
-      bookmarkId: null,
-    },
-    queryParamsHandling: 'merge',
-    replaceUrl: true,
+  if (isDefaultView) {
+    // Default view — keep ONLY the saved layers (your existing logic, unchanged).
+    const matchedLayerIds = this.layers()
+      .filter((layer) => layer.id !== null && selectedLayerIds.has(layer.id))
+      .sort((left, right) => left.drawOrderId - right.drawOrderId)
+      .map((layer) => layer.id as number);
+    const orderedLayerIds = matchedLayerIds.length > 0 ? matchedLayerIds : layerIds;
+
+    this.setSelectedMap({
+      ...selectedMap,
+      layers: orderedLayerIds.map((layerId, index) => ({ layerId, visible: true, order: index })),
+    });
+    return;
+  }
+
+  // Other maps — keep the FULL catalog (disabled layers included), just toggle visibility.
+  const ordered = this.layers()
+    .filter((layer) => layer.id !== null)
+    .sort((left, right) => left.drawOrderId - right.drawOrderId);
+
+  this.setSelectedMap({
+    ...selectedMap,
+    layers: ordered.map((layer, index) => ({
+      layerId: layer.id as number,
+      visible: selectedLayerIds.has(layer.id as number),
+      order: index,
+    })),
   });
 }
