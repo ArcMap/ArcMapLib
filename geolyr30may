@@ -1,29 +1,10 @@
-private mapDtoToSavedMap(dto: UserMapDto): SavedMap {
-  const parsedLayers = this.parseMapLayerInfo(dto.mapLayerInfo);
+serializeMapState(): string {
+  const state = this._state();
 
-  // Legacy marks the default map via isChecked on its displayed layers
-  const isDefault = parsedLayers.some((layer) => layer.visible === true);
-
-  const layers = parsedLayers.map((layer) => ({
-    layerId: layer.layerId,
-    visible: layer.visible,
+  const displayedLayers = state.activeLayerIds.map((layerId) => ({
+    uniqueLayerId: Number(layerId),
+    isChecked: true,
   }));
 
-  return {
-    id: dto.mapID,
-    name: dto.mapName,
-    userId: dto.userID,
-    layers,
-    createdAt: 'unknown',
-    isDefault,
-    rawMapLayerInfo: dto.mapLayerInfo,
-  };
-}
-
-
-
-const defaultMap = maps.find((m) => m.isDefault);
-if (defaultMap) {
-  this.currentSavedMapId.set(defaultMap.id);
-  this.loadSavedMap(defaultMap.id);
+  return JSON.stringify({ displayedLayers });
 }
