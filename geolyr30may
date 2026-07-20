@@ -1,12 +1,8 @@
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
-
-const activatedRouteMock: Partial<ActivatedRoute> = {
-  snapshot: {
-    paramMap: convertToParamMap({}),
-    queryParamMap: convertToParamMap({}),
-  } as any,
-  params: of({}),
-  queryParams: of({}),
-  data: of({}),
-  fragment: of(null),
-};
+void this.router
+  .navigate([], {
+    relativeTo: this.activatedRoute,
+    queryParams: { /* ... */ },
+    queryParamsHandling: 'merge',
+    replaceUrl: true,
+  })
+  .then((committed) => console.log('nav committed?', committed));
