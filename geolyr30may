@@ -1,33 +1,43 @@
-private defaultMapLoaded = false;
+it('should update query params when opening a map', () => {
+  const fixture =
+    TestBed.createComponent(MapsLayersPanelComponent);
 
-loadUserMaps(): void {
-  this.mapApi.readUserMaps().subscribe({
-    next: (dtos) => {
-      const maps = dtos
-        .filter((dto) => dto.userID !== 'predefined')
-        .map((dto) => this.mapDtoToSavedMap(dto));
+  fixture.detectChanges();
 
-      this.savedMaps.set(
-        this.applyFavoriteMapFlag(maps)
-      );
+  const component = fixture.componentInstance;
 
-      if (!this.defaultMapLoaded) {
-        const defaultMapId =
-          this.userFacade.getPreference('userDefaultSearchLayer');
+  const map: MapSelectionItem = {
+    id: 'saved-1',
+    mapId: 'saved-1',
+    userId: 'u1',
+    name: 'Bridge Construction',
+    type: 'user' as const,
+    createdAt: 'today',
+    layers: [
+      { uniqueLayerId: 3564, isChecked: true },
+      { uniqueLayerId: 3614, isChecked: true },
+      { uniqueLayerId: 3663, isChecked: true },
+      { uniqueLayerId: 3665, isChecked: true },
+      { uniqueLayerId: 3666, isChecked: true },
+      { uniqueLayerId: 3668, isChecked: true },
+      { uniqueLayerId: 3669, isChecked: true },
+    ],
+  };
 
-        if (
-          defaultMapId &&
-          maps.some(
-            (map) => String(map.id) === String(defaultMapId)
-          )
-        ) {
-          this.defaultMapLoaded = true;
-          this.loadSavedMap(String(defaultMapId));
-        }
-      }
-    },
+  component.selectMapItem(map);
 
-    error: (err) =>
-      console.error('[SavedMapFacade] loadUserMaps failed', err),
-  });
-}
+  expect(routerMock.navigate).toHaveBeenCalledTimes(1);
+
+  expect(routerMock.navigate).toHaveBeenCalledWith(
+    ['/'],
+    expect.objectContaining({
+      queryParams: expect.objectContaining({
+        layers: '3564,3614,3663,3665,3666,3668,3669',
+        userMap: 'Bridge Construction',
+        bookmarkId: null,
+      }),
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    }),
+  );
+});
