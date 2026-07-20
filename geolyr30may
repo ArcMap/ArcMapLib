@@ -1,1 +1,12 @@
-history.pushState({}, '', location.pathname + '?test=99');
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
+
+const activatedRouteMock: Partial<ActivatedRoute> = {
+  snapshot: {
+    paramMap: convertToParamMap({}),
+    queryParamMap: convertToParamMap({}),
+  } as any,
+  params: of({}),
+  queryParams: of({}),
+  data: of({}),
+  fragment: of(null),
+};
