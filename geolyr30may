@@ -1,6 +1,27 @@
+// in SavedMapFacade.loadSavedMap(), after applying the map:
 loadSavedMap(id: string): void {
-  console.log('[loadSavedMap] called with id =', id);
-  const savedMap = this.savedMaps().find((map) => map.id === id);
-  console.log('[loadSavedMap] found map =', savedMap);
+  const savedMap = this.savedMaps().find((map) => String(map.id) === String(id));
+  if (savedMap?.rawMapLayerInfo) {
+    this.currentSavedMapId.set(id);
+    this.mapFacade.applySavedMap(savedMap.rawMapLayerInfo);
+
+    // NEW: reflect the saved map as the selected item so the label shows its name
+    const mapItem = this.toMapSelectionItem(savedMap);
+    this.layersFacade.setSelectedMapItem(mapItem);
+    return;
+  }
   // ... rest
 }
+
+
+
+readonly selectedMapLabel = computed(() => {
+  // If a saved map is loaded, show its name first
+  const savedMapId = this.savedMapFacade.currentSavedMapId();
+  if (savedMapId) {
+    const savedMap = this.savedMapFacade.savedMaps()
+      .find((m) => String(m.id) === String(savedMapId));
+    if (savedMap) return savedMap.name;
+  }
+  return this.selectedMapItem()?.name ?? this.selectedMap()?.name ?? 'Atlas (Default)';
+});
