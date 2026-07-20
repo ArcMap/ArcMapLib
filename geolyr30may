@@ -1,13 +1,34 @@
+// in LayersFacade
+selectSavedMap(savedMap: SavedMap): void {
+  // toMapSelectionItem takes a UserMapDto, so build the item from the SavedMap here,
+  // or map SavedMap -> the shape toMapSelectionItem/MapSelectionItem needs.
+  const mapItem: MapSelectionItem = {
+    id: Number(savedMap.id),
+    mapId: savedMap.id,
+    userId: savedMap.userId,
+    name: savedMap.name,
+    type: 'user',
+    layers: savedMap.layers.map((layer, index) => ({
+      uniqueLayerId: layer.layerId,
+      isChecked: layer.visible,
+      order: index,
+    })),
+  };
+
+  this.setSelectedMapItem(mapItem);  // private, but we're INSIDE LayersFacade — OK
+}
+
+
 loadSavedMap(id: string): void {
   const savedMap = this.savedMaps().find((map) => String(map.id) === String(id));
   if (savedMap?.rawMapLayerInfo) {
     this.currentSavedMapId.set(id);
     this.mapFacade.applySavedMap(savedMap.rawMapLayerInfo);
 
-    // Reflect the saved map as the selected item → label shows its name
-    const mapItem = this.toMapSelectionItem(savedMap);   // SavedMapFacade's own method (SavedMap input)
-    this.layersFacade.setSelectedMapItem(mapItem);        // LayersFacade public method
+    // 👇 the only new line — one public call into LayersFacade
+    this.layersFacade.selectSavedMap(savedMap);
+
     return;
   }
-  // ... rest of your existing loadSavedMap
+  // ... rest unchanged
 }
