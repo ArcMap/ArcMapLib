@@ -1,10 +1,15 @@
-serializeMapState(): string {
-  const state = this._state();
-
-  const displayedLayers = state.activeLayerIds.map((layerId) => ({
-    uniqueLayerId: Number(layerId),
-    isChecked: true,
+// in LayersFacade
+serializeDisplayedLayers(): string {
+  const displayedLayers = this.selectedMapLayers().map((layer) => ({
+    uniqueLayerId: layer.id,            // numeric id → 13040, 13050, ...
+    isChecked: layer.visible === true,  // on/off, matches legacy
   }));
-
   return JSON.stringify({ displayedLayers });
 }
+
+
+
+// was:
+const mapLayerInfo = this.mapFacade.serializeMapState();
+// now:
+const mapLayerInfo = this.layersFacade.serializeDisplayedLayers();
