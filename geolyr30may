@@ -1,43 +1,24 @@
-it('should update query params when opening a map', () => {
-  const fixture =
-    TestBed.createComponent(MapsLayersPanelComponent);
+private updateMapQueryParams(map: MapSelectionItem): void {
+  const checkedLayerIds = (map.layers ?? [])
+    .filter((layer) => layer.isChecked === true)
+    .map((layer) => layer.uniqueLayerId)
+    .filter(
+      (layerId): layerId is number =>
+        layerId !== null && layerId !== undefined,
+    );
 
-  fixture.detectChanges();
+  this.suppressNextDeepLinkApply = true;
 
-  const component = fixture.componentInstance;
-
-  const map: MapSelectionItem = {
-    id: 'saved-1',
-    mapId: 'saved-1',
-    userId: 'u1',
-    name: 'Bridge Construction',
-    type: 'user' as const,
-    createdAt: 'today',
-    layers: [
-      { uniqueLayerId: 3564, isChecked: true },
-      { uniqueLayerId: 3614, isChecked: true },
-      { uniqueLayerId: 3663, isChecked: true },
-      { uniqueLayerId: 3665, isChecked: true },
-      { uniqueLayerId: 3666, isChecked: true },
-      { uniqueLayerId: 3668, isChecked: true },
-      { uniqueLayerId: 3669, isChecked: true },
-    ],
-  };
-
-  component.selectMapItem(map);
-
-  expect(routerMock.navigate).toHaveBeenCalledTimes(1);
-
-  expect(routerMock.navigate).toHaveBeenCalledWith(
-    ['/'],
-    expect.objectContaining({
-      queryParams: expect.objectContaining({
-        layers: '3564,3614,3663,3665,3666,3668,3669',
-        userMap: 'Bridge Construction',
-        bookmarkId: null,
-      }),
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    }),
-  );
-});
+  void this.router.navigate(['/'], {
+    queryParams: {
+      layers:
+        checkedLayerIds.length > 0
+          ? checkedLayerIds.join(',')
+          : null,
+      userMap: map.name,
+      bookmarkId: null,
+    },
+    queryParamsHandling: 'merge',
+    replaceUrl: true,
+  });
+}
