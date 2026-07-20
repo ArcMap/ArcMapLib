@@ -1,8 +1,4 @@
-void this.router
-  .navigate([], {
-    relativeTo: this.activatedRoute,
-    queryParams: { /* ... */ },
-    queryParamsHandling: 'merge',
-    replaceUrl: true,
-  })
-  .then((committed) => console.log('nav committed?', committed));
+export const routes: Routes = [
+  { path: 'index.html', redirectTo: '', pathMatch: 'full' }, // absorb the bad segment
+  { path: '', component: AppShellComponent },                 // your actual root
+];
