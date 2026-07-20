@@ -1,34 +1,12 @@
-// in LayersFacade
-selectSavedMap(savedMap: SavedMap): void {
-  // toMapSelectionItem takes a UserMapDto, so build the item from the SavedMap here,
-  // or map SavedMap -> the shape toMapSelectionItem/MapSelectionItem needs.
-  const mapItem: MapSelectionItem = {
-    id: Number(savedMap.id),
-    mapId: savedMap.id,
-    userId: savedMap.userId,
-    name: savedMap.name,
-    type: 'user',
-    layers: savedMap.layers.map((layer, index) => ({
-      uniqueLayerId: layer.layerId,
-      isChecked: layer.visible,
-      order: index,
-    })),
-  };
+serializeDisplayedLayers(): string {
+  const all = this.selectedMapLayers();
+  const visible = this.visibleLayers();
+  console.log('[serialize] selectedMapLayers =', all.map(l => ({id: l.id, visible: l.visible})));
+  console.log('[serialize] visibleLayers =', visible.map(l => l.id));
 
-  this.setSelectedMapItem(mapItem);  // private, but we're INSIDE LayersFacade — OK
-}
-
-
-loadSavedMap(id: string): void {
-  const savedMap = this.savedMaps().find((map) => String(map.id) === String(id));
-  if (savedMap?.rawMapLayerInfo) {
-    this.currentSavedMapId.set(id);
-    this.mapFacade.applySavedMap(savedMap.rawMapLayerInfo);
-
-    // 👇 the only new line — one public call into LayersFacade
-    this.layersFacade.selectSavedMap(savedMap);
-
-    return;
-  }
-  // ... rest unchanged
+  const displayedLayers = all.map((layer) => ({
+    uniqueLayerId: layer.id,
+    isChecked: layer.visible === true,
+  }));
+  return JSON.stringify({ displayedLayers });
 }
