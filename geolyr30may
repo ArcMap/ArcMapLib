@@ -1,12 +1,33 @@
-serializeDisplayedLayers(): string {
-  console.log('[serialize] layers() =', this.layers().map(l => ({id: l.id, visible: l.visible, mapVisible: l.mapVisible})));
-  console.log('[serialize] selectedMapLayers() =', this.selectedMapLayers().map(l => ({id: l.id, visible: l.visible})));
-  console.log('[serialize] visibleLayers() =', this.visibleLayers().map(l => l.id));
-  console.log('[serialize] selectedMap() =', this.selectedMap());
+private defaultMapLoaded = false;
 
-  const displayedLayers = this.selectedMapLayers().map((layer) => ({
-    uniqueLayerId: layer.id,
-    isChecked: layer.visible === true,
-  }));
-  return JSON.stringify({ displayedLayers });
+loadUserMaps(): void {
+  this.mapApi.readUserMaps().subscribe({
+    next: (dtos) => {
+      const maps = dtos
+        .filter((dto) => dto.userID !== 'predefined')
+        .map((dto) => this.mapDtoToSavedMap(dto));
+
+      this.savedMaps.set(
+        this.applyFavoriteMapFlag(maps)
+      );
+
+      if (!this.defaultMapLoaded) {
+        const defaultMapId =
+          this.userFacade.getPreference('userDefaultSearchLayer');
+
+        if (
+          defaultMapId &&
+          maps.some(
+            (map) => String(map.id) === String(defaultMapId)
+          )
+        ) {
+          this.defaultMapLoaded = true;
+          this.loadSavedMap(String(defaultMapId));
+        }
+      }
+    },
+
+    error: (err) =>
+      console.error('[SavedMapFacade] loadUserMaps failed', err),
+  });
 }
