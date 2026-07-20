@@ -1,10 +1,10 @@
 serializeDisplayedLayers(): string {
-  const all = this.selectedMapLayers();
-  const visible = this.visibleLayers();
-  console.log('[serialize] selectedMapLayers =', all.map(l => ({id: l.id, visible: l.visible})));
-  console.log('[serialize] visibleLayers =', visible.map(l => l.id));
+  console.log('[serialize] layers() =', this.layers().map(l => ({id: l.id, visible: l.visible, mapVisible: l.mapVisible})));
+  console.log('[serialize] selectedMapLayers() =', this.selectedMapLayers().map(l => ({id: l.id, visible: l.visible})));
+  console.log('[serialize] visibleLayers() =', this.visibleLayers().map(l => l.id));
+  console.log('[serialize] selectedMap() =', this.selectedMap());
 
-  const displayedLayers = all.map((layer) => ({
+  const displayedLayers = this.selectedMapLayers().map((layer) => ({
     uniqueLayerId: layer.id,
     isChecked: layer.visible === true,
   }));
