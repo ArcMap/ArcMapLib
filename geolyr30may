@@ -1,12 +1,12 @@
 private applyLayers(parsed: ParsedDeepLink): void {
   if (!parsed.layers?.length) return;
 
-  const catalogIds = new Set(this.mapFacade.getAllLayerIds()); // or however the full catalog is exposed
+  const catalogIds = new Set(this.layersFacade.layers().map((l) => l.id));
   const matchedIds = parsed.layers.filter((id) => catalogIds.has(id));
 
   if (matchedIds.length === 0) {
-    console.warn('[DeepLinkFacade] none of the requested layer IDs matched the catalog — keeping default layers');
-    return; // leave whatever the default map already applied untouched
+    console.warn('[DeepLinkFacade] no requested layer IDs matched the catalog — keeping default layers');
+    return; // leaves whatever the map's default already set, untouched
   }
 
   for (const layerId of matchedIds) {
