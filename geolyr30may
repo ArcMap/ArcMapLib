@@ -1,14 +1,48 @@
-if (match?.mapLayerInfo) {
-  this.mapFacade.applySavedMap(match.mapLayerInfo);
-  this.layersFacade.setSelectedMap(match);   // ← populates selectedMapLayers() for applyLayers to use
-  this.navState.openPanel('maps-layers');
-  return;
-}
+private async applyMap(parsed: ParsedDeepLink): Promise<void> {
+  try {
+    const [predefinedMaps, userMaps] = await firstValueFrom(
+      forkJoin([this.mapsApi.readPredefinedMaps(), this.mapsApi.readUserMaps()]),
+    );
 
-console.warn(`[DeepLinkFacade] map not found: "${parsed.map}" — falling back to Atlas Default`);
-const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
-if (fallback?.mapLayerInfo) {
-  this.mapFacade.applySavedMap(fallback.mapLayerInfo);
-  this.layersFacade.setSelectedMap(fallback);   // ← same here
-  this.navState.openPanel('maps-layers');
+    const applyDto = (dto: UserMapDto, type: 'predefined' | 'user') => {
+      this.mapFacade.applySavedMap(dto.mapLayerInfo);
+      this.layersFacade.setSelectedMapItem(this.layersFacade.toMapSelectionItem(dto, type));
+      this.navState.openPanel('maps-layers');
+    };
+
+    if (!parsed.map) {
+      if (!parsed.layers?.length) return;
+      const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
+      if (fallback) {
+        applyDto(fallback, 'predefined');
+      } else {
+        console.warn('[DeepLinkFacade] Atlas Default not found — layers-only deep link has no map to apply against');
+      }
+      return;
+    }
+
+    const predefinedMatch = predefinedMaps.find(
+      (m) => m.mapID === parsed.map || m.mapName?.toLowerCase() === parsed.map!.toLowerCase(),
+    );
+    const userMatch = predefinedMatch
+      ? undefined
+      : userMaps.find((m) => m.mapID === parsed.map || m.mapName?.toLowerCase() === parsed.map!.toLowerCase());
+
+    if (predefinedMatch) {
+      applyDto(predefinedMatch, 'predefined');
+      return;
+    }
+    if (userMatch) {
+      applyDto(userMatch, 'user');
+      return;
+    }
+
+    console.warn(`[DeepLinkFacade] map not found: "${parsed.map}" — falling back to Atlas Default`);
+    const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
+    if (fallback) {
+      applyDto(fallback, 'predefined');
+    }
+  } catch (err) {
+    console.warn('[DeepLinkFacade] applyMap failed', err);
+  }
 }
