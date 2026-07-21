@@ -1,13 +1,22 @@
-selectMap(map: PredefinedMap): void {
-  const allMaps = this.getDistinctMapSelectionItems();
-  const item = allMaps.find(
-    (candidate) => candidate.type === 'predefined' && candidate.mapId === map.mapID,
+private applyLayers(parsed: ParsedDeepLink): void {
+  if (!parsed.layers?.length) return;
+
+  const requestedIds = new Set(
+    parsed.layers.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
   );
 
-  if (item) {
-    this.applyMapSelection(item, { updateQueryParams: true });
-  } else {
-    console.warn('[MapsLayersPanelComponent] selectMap: no matching MapSelectionItem found for', map);
-    this.layersFacade.setSelectedMap(map);
+  const matchedLayers = this.layersFacade
+    .selectedMapLayers()   // ← scoped to the current map, not the full catalog
+    .filter((layer) => layer.id !== null && requestedIds.has(layer.id));
+
+  if (matchedLayers.length === 0) {
+    console.warn('[DeepLinkFacade] no requested layer IDs matched the selected map — keeping default layers');
+    return;
   }
+
+  for (const layer of matchedLayers) {
+    this.mapFacade.setLayerVisibility(layer.layerKey, true, layer.layerUrl);
+  }
+
+  this.navState.openPanel('maps-layers');
 }
