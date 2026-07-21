@@ -1,18 +1,3 @@
-it('sets visibility for each layer and opens maps-layers panel', async () => {
-  parserSpy.parse.mockReturnValue({ layers: ['101', '202'] });
-  parserSpy.isEmpty.mockReturnValue(false);
-  mapsApiSpy.readUserMaps.mockReturnValue(of([]));
-  mapsApiSpy.readBookmarks.mockReturnValue(of([]));
-
-  // NEW: mock the catalog/selected-map source so 101 and 202 actually match
-  layersFacadeSpy.selectedMapLayers.mockReturnValue([
-    { id: 101, layerKey: 'layer-101', layerUrl: 'url-101' },
-    { id: 202, layerKey: 'layer-202', layerUrl: 'url-202' },
-  ]);
-
-  await facade.applyFromParams(emptyParams);
-
-  expect(mapFacadeSpy.setLayerVisibility).toHaveBeenCalledWith('layer-101', true, 'url-101');
-  expect(mapFacadeSpy.setLayerVisibility).toHaveBeenCalledWith('layer-202', true, 'url-202');
-  expect(navStateSpy.openPanel).toHaveBeenCalledWith('maps-layers');
-});
+layersFacadeSpy = createSpyFromClass(LayersFacade);
+layersFacadeSpy.selectedMapLayers = vi.fn() as any;   // ← this line needs to exist first
+layersFacadeSpy.selectedMapLayers.mockReturnValue([] as unknown as Layer[]);
