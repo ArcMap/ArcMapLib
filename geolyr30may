@@ -1,3 +1,41 @@
-layersFacadeSpy = createSpyFromClass(LayersFacade);
-layersFacadeSpy.selectedMapLayers = vi.fn() as any;   // ← this line needs to exist first
-layersFacadeSpy.selectedMapLayers.mockReturnValue([] as unknown as Layer[]);
+private async applyMap(parsed: ParsedDeepLink): Promise<void> {
+  try {
+    const [predefinedMaps, userMaps] = await firstValueFrom(
+      forkJoin([this.mapsApi.readPredefinedMaps(), this.mapsApi.readUserMaps()]),
+    );
+
+    if (!parsed.map) {
+      if (!parsed.layers?.length) return; // nothing to do — no map, no layers
+
+      // Layers were requested with no map specified — load Atlas Default so applyLayers has something to match against.
+      const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
+      if (fallback?.mapLayerInfo) {
+        this.mapFacade.applySavedMap(fallback.mapLayerInfo);
+        this.navState.openPanel('maps-layers');
+      } else {
+        console.warn('[DeepLinkFacade] Atlas Default not found — layers-only deep link has no map to apply against');
+      }
+      return;
+    }
+
+    const allMaps = [...predefinedMaps, ...userMaps];
+    const match = allMaps.find(
+      (m) => m.mapID === parsed.map || m.mapName?.toLowerCase() === parsed.map!.toLowerCase(),
+    );
+
+    if (match?.mapLayerInfo) {
+      this.mapFacade.applySavedMap(match.mapLayerInfo);
+      this.navState.openPanel('maps-layers');
+      return;
+    }
+
+    console.warn(`[DeepLinkFacade] map not found: "${parsed.map}" — falling back to Atlas Default`);
+    const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
+    if (fallback?.mapLayerInfo) {
+      this.mapFacade.applySavedMap(fallback.mapLayerInfo);
+      this.navState.openPanel('maps-layers');
+    }
+  } catch (err) {
+    console.warn('[DeepLinkFacade] applyMap failed', err);
+  }
+}
