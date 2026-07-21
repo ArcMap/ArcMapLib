@@ -1,8 +1,15 @@
+// inject in SavedMapFacade:  private readonly router = inject(Router);
+
 if (setAsDefault) {
   this.addFavoriteMapId(saved.mapID);
-  this.userFacade.setPreference('userDefaultSavedMap', saved.mapID);  // ← corrected key
+  this.userFacade.setPreference('userDefaultSearchLayer', saved.mapID);
+  this.currentSavedMapId.set(savedMap.id);
+  this.layerFacade.selectSavedMap(savedMap);
 
-  const mapItem = this.toMapSelectionItem(savedMap);   // reuse the same conversion openMap() uses
-  this.layersFacade.setSelectedMapItem(mapItem);
-  this.updateMapQueryParams(mapItem);                   // if this method lives on SavedMapFacade; otherwise the panel component's equivalent
+  // NEW: clear stale deep-link params so panel navigation can't re-apply the old map
+  this.router.navigate([], {
+    queryParams: { map: null, layers: null },
+    queryParamsHandling: 'merge',
+    replaceUrl: true,
+  });
 }
