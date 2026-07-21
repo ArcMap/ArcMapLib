@@ -1,7 +1,8 @@
-if (!parsed.map || parsed.map.trim().toLowerCase() === 'all at layers') {
-  if (!parsed.layers?.length) return;
-  const layerIds = parsed.layers.map((id) => Number(id)).filter((id) => !Number.isNaN(id));
-  this.layersFacade.applyFullCatalogLayerIds(layerIds);
-  this.navState.openPanel('maps-layers');
-  return;
+if (setAsDefault) {
+  this.addFavoriteMapId(saved.mapID);
+  this.userFacade.setPreference('userDefaultSavedMap', saved.mapID);  // ← corrected key
+
+  const mapItem = this.toMapSelectionItem(savedMap);   // reuse the same conversion openMap() uses
+  this.layersFacade.setSelectedMapItem(mapItem);
+  this.updateMapQueryParams(mapItem);                   // if this method lives on SavedMapFacade; otherwise the panel component's equivalent
 }
