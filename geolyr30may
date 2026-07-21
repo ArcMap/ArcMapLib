@@ -1,13 +1,55 @@
-selectMap(map: PredefinedMap): void {
-  const allMaps = this.getDistinctMapSelectionItems();
-  const item = allMaps.find(
-    (candidate) => candidate.type === 'predefined' && candidate.mapId === map.mapID,
+// — Step 3: layers
+private applyLayers(parsed: ParsedDeepLink): void {
+  if (!parsed.layers?.length) return;
+
+  const requestedIds = new Set(
+    parsed.layers.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
   );
 
-  if (item) {
-    this.applyMapSelection(item, { updateQueryParams: true });
-  } else {
-    // Fallback only if lookup fails — old behavior, still better than nothing.
-    this.layersFacade.setSelectedMap(map);
+  const matchedLayers = this.layersFacade
+    .layers()
+    .filter((layer) => layer.id !== null && requestedIds.has(layer.id));
+
+  if (matchedLayers.length === 0) {
+    console.warn('[DeepLinkFacade] no requested layer IDs matched the catalog — keeping default layers');
+    return;
+  }
+
+  for (const layer of matchedLayers) {
+    this.mapFacade.setLayerVisibility(layer.layerKey, true, layer.layerUrl);
+  }
+
+  this.navState.openPanel('maps-layers');
+}
+
+
+
+// — Step 1: map / userMap
+private async applyMap(parsed: ParsedDeepLink): Promise<void> {
+  if (!parsed.map) return;
+
+  try {
+    const [predefinedMaps, userMaps] = await firstValueFrom(
+      forkJoin([this.mapsApi.readPredefinedMaps(), this.mapsApi.readUserMaps()]),
+    );
+    const allMaps = [...predefinedMaps, ...userMaps];
+    const match = allMaps.find(
+      (m) => m.mapID === parsed.map || m.mapName?.toLowerCase() === parsed.map!.toLowerCase(),
+    );
+
+    if (match?.mapLayerInfo) {
+      this.mapFacade.applySavedMap(match.mapLayerInfo);
+      this.navState.openPanel('maps-layers');
+      return;
+    }
+
+    console.warn(`[DeepLinkFacade] map not found: "${parsed.map}" — falling back to Atlas Default`);
+    const fallback = predefinedMaps.find((m) => m.mapName?.toLowerCase() === 'atlas default');
+    if (fallback?.mapLayerInfo) {
+      this.mapFacade.applySavedMap(fallback.mapLayerInfo);
+      this.navState.openPanel('maps-layers');
+    }
+  } catch (err) {
+    console.warn('[DeepLinkFacade] applyMap failed', err);
   }
 }
