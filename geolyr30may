@@ -1,16 +1,21 @@
 private applyLayers(parsed: ParsedDeepLink): void {
   if (!parsed.layers?.length) return;
 
-  const catalogIds = new Set(this.layersFacade.layers().map((l) => l.id));
-  const matchedIds = parsed.layers.filter((id) => catalogIds.has(id));
+  const requestedIds = new Set(
+    parsed.layers.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
+  );
 
-  if (matchedIds.length === 0) {
+  const matchedLayers = this.layerFacade
+    .layers()
+    .filter((layer) => requestedIds.has(layer.id));
+
+  if (matchedLayers.length === 0) {
     console.warn('[DeepLinkFacade] no requested layer IDs matched the catalog — keeping default layers');
-    return; // leaves whatever the map's default already set, untouched
+    return;
   }
 
-  for (const layerId of matchedIds) {
-    this.mapFacade.setLayerVisibility(layerId, true);
+  for (const layer of matchedLayers) {
+    this.mapFacade.setLayerVisibility(layer.layerKey, true, layer.layerUrl);
   }
 
   this.navState.openPanel('maps-layers');
