@@ -1,26 +1,4 @@
-.
- */
-applyFullCatalogLayerIds(layerIds: number[]): void {
-  const requestedIds = new Set(layerIds);
-  const ordered = this.layers()
-    .filter((layer) => layer.id !== null)
-    .sort((a, b) => a.drawOrderId - b.drawOrderId);
-
-  this.setSelectedMap({
-    id: 'all-atl layers',
-    name: 'All At Layers',
-    layers: ordered.map((layer, index) => ({
-      layerId: layer.id as number,
-      visible: requestedIds.has(layer.id as number),
-      order: index,
-    })),
-  });
-}
-
-
-
-
-if (!parsed.map) {
+if (!parsed.map || parsed.map.trim().toLowerCase() === 'all at layers') {
   if (!parsed.layers?.length) return;
   const layerIds = parsed.layers.map((id) => Number(id)).filter((id) => !Number.isNaN(id));
   this.layersFacade.applyFullCatalogLayerIds(layerIds);
