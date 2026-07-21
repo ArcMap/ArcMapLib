@@ -1,11 +1,13 @@
 selectMap(map: PredefinedMap): void {
-  const item = this.getDistinctMapSelectionItems().find(
+  const allMaps = this.getDistinctMapSelectionItems();
+  const item = allMaps.find(
     (candidate) => candidate.type === 'predefined' && candidate.mapId === map.mapID,
   );
+
   if (item) {
     this.applyMapSelection(item, { updateQueryParams: true });
   } else {
-    // fallback: at least clear stale URL params even if list lookup fails
+    // Fallback only if lookup fails — old behavior, still better than nothing.
     this.layersFacade.setSelectedMap(map);
   }
 }
