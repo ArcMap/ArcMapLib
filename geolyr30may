@@ -1,4 +1,115 @@
-addUserMapItem(dto: UserMapDto): void {
-  const item = this.toMapSelectionItem(dto, 'user');
-  this.userMapItems.update((items) => [item, ...items]);
+async applyFromParams(params: ParamMap): Promise<void> {
+  const parsed = this.parser.parse(params);
+
+  if (this.parser.isEmpty(parsed)) {
+    return;
+  }
+
+  this.lastApplied.set(parsed);
+
+  await this.applyMap(parsed);
+  await this.waitForSelectedMapLayers(parsed);
+
+  this.applyLayers(parsed);
+
+  await this.applyBookmark(parsed);
+
+  if (parsed.extent) {
+    this.applyExtent(parsed);
+  } else {
+    this.applyLatLon(parsed);
+  }
+
+  this.applyHideLayerSelector(parsed);
+}
+
+
+
+private async waitForSelectedMapLayers(
+  parsed: ParsedDeepLink
+): Promise<void> {
+  if (!parsed.layers?.length) {
+    return;
+  }
+
+  const requestedIds = new Set(
+    parsed.layers.map((id) => String(id).trim())
+  );
+
+  const timeoutMs = 5000;
+  const intervalMs = 50;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const selectedMapLayers =
+      this.layersFacade.selectedMapLayers();
+
+    const hasMatchingLayer = selectedMapLayers.some((layer) =>
+      requestedIds.has(String(layer.uniqueLayerId))
+    );
+
+    if (hasMatchingLayer) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, intervalMs);
+    });
+  }
+
+  console.warn(
+    '[DeepLinkFacade.waitForSelectedMapLayers] Timed out waiting for selected-map layers.',
+    {
+      requestedIds: [...requestedIds],
+      availableIds: this.layersFacade
+        .selectedMapLayers()
+        .map((layer) => layer.uniqueLayerId)
+    }
+  );
+}
+
+
+private applyLayers(parsed: ParsedDeepLink): void {
+  if (!parsed.layers?.length) {
+    return;
+  }
+
+  const requestedIds = new Set(
+    parsed.layers.map((id) => String(id).trim())
+  );
+
+  const selectedMapLayers =
+    this.layersFacade.selectedMapLayers();
+
+  const hasMatchingLayer = selectedMapLayers.some((layer) =>
+    requestedIds.has(String(layer.uniqueLayerId))
+  );
+
+  if (!hasMatchingLayer) {
+    console.warn(
+      '[DeepLinkFacade.applyLayers] No requested uniqueLayerIds matched the selected map.',
+      {
+        requestedIds: [...requestedIds],
+        availableIds: selectedMapLayers.map(
+          (layer) => layer.uniqueLayerId
+        )
+      }
+    );
+
+    return;
+  }
+
+  for (const layer of selectedMapLayers) {
+    const shouldBeVisible = requestedIds.has(
+      String(layer.uniqueLayerId)
+    );
+
+    this.mapFacade.setLayerVisibility(
+      layer.layerKey,
+      shouldBeVisible,
+      layer.layerUrl
+    );
+  }
+
+  this.navState.openPanel('maps-layers');
 }
