@@ -1,115 +1,73 @@
-async applyFromParams(params: ParamMap): Promise<void> {
-  const parsed = this.parser.parse(params);
+describe("parseAndValidateRoute", () => {
+  let consoleSpy: jest.SpyInstance;
 
-  if (this.parser.isEmpty(parsed)) {
-    return;
-  }
+  beforeEach(() => {
+    consoleSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+  });
 
-  this.lastApplied.set(parsed);
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
 
-  await this.applyMap(parsed);
-  await this.waitForSelectedMapLayers(parsed);
+  it("returns parsed array if valid", () => {
+    (
+      ValidationService.isValidRoutingLocationArray as unknown as jest.Mock
+    ).mockReturnValue(true);
 
-  this.applyLayers(parsed);
-
-  await this.applyBookmark(parsed);
-
-  if (parsed.extent) {
-    this.applyExtent(parsed);
-  } else {
-    this.applyLatLon(parsed);
-  }
-
-  this.applyHideLayerSelector(parsed);
-}
-
-
-
-private async waitForSelectedMapLayers(
-  parsed: ParsedDeepLink
-): Promise<void> {
-  if (!parsed.layers?.length) {
-    return;
-  }
-
-  const requestedIds = new Set(
-    parsed.layers.map((id) => String(id).trim())
-  );
-
-  const timeoutMs = 5000;
-  const intervalMs = 50;
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < timeoutMs) {
-    const selectedMapLayers =
-      this.layersFacade.selectedMapLayers();
-
-    const hasMatchingLayer = selectedMapLayers.some((layer) =>
-      requestedIds.has(String(layer.uniqueLayerId))
-    );
-
-    if (hasMatchingLayer) {
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, intervalMs);
-    });
-  }
-
-  console.warn(
-    '[DeepLinkFacade.waitForSelectedMapLayers] Timed out waiting for selected-map layers.',
-    {
-      requestedIds: [...requestedIds],
-      availableIds: this.layersFacade
-        .selectedMapLayers()
-        .map((layer) => layer.uniqueLayerId)
-    }
-  );
-}
-
-
-private applyLayers(parsed: ParsedDeepLink): void {
-  if (!parsed.layers?.length) {
-    return;
-  }
-
-  const requestedIds = new Set(
-    parsed.layers.map((id) => String(id).trim())
-  );
-
-  const selectedMapLayers =
-    this.layersFacade.selectedMapLayers();
-
-  const hasMatchingLayer = selectedMapLayers.some((layer) =>
-    requestedIds.has(String(layer.uniqueLayerId))
-  );
-
-  if (!hasMatchingLayer) {
-    console.warn(
-      '[DeepLinkFacade.applyLayers] No requested uniqueLayerIds matched the selected map.',
+    const arr: RoutingLocation[] = [
       {
-        requestedIds: [...requestedIds],
-        availableIds: selectedMapLayers.map(
-          (layer) => layer.uniqueLayerId
-        )
+        type: "latlon",
+        Location: {
+          lat: 1,
+          lon: 2
+        }
       }
-    );
+    ];
 
-    return;
-  }
+    expect(upRoute["parseAndValidateRoute"](arr)).toEqual(arr);
+  });
 
-  for (const layer of selectedMapLayers) {
-    const shouldBeVisible = requestedIds.has(
-      String(layer.uniqueLayerId)
-    );
+  it("parses JSON string and returns array if valid", () => {
+    (
+      ValidationService.isValidRoutingLocationArray as unknown as jest.Mock
+    ).mockReturnValue(true);
 
-    this.mapFacade.setLayerVisibility(
-      layer.layerKey,
-      shouldBeVisible,
-      layer.layerUrl
-    );
-  }
+    const arr: RoutingLocation[] = [
+      {
+        type: "latlon",
+        Location: {
+          lat: 1,
+          lon: 2
+        }
+      }
+    ];
 
-  this.navState.openPanel('maps-layers');
-}
+    expect(
+      upRoute["parseAndValidateRoute"](JSON.stringify(arr))
+    ).toEqual(arr);
+  });
+
+  it("returns [] if not valid", () => {
+    (
+      ValidationService.isValidRoutingLocationArray as unknown as jest.Mock
+    ).mockReturnValue(false);
+
+    expect(
+      upRoute["parseAndValidateRoute"]([])
+    ).toEqual([]);
+  });
+
+  it("returns [] if input is not array or string", () => {
+    expect(
+      upRoute["parseAndValidateRoute"](123 as any)
+    ).toEqual([]);
+  });
+
+  it("returns [] if JSON string is invalid", () => {
+    expect(
+      upRoute["parseAndValidateRoute"]("not json")
+    ).toEqual([]);
+  });
+});
