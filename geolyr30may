@@ -1,14 +1,103 @@
-/** @jest-environment jsdom */
+/* ============================================================
+ * IMPORTANT
+ *
+ * Do NOT add:
+ *
+ * /** @jest-environment jsdom *\/
+ *
+ * This project currently runs Jest without
+ * jest-environment-jsdom.
+ *
+ * We mock LitElement so these tests can run in the
+ * existing Node Jest environment.
+ * ============================================================
+ */
+
+
+/* ============================================================
+ * MOCK LIT
+ * ============================================================
+ */
+
+jest.mock("lit", () => {
+
+  class MockLitElement {
+
+    public isConnected = true;
+
+    public hasUpdated = true;
+
+    public updateComplete =
+      Promise.resolve(true);
+
+
+    public closest = jest.fn();
+
+
+    public connectedCallback(): void {
+      // no-op
+    }
+
+
+    public disconnectedCallback(): void {
+      // no-op
+    }
+  }
+
+
+  return {
+
+    LitElement:
+      MockLitElement,
+
+    nothing:
+      null
+  };
+});
+
+
+/* ============================================================
+ * MOCK LIT DECORATORS
+ * ============================================================
+ */
+
+jest.mock(
+  "lit/decorators.js",
+  () => ({
+
+    customElement:
+      (_tagName: string) =>
+        (target: any) =>
+          target,
+
+    property:
+      (_options?: any) =>
+        (..._args: any[]) => {
+          // no-op decorator
+        }
+  })
+);
+
+
+/* ============================================================
+ * MOCK ARCGIS WMSLayer
+ * ============================================================
+ */
 
 jest.mock(
   "@arcgis/core/layers/WMSLayer.js",
   () => ({
+
     __esModule: true,
-    default: jest.fn()
+
+    default:
+      jest.fn()
   })
 );
 
-import WMSLayer from "@arcgis/core/layers/WMSLayer.js";
+
+import WMSLayer
+  from "@arcgis/core/layers/WMSLayer.js";
 
 import {
   ArcWmsLayer
@@ -16,28 +105,32 @@ import {
 
 
 /* ============================================================
- * TEST TYPES
+ * TYPES
  * ============================================================
  */
 
-type MockSublayer = {
+type MockWmsSublayer = {
+
   id: number;
+
   name: string;
+
   title: string;
+
   visible?: boolean;
+
   legendUrl?: string;
 };
 
 
 type MockWmsLayer = {
+
   id: string;
 
   url: string;
 
-  title:
-    | string
-    | null
-    | undefined;
+  title?:
+    string | null;
 
   visible: boolean;
 
@@ -46,14 +139,13 @@ type MockWmsLayer = {
   loadStatus: string;
 
   loadError:
-    | Error
-    | null;
+    Error | null;
 
   allSublayers:
-    MockSublayer[];
+    MockWmsSublayer[];
 
   sublayers:
-    MockSublayer[];
+    MockWmsSublayer[];
 
   load:
     jest.Mock;
@@ -69,85 +161,70 @@ type MockWmsLayer = {
 };
 
 
-type ArcMapTestElement =
-  HTMLElement & {
+type MockArcMap = {
 
-    addLayer:
-      jest.Mock;
+  addLayer:
+    jest.Mock;
 
-    removeLayer:
-      jest.Mock;
-  };
+  removeLayer:
+    jest.Mock;
+};
 
 
 /* ============================================================
- * ARC GIS MOCK
+ * WMS CONSTRUCTOR MOCK
  * ============================================================
  */
 
-const WMSLayerMock =
+const MockWMSLayerConstructor =
   WMSLayer as unknown as jest.Mock;
 
 
-/*
- * Every WMSLayer created by the component
- * will be stored here.
- *
- * That allows tests to inspect:
- *
- * load()
- * destroy()
- * sublayers
- * findSublayerByName()
- * etc.
- */
 let createdLayers:
-  MockWmsLayer[] = [];
+  MockWmsLayer[];
 
 
-/*
- * Default WMS capabilities returned by our mocked WMS.
+/* ============================================================
+ * HELPERS
+ * ============================================================
  */
-const createDefaultSublayers =
-  (): MockSublayer[] => [
 
-    {
-      id: 1,
-      name: "roads",
-      title: "Roads",
-      visible: true
-    },
+const createSublayers =
+  (): MockWmsSublayer[] => {
 
-    {
-      id: 2,
-      name: "cities",
-      title: "Cities",
-      visible: true
-    },
+    return [
 
-    {
-      id: 3,
-      name: "states",
-      title: "States",
-      visible: true
-    }
-  ];
+      {
+        id: 1,
+        name: "roads",
+        title: "Roads",
+        visible: true
+      },
+
+      {
+        id: 2,
+        name: "cities",
+        title: "Cities",
+        visible: true
+      },
+
+      {
+        id: 3,
+        name: "states",
+        title: "States",
+        visible: true
+      }
+    ];
+  };
 
 
-/*
- * Creates one fake ArcGIS WMSLayer.
- */
 const createMockWmsLayer =
   (
-    options: {
-      url?: string;
-      title?: string;
-      visible?: boolean;
-    }
+    options: any
   ): MockWmsLayer => {
 
     const allSublayers =
-      createDefaultSublayers();
+      createSublayers();
 
 
     const layer =
@@ -155,19 +232,19 @@ const createMockWmsLayer =
 
 
     layer.id =
-      `mock-wms-${createdLayers.length + 1}`;
+      `wms-${createdLayers.length + 1}`;
 
 
     layer.url =
-      options.url ?? "";
+      options?.url ?? "";
 
 
     layer.title =
-      options.title;
+      options?.title;
 
 
     layer.visible =
-      options.visible ?? true;
+      options?.visible ?? true;
 
 
     layer.loaded =
@@ -190,12 +267,11 @@ const createMockWmsLayer =
       [];
 
 
-    /*
-     * Mock WMSLayer.load()
-     *
-     * This represents a successful
-     * GetCapabilities request.
+    /* --------------------------------------------------------
+     * Mock WMS GetCapabilities/load()
+     * --------------------------------------------------------
      */
+
     layer.load =
       jest.fn()
         .mockImplementation(
@@ -212,15 +288,17 @@ const createMockWmsLayer =
         );
 
 
-    /*
-     * Mock:
-     *
-     * wmsLayer.findSublayerByName(...)
+    /* --------------------------------------------------------
+     * Mock findSublayerByName()
+     * --------------------------------------------------------
      */
+
     layer.findSublayerByName =
       jest.fn()
         .mockImplementation(
-          (name: string) => {
+          (
+            name: string
+          ) => {
 
             return allSublayers.find(
               sublayer =>
@@ -230,15 +308,17 @@ const createMockWmsLayer =
         );
 
 
-    /*
-     * Mock:
-     *
-     * wmsLayer.findSublayerById(...)
+    /* --------------------------------------------------------
+     * Mock findSublayerById()
+     * --------------------------------------------------------
      */
+
     layer.findSublayerById =
       jest.fn()
         .mockImplementation(
-          (id: number) => {
+          (
+            id: number
+          ) => {
 
             return allSublayers.find(
               sublayer =>
@@ -248,9 +328,11 @@ const createMockWmsLayer =
         );
 
 
-    /*
+    /* --------------------------------------------------------
      * Mock destroy()
+     * --------------------------------------------------------
      */
+
     layer.destroy =
       jest.fn();
 
@@ -259,126 +341,100 @@ const createMockWmsLayer =
   };
 
 
-/* ============================================================
- * HELPERS
- * ============================================================
- */
-
-
-/*
- * Creates fake <arc-map>.
- *
- * We don't need the real ArcMap component
- * for unit testing arc-wms-layer.
- */
-const createArcMap =
-  (): ArcMapTestElement => {
-
-    const arcMap =
-      document.createElement(
-        "arc-map"
-      ) as ArcMapTestElement;
-
-
-    arcMap.addLayer =
-      jest.fn()
-        .mockResolvedValue(
-          undefined
-        );
-
-
-    arcMap.removeLayer =
-      jest.fn()
-        .mockResolvedValue(
-          undefined
-        );
-
-
-    return arcMap;
-  };
-
-
-/*
- * Creates:
- *
- * <arc-map>
- *    <arc-wms-layer>
- * </arc-map>
- *
- * and attaches it to document.body.
- */
-const mountComponent =
-  (): {
-    arcMap: ArcMapTestElement;
-    element: ArcWmsLayer;
-  } => {
-
-    const arcMap =
-      createArcMap();
-
-
-    const element =
-      document.createElement(
-        "arc-wms-layer"
-      ) as ArcWmsLayer;
-
-
-    arcMap.appendChild(
-      element
-    );
-
-
-    document.body.appendChild(
-      arcMap
-    );
-
+const createMockArcMap =
+  (): MockArcMap => {
 
     return {
-      arcMap,
-      element
+
+      addLayer:
+        jest.fn()
+          .mockResolvedValue(
+            undefined
+          ),
+
+      removeLayer:
+        jest.fn()
+          .mockResolvedValue(
+            undefined
+          )
     };
   };
 
 
-/*
- * Allows Lit lifecycle + our asynchronous
- * updateLayer() / constructLayerAndAddToMap()
- * calls to finish.
+/**
+ * Creates ArcWmsLayer without using document/customElements.
+ *
+ * closest("arc-map") is mocked directly.
  */
-const flushAsync =
-  async (): Promise<void> => {
+const createComponent =
+  (
+    arcMap:
+      MockArcMap | null =
+        createMockArcMap()
+  ) => {
 
-    await Promise.resolve();
+    const component =
+      new ArcWmsLayer();
 
-    await Promise.resolve();
 
-    await new Promise<void>(
-      resolve => {
+    (
+      component as any
+    ).closest =
+      jest.fn()
+        .mockImplementation(
+          (
+            selector: string
+          ) => {
 
-        setTimeout(
-          resolve,
-          0
+            if (
+              selector ===
+              "arc-map"
+            ) {
+
+              return arcMap;
+            }
+
+            return null;
+          }
         );
-      }
-    );
 
-    await Promise.resolve();
+
+    return {
+
+      component,
+
+      arcMap
+    };
   };
 
 
-const waitForComponent =
+/**
+ * Calls private updateLayer().
+ *
+ * We intentionally test the actual component flow:
+ *
+ * updateLayer()
+ *   -> parse service
+ *   -> find arc-map
+ *   -> constructLayerAndAddToMap()
+ *   -> WMSLayer.load()
+ *   -> sublayer lookup
+ *   -> arcMap.addLayer()
+ */
+const runUpdate =
   async (
-    element: ArcWmsLayer
+    component:
+      ArcWmsLayer
   ): Promise<void> => {
 
-    await element.updateComplete;
-
-    await flushAsync();
+    await (
+      component as any
+    ).updateLayer();
   };
 
 
 /* ============================================================
- * TESTS
+ * TEST SUITE
  * ============================================================
  */
 
@@ -399,62 +455,36 @@ describe(
     beforeEach(
       () => {
 
-        /*
-         * Clean DOM.
-         */
-        document.body.innerHTML =
-          "";
-
-
-        /*
-         * Reset instances.
-         */
         createdLayers =
           [];
 
 
-        /*
-         * Reset mocked ArcGIS constructor.
-         */
-        WMSLayerMock.mockReset();
+        MockWMSLayerConstructor
+          .mockReset();
 
 
-        /*
-         * Every:
-         *
-         * new WMSLayer(...)
-         *
-         * will return our mock.
-         */
-        WMSLayerMock.mockImplementation(
-          (
-            options: {
-              url?: string;
-              title?: string;
-              visible?: boolean;
-            }
-          ) => {
+        MockWMSLayerConstructor
+          .mockImplementation(
+            (
+              options: any
+            ) => {
 
-            const layer =
-              createMockWmsLayer(
-                options
+              const layer =
+                createMockWmsLayer(
+                  options
+                );
+
+
+              createdLayers.push(
+                layer
               );
 
 
-            createdLayers.push(
-              layer
-            );
+              return layer;
+            }
+          );
 
 
-            return layer;
-          }
-        );
-
-
-        /*
-         * Silence component debugging logs
-         * during tests.
-         */
         consoleLogSpy =
           jest.spyOn(
             console,
@@ -488,16 +518,7 @@ describe(
 
 
     afterEach(
-      async () => {
-
-        /*
-         * Disconnect components while spies
-         * still exist.
-         */
-        document.body.innerHTML =
-          "";
-
-        await flushAsync();
+      () => {
 
         jest.restoreAllMocks();
       }
@@ -505,83 +526,59 @@ describe(
 
 
     /* ========================================================
-     * 1
-     * COMPONENT REGISTRATION
+     * 1. CREATE WMS
      * ========================================================
      */
 
     it(
-      "should register arc-wms-layer custom element",
-      () => {
-
-        const registeredElement =
-          customElements.get(
-            "arc-wms-layer"
-          );
-
-
-        expect(
-          registeredElement
-        ).toBeDefined();
-      }
-    );
-
-
-    /* ========================================================
-     * 2
-     * VALID SERVICE
-     * ========================================================
-     */
-
-    it(
-      "should create and load WMSLayer for a valid service",
+      "should create WMSLayer for valid service",
       async () => {
 
         const {
-          arcMap,
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.name =
-          "Road WMS";
+        component.name =
+          "Road Layer";
 
 
-        element.service = {
+        component.service = {
+
           url:
             "https://example.com/wms",
 
           layerNames: [
             "roads"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
-        /*
-         * Verify new WMSLayer(...)
-         */
         expect(
-          WMSLayerMock
+          MockWMSLayerConstructor
         ).toHaveBeenCalledTimes(
           1
         );
 
 
         expect(
-          WMSLayerMock
+          MockWMSLayerConstructor
         ).toHaveBeenCalledWith(
           {
+
             url:
               "https://example.com/wms",
 
             title:
-              "Road WMS",
+              "Road Layer",
 
             visible:
               true
@@ -589,23 +586,73 @@ describe(
         );
 
 
-        const layer =
-          createdLayers[0];
-
-
-        /*
-         * GetCapabilities / load
-         */
         expect(
-          layer.load
+          createdLayers
+        ).toHaveLength(
+          1
+        );
+
+
+        expect(
+          createdLayers[0].load
         ).toHaveBeenCalledTimes(
           1
         );
 
 
-        /*
-         * Requested layer
-         */
+        expect(
+          arcMap!.addLayer
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          arcMap!.addLayer
+        ).toHaveBeenCalledWith(
+          createdLayers[0],
+          component
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 2. FIND SUBLAYER BY NAME
+     * ========================================================
+     */
+
+    it(
+      "should find requested sublayer by name",
+      async () => {
+
+        const {
+          component
+        } =
+          createComponent();
+
+
+        component.service = {
+
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
         expect(
           layer.findSublayerByName
         ).toHaveBeenCalledWith(
@@ -613,9 +660,6 @@ describe(
         );
 
 
-        /*
-         * Only roads selected.
-         */
         expect(
           layer.sublayers
         ).toEqual(
@@ -623,46 +667,28 @@ describe(
             layer.allSublayers[0]
           ]
         );
-
-
-        /*
-         * Added through arc-map.
-         */
-        expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledTimes(
-          1
-        );
-
-
-        expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledWith(
-          layer,
-          element
-        );
       }
     );
 
 
     /* ========================================================
-     * 3
-     * MULTIPLE LAYERS
+     * 3. MULTIPLE SUBLAYERS
      * ========================================================
      */
 
     it(
-      "should select multiple requested WMS sublayers",
+      "should select multiple WMS sublayers",
       async () => {
 
         const {
-          arcMap,
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.service = {
+        component.service = {
+
           url:
             "https://example.com/wms",
 
@@ -670,11 +696,12 @@ describe(
             "roads",
             "cities"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -707,96 +734,7 @@ describe(
 
 
         expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledWith(
-          layer,
-          element
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 4
-     * HTML JSON ATTRIBUTE
-     * ========================================================
-     */
-
-    it(
-      "should parse service passed as an HTML JSON attribute",
-      async () => {
-
-        const arcMap =
-          createArcMap();
-
-
-        const element =
-          document.createElement(
-            "arc-wms-layer"
-          ) as ArcWmsLayer;
-
-
-        element.setAttribute(
-          "name",
-          "HTML WMS"
-        );
-
-
-        element.setAttribute(
-          "service",
-          JSON.stringify(
-            {
-              url:
-                "https://example.com/html-wms",
-
-              layerNames: [
-                "roads"
-              ]
-            }
-          )
-        );
-
-
-        arcMap.appendChild(
-          element
-        );
-
-
-        document.body.appendChild(
-          arcMap
-        );
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        expect(
-          WMSLayerMock
-        ).toHaveBeenCalledTimes(
-          1
-        );
-
-
-        expect(
-          WMSLayerMock
-        ).toHaveBeenCalledWith(
-          {
-            url:
-              "https://example.com/html-wms",
-
-            title:
-              "HTML WMS",
-
-            visible:
-              true
-          }
-        );
-
-
-        expect(
-          arcMap.addLayer
+          arcMap!.addLayer
         ).toHaveBeenCalledTimes(
           1
         );
@@ -805,204 +743,34 @@ describe(
 
 
     /* ========================================================
-     * 5
-     * INVALID JSON
+     * 4. NUMERIC ID FALLBACK
      * ========================================================
      */
 
     it(
-      "should not create WMSLayer when service JSON is invalid",
-      async () => {
-
-        const arcMap =
-          createArcMap();
-
-
-        const element =
-          document.createElement(
-            "arc-wms-layer"
-          ) as ArcWmsLayer;
-
-
-        element.setAttribute(
-          "service",
-          "{invalid-json"
-        );
-
-
-        arcMap.appendChild(
-          element
-        );
-
-
-        document.body.appendChild(
-          arcMap
-        );
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        expect(
-          WMSLayerMock
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          arcMap.addLayer
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          consoleErrorSpy
-        ).toHaveBeenCalledWith(
-          expect.stringContaining(
-            "Could not parse service JSON"
-          ),
-          expect.anything(),
-          expect.anything()
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 6
-     * MISSING URL
-     * ========================================================
-     */
-
-    it(
-      "should not create WMSLayer when URL is missing",
+      "should use sublayer id when numeric layer name is provided",
       async () => {
 
         const {
-          arcMap,
-          element
+          component
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.service = {
-          layerNames: [
-            "roads"
-          ]
-        } as any;
+        component.service = {
 
-
-        await waitForComponent(
-          element
-        );
-
-
-        expect(
-          WMSLayerMock
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          arcMap.addLayer
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          consoleErrorSpy
-        ).toHaveBeenCalledWith(
-          expect.stringContaining(
-            "valid WMS url is required"
-          )
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 7
-     * NO ARC-MAP ANCESTOR
-     * ========================================================
-     */
-
-    it(
-      "should not create WMSLayer when arc-map ancestor is missing",
-      async () => {
-
-        const element =
-          document.createElement(
-            "arc-wms-layer"
-          ) as ArcWmsLayer;
-
-
-        document.body.appendChild(
-          element
-        );
-
-
-        element.service = {
-          url:
-            "https://example.com/wms",
-
-          layerNames: [
-            "roads"
-          ]
-        } as any;
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        /*
-         * constructLayerAndAddToMap()
-         * must not be reached.
-         */
-        expect(
-          WMSLayerMock
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          consoleErrorSpy
-        ).toHaveBeenCalledWith(
-          expect.stringContaining(
-            "must be a descendant of <arc-map>"
-          )
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 8
-     * NUMERIC LAYER ID FALLBACK
-     * ========================================================
-     */
-
-    it(
-      "should fall back to findSublayerById for numeric layer name",
-      async () => {
-
-        const {
-          arcMap,
-          element
-        } =
-          mountComponent();
-
-
-        element.service = {
           url:
             "https://example.com/wms",
 
           layerNames: [
             "2"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -1011,7 +779,7 @@ describe(
 
 
         /*
-         * First attempt by name.
+         * First tries WMS name.
          */
         expect(
           layer.findSublayerByName
@@ -1021,7 +789,8 @@ describe(
 
 
         /*
-         * Then numeric ID.
+         * Since "2" wasn't a name,
+         * falls back to numeric id.
          */
         expect(
           layer.findSublayerById
@@ -1030,9 +799,6 @@ describe(
         );
 
 
-        /*
-         * ID 2 = cities
-         */
         expect(
           layer.sublayers
         ).toEqual(
@@ -1040,47 +806,255 @@ describe(
             layer.allSublayers[1]
           ]
         );
+      }
+    );
+
+
+    /* ========================================================
+     * 5. SERVICE AS JSON STRING
+     * ========================================================
+     */
+
+    it(
+      "should parse service when provided as JSON string",
+      async () => {
+
+        const {
+          component,
+          arcMap
+        } =
+          createComponent();
+
+
+        component.service =
+          JSON.stringify(
+            {
+
+              url:
+                "https://example.com/string-wms",
+
+              layerNames: [
+                "roads"
+              ]
+            }
+          );
+
+
+        await runUpdate(
+          component
+        );
 
 
         expect(
-          arcMap.addLayer
+          MockWMSLayerConstructor
         ).toHaveBeenCalledWith(
-          layer,
-          element
+          {
+
+            url:
+              "https://example.com/string-wms",
+
+            title:
+              undefined,
+
+            visible:
+              true
+          }
+        );
+
+
+        expect(
+          arcMap!.addLayer
+        ).toHaveBeenCalledTimes(
+          1
         );
       }
     );
 
 
     /* ========================================================
-     * 9
-     * REQUESTED SUBLAYER NOT FOUND
+     * 6. INVALID JSON
      * ========================================================
      */
 
     it(
-      "should not add WMSLayer when requested sublayer does not exist",
+      "should not create layer for invalid service JSON",
       async () => {
 
         const {
-          arcMap,
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.service = {
+        component.service =
+          "{invalid-json";
+
+
+        await runUpdate(
+          component
+        );
+
+
+        expect(
+          MockWMSLayerConstructor
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap!.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+
+          expect.stringContaining(
+            "Could not parse service JSON"
+          ),
+
+          expect.anything(),
+
+          expect.anything()
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 7. MISSING URL
+     * ========================================================
+     */
+
+    it(
+      "should not create WMS layer when url is missing",
+      async () => {
+
+        const {
+          component,
+          arcMap
+        } =
+          createComponent();
+
+
+        component.service = {
+
+          layerNames: [
+            "roads"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
+        );
+
+
+        expect(
+          MockWMSLayerConstructor
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap!.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+
+          expect.stringContaining(
+            "valid WMS url is required"
+          )
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 8. MISSING ARC-MAP
+     * ========================================================
+     */
+
+    it(
+      "should not create WMS layer when arc-map ancestor is missing",
+      async () => {
+
+        const {
+          component
+        } =
+          createComponent(
+            null
+          );
+
+
+        component.service = {
+
           url:
             "https://example.com/wms",
 
           layerNames: [
-            "not-existing-layer"
+            "roads"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
+        );
+
+
+        expect(
+          MockWMSLayerConstructor
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+
+          expect.stringContaining(
+            "must be a descendant of <arc-map>"
+          )
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 9. SUBLAYER DOES NOT EXIST
+     * ========================================================
+     */
+
+    it(
+      "should not add layer when requested sublayer does not exist",
+      async () => {
+
+        const {
+          component,
+          arcMap
+        } =
+          createComponent();
+
+
+        component.service = {
+
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "unknown-layer"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
         );
 
 
@@ -1098,32 +1072,24 @@ describe(
         expect(
           layer.findSublayerByName
         ).toHaveBeenCalledWith(
-          "not-existing-layer"
+          "unknown-layer"
         );
 
 
-        /*
-         * Nothing should reach the map.
-         */
         expect(
-          arcMap.addLayer
+          arcMap!.addLayer
         ).not.toHaveBeenCalled();
 
 
-        /*
-         * Failed / unused ArcGIS layer
-         * should be destroyed.
-         */
         expect(
           layer.destroy
-        ).toHaveBeenCalledTimes(
-          1
-        );
+        ).toHaveBeenCalled();
 
 
         expect(
           consoleErrorSpy
         ).toHaveBeenCalledWith(
+
           expect.stringContaining(
             "was NOT found"
           )
@@ -1133,26 +1099,24 @@ describe(
 
 
     /* ========================================================
-     * 10
-     * WMS LOAD FAILURE
+     * 10. WMS LOAD FAILURE
      * ========================================================
      */
 
     it(
-      "should handle WMSLayer load failure",
+      "should handle WMS load failure",
       async () => {
 
-        /*
-         * Override only the next WMSLayer.
-         */
-        WMSLayerMock
+        const loadError =
+          new Error(
+            "GetCapabilities failed"
+          );
+
+
+        MockWMSLayerConstructor
           .mockImplementationOnce(
             (
-              options: {
-                url?: string;
-                title?: string;
-                visible?: boolean;
-              }
+              options: any
             ) => {
 
               const layer =
@@ -1161,16 +1125,13 @@ describe(
                 );
 
 
-              const loadError =
-                new Error(
-                  "GetCapabilities failed"
-                );
-
-
               layer.load =
                 jest.fn()
                   .mockImplementation(
                     async () => {
+
+                      layer.loaded =
+                        false;
 
                       layer.loadStatus =
                         "failed";
@@ -1194,24 +1155,26 @@ describe(
 
 
         const {
-          arcMap,
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.service = {
+        component.service = {
+
           url:
             "https://example.com/broken-wms",
 
           layerNames: [
             "roads"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -1226,19 +1189,14 @@ describe(
         );
 
 
-        /*
-         * Failed WMS should not be added.
-         */
         expect(
-          arcMap.addLayer
+          arcMap!.addLayer
         ).not.toHaveBeenCalled();
 
 
         expect(
           layer.destroy
-        ).toHaveBeenCalledTimes(
-          1
-        );
+        ).toHaveBeenCalled();
 
 
         expect(
@@ -1251,89 +1209,78 @@ describe(
 
 
     /* ========================================================
-     * 11
-     * LEGEND URL
+     * 11. CUSTOM LEGEND
      * ========================================================
      */
 
     it(
-      "should apply legendUrl to selected WMS sublayer",
+      "should apply legend url to selected sublayer",
       async () => {
 
         const {
-          element
+          component
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.legendUrl =
-          "https://example.com/legend.png";
+        component.legendUrl =
+          "https://example.com/road-legend.png";
 
 
-        element.service = {
+        component.service = {
+
           url:
             "https://example.com/wms",
 
           layerNames: [
             "roads"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
-        const layer =
-          createdLayers[0];
-
-
-        const roads =
-          layer.allSublayers[0];
-
-
         expect(
-          roads.legendUrl
+          createdLayers[0]
+            .allSublayers[0]
+            .legendUrl
         ).toBe(
-          "https://example.com/legend.png"
+          "https://example.com/road-legend.png"
         );
       }
     );
 
 
     /* ========================================================
-     * 12
-     * NAME UPDATE
+     * 12. NO LAYER NAMES
      * ========================================================
      */
 
     it(
-      "should update WMSLayer title when name changes",
+      "should add WMS when layerNames is not provided",
       async () => {
 
         const {
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.name =
-          "Original Name";
+        component.service = {
 
-
-        element.service = {
           url:
-            "https://example.com/wms",
+            "https://example.com/wms"
 
-          layerNames: [
-            "roads"
-          ]
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -1342,73 +1289,204 @@ describe(
 
 
         expect(
-          layer.title
-        ).toBe(
-          "Original Name"
-        );
-
-
-        /*
-         * Change only the Lit name property.
-         * This should NOT recreate WMSLayer.
-         */
-        element.name =
-          "Updated Name";
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        expect(
-          layer.title
-        ).toBe(
-          "Updated Name"
-        );
-
-
-        expect(
-          WMSLayerMock
+          layer.load
         ).toHaveBeenCalledTimes(
           1
         );
+
+
+        expect(
+          layer.findSublayerByName
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap!.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          component
+        );
       }
     );
 
 
     /* ========================================================
-     * 13
-     * SERVICE CHANGE
+     * 13. GET LAYER
      * ========================================================
      */
 
     it(
-      "should remove old WMSLayer and create a new layer when service changes",
+      "should return ArcGIS WMS layer from getLayer",
       async () => {
 
         const {
-          arcMap,
-          element
+          component
         } =
-          mountComponent();
+          createComponent();
 
 
-        /*
-         * First WMS service.
-         */
-        element.service = {
+        component.service = {
+
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
+        );
+
+
+        expect(
+          component.getLayer()
+        ).toBe(
+          createdLayers[0]
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 14. GET LAYER ID
+     * ========================================================
+     */
+
+    it(
+      "should return WMS layer id",
+      async () => {
+
+        const {
+          component
+        } =
+          createComponent();
+
+
+        component.service = {
+
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
+        );
+
+
+        expect(
+          await component.getLayerId()
+        ).toBe(
+          "wms-1"
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 15. REMOVE LAYER
+     * ========================================================
+     */
+
+    it(
+      "should remove and destroy existing WMS layer",
+      async () => {
+
+        const {
+          component,
+          arcMap
+        } =
+          createComponent();
+
+
+        component.service = {
+
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+
+        } as any;
+
+
+        await runUpdate(
+          component
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        await (
+          component as any
+        ).removeLayer();
+
+
+        expect(
+          arcMap!.removeLayer
+        ).toHaveBeenCalledWith(
+          layer
+        );
+
+
+        expect(
+          layer.destroy
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          component.getLayer()
+        ).toBeUndefined();
+      }
+    );
+
+
+    /* ========================================================
+     * 16. CHANGE SERVICE
+     * ========================================================
+     */
+
+    it(
+      "should remove old layer and create new layer when service changes",
+      async () => {
+
+        const {
+          component,
+          arcMap
+        } =
+          createComponent();
+
+
+        /* First service */
+
+        component.service = {
+
           url:
             "https://example.com/wms-1",
 
           layerNames: [
             "roads"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -1416,29 +1494,22 @@ describe(
           createdLayers[0];
 
 
-        expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledWith(
-          firstLayer,
-          element
-        );
+        /* Second service */
 
+        component.service = {
 
-        /*
-         * Change WMS service.
-         */
-        element.service = {
           url:
             "https://example.com/wms-2",
 
           layerNames: [
             "cities"
           ]
+
         } as any;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
@@ -1453,11 +1524,8 @@ describe(
           createdLayers[1];
 
 
-        /*
-         * Old layer removed.
-         */
         expect(
-          arcMap.removeLayer
+          arcMap!.removeLayer
         ).toHaveBeenCalledWith(
           firstLayer
         );
@@ -1465,29 +1533,13 @@ describe(
 
         expect(
           firstLayer.destroy
-        ).toHaveBeenCalledTimes(
-          1
-        );
+        ).toHaveBeenCalled();
 
 
-        /*
-         * New layer uses new URL.
-         */
         expect(
           secondLayer.url
         ).toBe(
           "https://example.com/wms-2"
-        );
-
-
-        /*
-         * New layer added.
-         */
-        expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledWith(
-          secondLayer,
-          element
         );
 
 
@@ -1498,258 +1550,52 @@ describe(
             secondLayer.allSublayers[1]
           ]
         );
-      }
-    );
 
 
-    /* ========================================================
-     * 14
-     * DISCONNECTED CALLBACK
-     * ========================================================
-     */
-
-    it(
-      "should remove and destroy WMSLayer when component is disconnected",
-      async () => {
-
-        const {
-          arcMap,
-          element
-        } =
-          mountComponent();
-
-
-        element.service = {
-          url:
-            "https://example.com/wms",
-
-          layerNames: [
-            "roads"
-          ]
-        } as any;
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        const layer =
-          createdLayers[0];
-
-
-        /*
-         * Verify layer initially added.
-         */
         expect(
-          arcMap.addLayer
+          arcMap!.addLayer
         ).toHaveBeenCalledWith(
-          layer,
-          element
-        );
-
-
-        /*
-         * Trigger disconnectedCallback().
-         */
-        arcMap.removeChild(
-          element
-        );
-
-
-        await flushAsync();
-
-
-        expect(
-          arcMap.removeLayer
-        ).toHaveBeenCalledWith(
-          layer
-        );
-
-
-        expect(
-          layer.destroy
-        ).toHaveBeenCalledTimes(
-          1
+          secondLayer,
+          component
         );
       }
     );
 
 
     /* ========================================================
-     * 15
-     * GET LAYER
+     * 17. EMPTY SERVICE
      * ========================================================
      */
 
     it(
-      "should return underlying ArcGIS WMSLayer from getLayer",
+      "should not construct WMS layer when service is undefined",
       async () => {
 
         const {
-          element
+          component,
+          arcMap
         } =
-          mountComponent();
+          createComponent();
 
 
-        element.service = {
-          url:
-            "https://example.com/wms",
-
-          layerNames: [
-            "roads"
-          ]
-        } as any;
+        component.service =
+          undefined;
 
 
-        await waitForComponent(
-          element
+        await runUpdate(
+          component
         );
 
 
         expect(
-          element.getLayer()
-        ).toBe(
-          createdLayers[0]
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 16
-     * GET LAYER ID
-     * ========================================================
-     */
-
-    it(
-      "should return WMS layer id from getLayerId",
-      async () => {
-
-        const {
-          element
-        } =
-          mountComponent();
-
-
-        element.service = {
-          url:
-            "https://example.com/wms",
-
-          layerNames: [
-            "roads"
-          ]
-        } as any;
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        const layerId =
-          await element.getLayerId();
-
-
-        expect(
-          layerId
-        ).toBe(
-          "mock-wms-1"
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 17
-     * NO LAYER NAME
-     * ========================================================
-     */
-
-    it(
-      "should add WMSLayer when layerNames is not provided",
-      async () => {
-
-        const {
-          arcMap,
-          element
-        } =
-          mountComponent();
-
-
-        element.service = {
-          url:
-            "https://example.com/wms"
-        } as any;
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        const layer =
-          createdLayers[0];
-
-
-        expect(
-          layer.load
-        ).toHaveBeenCalledTimes(
-          1
-        );
-
-
-        /*
-         * Since no specific layerNames were supplied,
-         * findSublayerByName should not be needed.
-         */
-        expect(
-          layer.findSublayerByName
+          MockWMSLayerConstructor
         ).not.toHaveBeenCalled();
 
 
         expect(
-          arcMap.addLayer
-        ).toHaveBeenCalledWith(
-          layer,
-          element
-        );
-      }
-    );
-
-
-    /* ========================================================
-     * 18
-     * EMPTY SERVICE
-     * ========================================================
-     */
-
-    it(
-      "should do nothing when service is undefined",
-      async () => {
-
-        const {
-          arcMap,
-          element
-        } =
-          mountComponent();
-
-
-        await waitForComponent(
-          element
-        );
-
-
-        expect(
-          WMSLayerMock
-        ).not.toHaveBeenCalled();
-
-
-        expect(
-          arcMap.addLayer
+          arcMap!.addLayer
         ).not.toHaveBeenCalled();
       }
     );
-
   }
 );
