@@ -1,1262 +1,1755 @@
-import {
-  LitElement,
-  nothing,
-  PropertyValues
-} from "lit";
+/** @jest-environment jsdom */
 
-import {
-  customElement,
-  property
-} from "lit/decorators.js";
+jest.mock(
+  "@arcgis/core/layers/WMSLayer.js",
+  () => ({
+    __esModule: true,
+    default: jest.fn()
+  })
+);
 
 import WMSLayer from "@arcgis/core/layers/WMSLayer.js";
-import type WMSSublayer from "@arcgis/core/layers/support/WMSSublayer.js";
 
-import type {
-  DynamicWebMappingService
-} from "../../external-api";
+import {
+  ArcWmsLayer
+} from "./wms-layer";
 
 
-/**
- * Minimum contract required from our <arc-map>.
- *
- * We intentionally do NOT get MapView directly here.
- * arc-map remains responsible for adding/removing layers
- * and maintaining layer order.
+/* ============================================================
+ * TEST TYPES
+ * ============================================================
  */
-type ArcMapElement = HTMLElement & {
 
-  addLayer: (
-    layer: WMSLayer,
-    element?: HTMLElement
-  ) => void | Promise<void>;
-
-  removeLayer: (
-    layer: WMSLayer
-  ) => void | Promise<void>;
+type MockSublayer = {
+  id: number;
+  name: string;
+  title: string;
+  visible?: boolean;
+  legendUrl?: string;
 };
 
 
-/**
- * <arc-wms-layer>
+type MockWmsLayer = {
+  id: string;
+
+  url: string;
+
+  title:
+    | string
+    | null
+    | undefined;
+
+  visible: boolean;
+
+  loaded: boolean;
+
+  loadStatus: string;
+
+  loadError:
+    | Error
+    | null;
+
+  allSublayers:
+    MockSublayer[];
+
+  sublayers:
+    MockSublayer[];
+
+  load:
+    jest.Mock;
+
+  findSublayerByName:
+    jest.Mock;
+
+  findSublayerById:
+    jest.Mock;
+
+  destroy:
+    jest.Mock;
+};
+
+
+type ArcMapTestElement =
+  HTMLElement & {
+
+    addLayer:
+      jest.Mock;
+
+    removeLayer:
+      jest.Mock;
+  };
+
+
+/* ============================================================
+ * ARC GIS MOCK
+ * ============================================================
+ */
+
+const WMSLayerMock =
+  WMSLayer as unknown as jest.Mock;
+
+
+/*
+ * Every WMSLayer created by the component
+ * will be stored here.
  *
- * Must be placed under <arc-map>.
+ * That allows tests to inspect:
  *
- * Example:
+ * load()
+ * destroy()
+ * sublayers
+ * findSublayerByName()
+ * etc.
+ */
+let createdLayers:
+  MockWmsLayer[] = [];
+
+
+/*
+ * Default WMS capabilities returned by our mocked WMS.
+ */
+const createDefaultSublayers =
+  (): MockSublayer[] => [
+
+    {
+      id: 1,
+      name: "roads",
+      title: "Roads",
+      visible: true
+    },
+
+    {
+      id: 2,
+      name: "cities",
+      title: "Cities",
+      visible: true
+    },
+
+    {
+      id: 3,
+      name: "states",
+      title: "States",
+      visible: true
+    }
+  ];
+
+
+/*
+ * Creates one fake ArcGIS WMSLayer.
+ */
+const createMockWmsLayer =
+  (
+    options: {
+      url?: string;
+      title?: string;
+      visible?: boolean;
+    }
+  ): MockWmsLayer => {
+
+    const allSublayers =
+      createDefaultSublayers();
+
+
+    const layer =
+      {} as MockWmsLayer;
+
+
+    layer.id =
+      `mock-wms-${createdLayers.length + 1}`;
+
+
+    layer.url =
+      options.url ?? "";
+
+
+    layer.title =
+      options.title;
+
+
+    layer.visible =
+      options.visible ?? true;
+
+
+    layer.loaded =
+      false;
+
+
+    layer.loadStatus =
+      "not-loaded";
+
+
+    layer.loadError =
+      null;
+
+
+    layer.allSublayers =
+      allSublayers;
+
+
+    layer.sublayers =
+      [];
+
+
+    /*
+     * Mock WMSLayer.load()
+     *
+     * This represents a successful
+     * GetCapabilities request.
+     */
+    layer.load =
+      jest.fn()
+        .mockImplementation(
+          async () => {
+
+            layer.loaded =
+              true;
+
+            layer.loadStatus =
+              "loaded";
+
+            return layer;
+          }
+        );
+
+
+    /*
+     * Mock:
+     *
+     * wmsLayer.findSublayerByName(...)
+     */
+    layer.findSublayerByName =
+      jest.fn()
+        .mockImplementation(
+          (name: string) => {
+
+            return allSublayers.find(
+              sublayer =>
+                sublayer.name === name
+            );
+          }
+        );
+
+
+    /*
+     * Mock:
+     *
+     * wmsLayer.findSublayerById(...)
+     */
+    layer.findSublayerById =
+      jest.fn()
+        .mockImplementation(
+          (id: number) => {
+
+            return allSublayers.find(
+              sublayer =>
+                sublayer.id === id
+            );
+          }
+        );
+
+
+    /*
+     * Mock destroy()
+     */
+    layer.destroy =
+      jest.fn();
+
+
+    return layer;
+  };
+
+
+/* ============================================================
+ * HELPERS
+ * ============================================================
+ */
+
+
+/*
+ * Creates fake <arc-map>.
+ *
+ * We don't need the real ArcMap component
+ * for unit testing arc-wms-layer.
+ */
+const createArcMap =
+  (): ArcMapTestElement => {
+
+    const arcMap =
+      document.createElement(
+        "arc-map"
+      ) as ArcMapTestElement;
+
+
+    arcMap.addLayer =
+      jest.fn()
+        .mockResolvedValue(
+          undefined
+        );
+
+
+    arcMap.removeLayer =
+      jest.fn()
+        .mockResolvedValue(
+          undefined
+        );
+
+
+    return arcMap;
+  };
+
+
+/*
+ * Creates:
  *
  * <arc-map>
- *   <arc-wms-layer
- *     name="My WMS"
- *     service='{
- *       "url":"https://server/wms",
- *       "layerNames":["my_layer"]
- *     }'>
- *   </arc-wms-layer>
+ *    <arc-wms-layer>
  * </arc-map>
+ *
+ * and attaches it to document.body.
  */
-@customElement("arc-wms-layer")
-export class ArcWmsLayer extends LitElement {
+const mountComponent =
+  (): {
+    arcMap: ArcMapTestElement;
+    element: ArcWmsLayer;
+  } => {
 
-  /**
-   * Parent <arc-map>.
-   */
-  private ancestorMap?: ArcMapElement;
-
-  /**
-   * Actual ArcGIS WMSLayer.
-   */
-  private wmsLayer?: WMSLayer;
-
-  /**
-   * Prevent an older async update from completing
-   * after a newer service update has already started.
-   */
-  private updateSequence = 0;
+    const arcMap =
+      createArcMap();
 
 
-  // ============================================================
-  // PROPERTIES
-  // ============================================================
-
-  /**
-   * Kept for compatibility with old up-wms-layer API.
-   *
-   * ArcGIS 5.x does not expose the old SVG DOM node,
-   * therefore layerClass cannot be applied to the WMS
-   * rendered image the same way as the old implementation.
-   */
-  @property({
-    type: String,
-    attribute: "layer-class",
-    reflect: true
-  })
-  layerClass = "";
+    const element =
+      document.createElement(
+        "arc-wms-layer"
+      ) as ArcWmsLayer;
 
 
-  /**
-   * Optional custom WMS legend URL.
-   */
-  @property({
-    type: String,
-    attribute: "legend-url",
-    reflect: true
-  })
-  legendUrl = "";
-
-
-  /**
-   * Display name used by LayerList / Legend.
-   */
-  @property({
-    type: String,
-    reflect: true
-  })
-  name = "";
-
-
-  /**
-   * WMS service configuration.
-   *
-   * IMPORTANT:
-   *
-   * We intentionally allow this as an HTML attribute.
-   *
-   * Therefore BOTH of these work:
-   *
-   * JavaScript:
-   *
-   * element.service = {
-   *   url: "...",
-   *   layerNames: ["layer1"]
-   * };
-   *
-   * HTML:
-   *
-   * service='{"url":"...","layerNames":["layer1"]}'
-   */
-  @property({
-    attribute: "service"
-  })
-  service?: DynamicWebMappingService | string;
-
-
-  // ============================================================
-  // LIT LIFECYCLE
-  // ============================================================
-
-  connectedCallback(): void {
-
-    super.connectedCallback();
-
-    console.log(
-      "[arc-wms-layer] connectedCallback"
-    );
-
-    /*
-     * On FIRST connection, updated() will handle service.
-     *
-     * On reconnection, Lit may not consider service changed,
-     * so rebuild the layer if necessary.
-     */
-    if (
-      this.hasUpdated &&
-      this.service &&
-      !this.wmsLayer
-    ) {
-
-      console.log(
-        "[arc-wms-layer] reconnect detected - rebuilding layer"
-      );
-
-      void this.updateLayer();
-    }
-  }
-
-
-  disconnectedCallback(): void {
-
-    console.log(
-      "[arc-wms-layer] disconnectedCallback"
-    );
-
-    /*
-     * Invalidate any currently running async build.
-     */
-    ++this.updateSequence;
-
-    void this.removeLayer();
-
-    this.ancestorMap = undefined;
-
-    super.disconnectedCallback();
-  }
-
-
-  protected updated(
-    changedProperties: PropertyValues<this>
-  ): void {
-
-    console.log(
-      "[arc-wms-layer] updated()",
-      Array.from(changedProperties.keys())
+    arcMap.appendChild(
+      element
     );
 
 
-    // ----------------------------------------------------------
-    // SERVICE
-    // ----------------------------------------------------------
-
-    if (changedProperties.has("service")) {
-
-      console.log(
-        "[arc-wms-layer] SERVICE CHANGED:",
-        this.service
-      );
-
-      void this.updateLayer();
-
-      return;
-    }
-
-
-    // ----------------------------------------------------------
-    // NAME
-    // ----------------------------------------------------------
-
-    if (
-      changedProperties.has("name") &&
-      this.wmsLayer
-    ) {
-
-      console.log(
-        "[arc-wms-layer] updating title:",
-        this.name
-      );
-
-      this.wmsLayer.title =
-        this.name || null;
-    }
-
-
-    // ----------------------------------------------------------
-    // LEGEND URL
-    // ----------------------------------------------------------
-
-    if (
-      changedProperties.has("legendUrl") &&
-      this.wmsLayer
-    ) {
-
-      this.applyLegendUrl(
-        this.wmsLayer
-      );
-    }
-
-
-    // ----------------------------------------------------------
-    // OLD layerClass API
-    // ----------------------------------------------------------
-
-    if (
-      changedProperties.has("layerClass") &&
-      this.layerClass
-    ) {
-
-      console.warn(
-        "[arc-wms-layer] layerClass is retained for API " +
-        "compatibility, but ArcGIS 5.x WMSLayer does not " +
-        "expose the old SVG DOM node."
-      );
-    }
-  }
-
-
-  protected render() {
-
-    /*
-     * arc-wms-layer is a configuration component.
-     * It does not render its own visible DOM.
-     */
-    return nothing;
-  }
-
-
-  // ============================================================
-  // PUBLIC API
-  // ============================================================
-
-  /**
-   * Used by arc-map for layer ordering if required.
-   */
-  public async getLayerId():
-    Promise<string | undefined> {
-
-    return this.wmsLayer?.id;
-  }
-
-
-  /**
-   * Optional direct access to the ArcGIS layer.
-   */
-  public getLayer():
-    WMSLayer | undefined {
-
-    return this.wmsLayer;
-  }
-
-
-  // ============================================================
-  // MAIN UPDATE FLOW
-  // ============================================================
-
-  private async updateLayer():
-    Promise<void> {
-
-    const sequence =
-      ++this.updateSequence;
-
-
-    console.log(
-      "[arc-wms-layer] ==================================="
-    );
-
-    console.log(
-      "[arc-wms-layer] 1 - updateLayer ENTER"
-    );
-
-    console.log(
-      "[arc-wms-layer] sequence:",
-      sequence
+    document.body.appendChild(
+      arcMap
     );
 
 
-    // ----------------------------------------------------------
-    // Remove previous layer
-    // ----------------------------------------------------------
-
-    await this.removeLayer();
-
-
-    /*
-     * Another update may have started while we were
-     * removing the previous layer.
-     */
-    if (
-      sequence !== this.updateSequence ||
-      !this.isConnected
-    ) {
-
-      console.log(
-        "[arc-wms-layer] STOP - stale update after remove"
-      );
-
-      return;
-    }
-
-
-    // ----------------------------------------------------------
-    // Validate service
-    // ----------------------------------------------------------
-
-    if (!this.service) {
-
-      console.log(
-        "[arc-wms-layer] STOP - service is empty"
-      );
-
-      return;
-    }
-
-
-    console.log(
-      "[arc-wms-layer] 2 - parsing service:",
-      this.service
-    );
-
-
-    const parsedService =
-      ArcWmsLayer.parseAndValidateWebServiceProperty(
-        this.service
-      );
-
-
-    console.log(
-      "[arc-wms-layer] 3 - parsedService:",
-      parsedService
-    );
-
-
-    if (!parsedService) {
-
-      console.error(
-        "[arc-wms-layer] STOP - service is invalid"
-      );
-
-      return;
-    }
-
-
-    // ----------------------------------------------------------
-    // Find arc-map
-    // ----------------------------------------------------------
-
-    console.log(
-      "[arc-wms-layer] looking for ancestor <arc-map>"
-    );
-
-
-    const ancestorMap =
-      this.closest(
-        "arc-map"
-      ) as ArcMapElement | null;
-
-
-    console.log(
-      "[arc-wms-layer] 4 - ancestor <arc-map>:",
-      ancestorMap
-    );
-
-
-    if (!ancestorMap) {
-
-      console.error(
-        "[arc-wms-layer] STOP - <arc-wms-layer> " +
-        "must be a descendant of <arc-map>."
-      );
-
-      return;
-    }
-
-
-    /*
-     * Runtime check in addition to TypeScript contract.
-     */
-    if (
-      typeof ancestorMap.addLayer !== "function"
-    ) {
-
-      console.error(
-        "[arc-wms-layer] STOP - ancestor <arc-map> " +
-        "does not provide addLayer()."
-      );
-
-      return;
-    }
-
-
-    this.ancestorMap =
-      ancestorMap;
-
-
-    console.log(
-      "[arc-wms-layer] 5 - calling constructLayerAndAddToMap()"
-    );
-
-
-    // ----------------------------------------------------------
-    // Construct WMS
-    // ----------------------------------------------------------
-
-    await this.constructLayerAndAddToMap(
-      parsedService,
-      sequence
-    );
-
-
-    console.log(
-      "[arc-wms-layer] 6 - updateLayer FINISHED"
-    );
-
-    console.log(
-      "[arc-wms-layer] ==================================="
-    );
-  }
-
-
-  // ============================================================
-  // CONSTRUCT WMS LAYER
-  // ============================================================
-
-  private async constructLayerAndAddToMap(
-    parsedService: DynamicWebMappingService,
-    sequence: number
-  ): Promise<void> {
-
-    console.log(
-      "[arc-wms-layer] -----------------------------------"
-    );
-
-    console.log(
-      "[arc-wms-layer] CONSTRUCT ENTERED"
-    );
-
-    console.log(
-      "[arc-wms-layer] URL:",
-      parsedService.url
-    );
-
-    console.log(
-      "[arc-wms-layer] requested layerNames:",
-      parsedService.layerNames
-    );
-
-
-    // ----------------------------------------------------------
-    // Create WMSLayer
-    // ----------------------------------------------------------
-
-    const wmsLayer =
-      new WMSLayer({
-
-        url:
-          parsedService.url,
-
-        title:
-          this.name || undefined,
-
-        visible:
-          true
-      });
-
-
-    /*
-     * Store immediately so that disconnectedCallback()
-     * can clean it up while load() is still running.
-     */
-    this.wmsLayer =
-      wmsLayer;
-
-
-    console.log(
-      "[arc-wms-layer] WMSLayer CREATED:",
-      wmsLayer
-    );
-
-    console.log(
-      "[arc-wms-layer] WMSLayer URL:",
-      wmsLayer.url
-    );
-
-    console.log(
-      "[arc-wms-layer] BEFORE wmsLayer.load()"
-    );
-
-
-    try {
-
-      // ========================================================
-      // THIS SHOULD TRIGGER GetCapabilities
-      // ========================================================
-
-      await wmsLayer.load();
-
-
-      console.log(
-        "[arc-wms-layer] AFTER wmsLayer.load()"
-      );
-
-      console.log(
-        "[arc-wms-layer] loadStatus:",
-        wmsLayer.loadStatus
-      );
-
-      console.log(
-        "[arc-wms-layer] loaded:",
-        wmsLayer.loaded
-      );
-
-
-      /*
-       * If you reach BEFORE load() but not AFTER load(),
-       * immediately check Network for GetCapabilities.
-       */
-
-
-      // --------------------------------------------------------
-      // Check stale async operation
-      // --------------------------------------------------------
-
-      if (
-        sequence !== this.updateSequence ||
-        !this.isConnected
-      ) {
-
-        console.log(
-          "[arc-wms-layer] build became stale after load()"
+    return {
+      arcMap,
+      element
+    };
+  };
+
+
+/*
+ * Allows Lit lifecycle + our asynchronous
+ * updateLayer() / constructLayerAndAddToMap()
+ * calls to finish.
+ */
+const flushAsync =
+  async (): Promise<void> => {
+
+    await Promise.resolve();
+
+    await Promise.resolve();
+
+    await new Promise<void>(
+      resolve => {
+
+        setTimeout(
+          resolve,
+          0
         );
-
-        await this.disposeLayer(
-          wmsLayer
-        );
-
-        return;
       }
+    );
+
+    await Promise.resolve();
+  };
 
 
-      // --------------------------------------------------------
-      // Print every available WMS sublayer
-      // --------------------------------------------------------
+const waitForComponent =
+  async (
+    element: ArcWmsLayer
+  ): Promise<void> => {
 
-      const availableSublayers =
-        wmsLayer.allSublayers.map(
-          sublayer => ({
+    await element.updateComplete;
 
-            id:
-              sublayer.id,
+    await flushAsync();
+  };
 
-            name:
-              sublayer.name,
+
+/* ============================================================
+ * TESTS
+ * ============================================================
+ */
+
+describe(
+  "ArcWmsLayer",
+  () => {
+
+    let consoleLogSpy:
+      jest.SpyInstance;
+
+    let consoleWarnSpy:
+      jest.SpyInstance;
+
+    let consoleErrorSpy:
+      jest.SpyInstance;
+
+
+    beforeEach(
+      () => {
+
+        /*
+         * Clean DOM.
+         */
+        document.body.innerHTML =
+          "";
+
+
+        /*
+         * Reset instances.
+         */
+        createdLayers =
+          [];
+
+
+        /*
+         * Reset mocked ArcGIS constructor.
+         */
+        WMSLayerMock.mockReset();
+
+
+        /*
+         * Every:
+         *
+         * new WMSLayer(...)
+         *
+         * will return our mock.
+         */
+        WMSLayerMock.mockImplementation(
+          (
+            options: {
+              url?: string;
+              title?: string;
+              visible?: boolean;
+            }
+          ) => {
+
+            const layer =
+              createMockWmsLayer(
+                options
+              );
+
+
+            createdLayers.push(
+              layer
+            );
+
+
+            return layer;
+          }
+        );
+
+
+        /*
+         * Silence component debugging logs
+         * during tests.
+         */
+        consoleLogSpy =
+          jest.spyOn(
+            console,
+            "log"
+          )
+            .mockImplementation(
+              () => undefined
+            );
+
+
+        consoleWarnSpy =
+          jest.spyOn(
+            console,
+            "warn"
+          )
+            .mockImplementation(
+              () => undefined
+            );
+
+
+        consoleErrorSpy =
+          jest.spyOn(
+            console,
+            "error"
+          )
+            .mockImplementation(
+              () => undefined
+            );
+      }
+    );
+
+
+    afterEach(
+      async () => {
+
+        /*
+         * Disconnect components while spies
+         * still exist.
+         */
+        document.body.innerHTML =
+          "";
+
+        await flushAsync();
+
+        jest.restoreAllMocks();
+      }
+    );
+
+
+    /* ========================================================
+     * 1
+     * COMPONENT REGISTRATION
+     * ========================================================
+     */
+
+    it(
+      "should register arc-wms-layer custom element",
+      () => {
+
+        const registeredElement =
+          customElements.get(
+            "arc-wms-layer"
+          );
+
+
+        expect(
+          registeredElement
+        ).toBeDefined();
+      }
+    );
+
+
+    /* ========================================================
+     * 2
+     * VALID SERVICE
+     * ========================================================
+     */
+
+    it(
+      "should create and load WMSLayer for a valid service",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.name =
+          "Road WMS";
+
+
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        /*
+         * Verify new WMSLayer(...)
+         */
+        expect(
+          WMSLayerMock
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).toHaveBeenCalledWith(
+          {
+            url:
+              "https://example.com/wms",
 
             title:
-              sublayer.title
-          })
-        );
+              "Road WMS",
 
-
-      console.log(
-        "[arc-wms-layer] AVAILABLE WMS SUBLAYERS:",
-        availableSublayers
-      );
-
-
-      // --------------------------------------------------------
-      // Requested layer names
-      // --------------------------------------------------------
-
-      const layerNames =
-        this.normalizeLayerNames(
-          parsedService.layerNames
-        );
-
-
-      console.log(
-        "[arc-wms-layer] normalized requested layerNames:",
-        layerNames
-      );
-
-
-      // --------------------------------------------------------
-      // Select sublayers
-      // --------------------------------------------------------
-
-      if (layerNames.length > 0) {
-
-        const selectedSublayers:
-          WMSSublayer[] = [];
-
-
-        for (
-          const requestedName of layerNames
-        ) {
-
-          console.log(
-            "[arc-wms-layer] searching WMS sublayer:",
-            requestedName
-          );
-
-
-          /*
-           * First search by actual WMS Name.
-           */
-          let sublayer =
-            wmsLayer.findSublayerByName(
-              requestedName
-            );
-
-
-          /*
-           * Helpful fallback:
-           *
-           * Some old configurations use a numeric ID
-           * in layerNames rather than the WMS Name.
-           */
-          if (
-            !sublayer &&
-            /^\d+$/.test(requestedName)
-          ) {
-
-            const numericId =
-              Number(requestedName);
-
-
-            console.log(
-              "[arc-wms-layer] name not found; " +
-              "trying sublayer id:",
-              numericId
-            );
-
-
-            sublayer =
-              wmsLayer.findSublayerById(
-                numericId
-              );
+            visible:
+              true
           }
+        );
 
 
-          if (sublayer) {
-
-            console.log(
-              "[arc-wms-layer] SUBLAYER FOUND:",
-              {
-                id: sublayer.id,
-                name: sublayer.name,
-                title: sublayer.title
-              }
-            );
+        const layer =
+          createdLayers[0];
 
 
-            if (this.legendUrl) {
+        /*
+         * GetCapabilities / load
+         */
+        expect(
+          layer.load
+        ).toHaveBeenCalledTimes(
+          1
+        );
 
-              sublayer.legendUrl =
-                this.legendUrl;
+
+        /*
+         * Requested layer
+         */
+        expect(
+          layer.findSublayerByName
+        ).toHaveBeenCalledWith(
+          "roads"
+        );
+
+
+        /*
+         * Only roads selected.
+         */
+        expect(
+          layer.sublayers
+        ).toEqual(
+          [
+            layer.allSublayers[0]
+          ]
+        );
+
+
+        /*
+         * Added through arc-map.
+         */
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          element
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 3
+     * MULTIPLE LAYERS
+     * ========================================================
+     */
+
+    it(
+      "should select multiple requested WMS sublayers",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads",
+            "cities"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        expect(
+          layer.findSublayerByName
+        ).toHaveBeenCalledWith(
+          "roads"
+        );
+
+
+        expect(
+          layer.findSublayerByName
+        ).toHaveBeenCalledWith(
+          "cities"
+        );
+
+
+        expect(
+          layer.sublayers
+        ).toEqual(
+          [
+            layer.allSublayers[0],
+            layer.allSublayers[1]
+          ]
+        );
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          element
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 4
+     * HTML JSON ATTRIBUTE
+     * ========================================================
+     */
+
+    it(
+      "should parse service passed as an HTML JSON attribute",
+      async () => {
+
+        const arcMap =
+          createArcMap();
+
+
+        const element =
+          document.createElement(
+            "arc-wms-layer"
+          ) as ArcWmsLayer;
+
+
+        element.setAttribute(
+          "name",
+          "HTML WMS"
+        );
+
+
+        element.setAttribute(
+          "service",
+          JSON.stringify(
+            {
+              url:
+                "https://example.com/html-wms",
+
+              layerNames: [
+                "roads"
+              ]
             }
-
-
-            selectedSublayers.push(
-              sublayer
-            );
-
-          } else {
-
-            console.error(
-              `[arc-wms-layer] Requested WMS layer ` +
-              `"${requestedName}" was NOT found.`
-            );
-          }
-        }
-
-
-        // ------------------------------------------------------
-        // Nothing matched
-        // ------------------------------------------------------
-
-        if (
-          selectedSublayers.length === 0
-        ) {
-
-          console.error(
-            "[arc-wms-layer] STOP - none of the requested " +
-            "layerNames matched the WMS GetCapabilities response."
-          );
-
-
-          console.error(
-            "[arc-wms-layer] Compare requested names with:",
-            availableSublayers
-          );
-
-
-          await this.disposeLayer(
-            wmsLayer
-          );
-
-          return;
-        }
-
-
-        // ------------------------------------------------------
-        // Set only requested sublayers
-        // ------------------------------------------------------
-
-        console.log(
-          "[arc-wms-layer] setting selected sublayers:",
-          selectedSublayers.map(
-            layer => ({
-              id: layer.id,
-              name: layer.name,
-              title: layer.title
-            })
           )
         );
 
 
+        arcMap.appendChild(
+          element
+        );
+
+
+        document.body.appendChild(
+          arcMap
+        );
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).toHaveBeenCalledWith(
+          {
+            url:
+              "https://example.com/html-wms",
+
+            title:
+              "HTML WMS",
+
+            visible:
+              true
+          }
+        );
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledTimes(
+          1
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 5
+     * INVALID JSON
+     * ========================================================
+     */
+
+    it(
+      "should not create WMSLayer when service JSON is invalid",
+      async () => {
+
+        const arcMap =
+          createArcMap();
+
+
+        const element =
+          document.createElement(
+            "arc-wms-layer"
+          ) as ArcWmsLayer;
+
+
+        element.setAttribute(
+          "service",
+          "{invalid-json"
+        );
+
+
+        arcMap.appendChild(
+          element
+        );
+
+
+        document.body.appendChild(
+          arcMap
+        );
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Could not parse service JSON"
+          ),
+          expect.anything(),
+          expect.anything()
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 6
+     * MISSING URL
+     * ========================================================
+     */
+
+    it(
+      "should not create WMSLayer when URL is missing",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "valid WMS url is required"
+          )
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 7
+     * NO ARC-MAP ANCESTOR
+     * ========================================================
+     */
+
+    it(
+      "should not create WMSLayer when arc-map ancestor is missing",
+      async () => {
+
+        const element =
+          document.createElement(
+            "arc-wms-layer"
+          ) as ArcWmsLayer;
+
+
+        document.body.appendChild(
+          element
+        );
+
+
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
         /*
-         * ArcGIS supports setting the service-created
-         * WMSSublayers after load().
+         * constructLayerAndAddToMap()
+         * must not be reached.
          */
-        wmsLayer.sublayers =
-          selectedSublayers;
-      }
+        expect(
+          WMSLayerMock
+        ).not.toHaveBeenCalled();
 
 
-      // --------------------------------------------------------
-      // Legend URL when all layers are being used
-      // --------------------------------------------------------
-
-      if (
-        layerNames.length === 0 &&
-        this.legendUrl
-      ) {
-
-        this.applyLegendUrl(
-          wmsLayer
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "must be a descendant of <arc-map>"
+          )
         );
       }
+    );
 
 
-      // --------------------------------------------------------
-      // Get ancestor map into local variable.
-      //
-      // This avoids:
-      // "Object is possibly undefined"
-      // --------------------------------------------------------
+    /* ========================================================
+     * 8
+     * NUMERIC LAYER ID FALLBACK
+     * ========================================================
+     */
 
-      const ancestorMap =
-        this.ancestorMap;
+    it(
+      "should fall back to findSublayerById for numeric layer name",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
 
 
-      if (!ancestorMap) {
+        element.service = {
+          url:
+            "https://example.com/wms",
 
-        throw new Error(
-          "Ancestor <arc-map> disappeared before layer was added."
+          layerNames: [
+            "2"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        /*
+         * First attempt by name.
+         */
+        expect(
+          layer.findSublayerByName
+        ).toHaveBeenCalledWith(
+          "2"
+        );
+
+
+        /*
+         * Then numeric ID.
+         */
+        expect(
+          layer.findSublayerById
+        ).toHaveBeenCalledWith(
+          2
+        );
+
+
+        /*
+         * ID 2 = cities
+         */
+        expect(
+          layer.sublayers
+        ).toEqual(
+          [
+            layer.allSublayers[1]
+          ]
+        );
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          element
         );
       }
+    );
 
 
-      if (
-        typeof ancestorMap.addLayer !==
-        "function"
-      ) {
+    /* ========================================================
+     * 9
+     * REQUESTED SUBLAYER NOT FOUND
+     * ========================================================
+     */
 
-        throw new Error(
-          "<arc-map> does not contain addLayer()."
+    it(
+      "should not add WMSLayer when requested sublayer does not exist",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "not-existing-layer"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        expect(
+          layer.load
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          layer.findSublayerByName
+        ).toHaveBeenCalledWith(
+          "not-existing-layer"
+        );
+
+
+        /*
+         * Nothing should reach the map.
+         */
+        expect(
+          arcMap.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        /*
+         * Failed / unused ArcGIS layer
+         * should be destroyed.
+         */
+        expect(
+          layer.destroy
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "was NOT found"
+          )
         );
       }
+    );
 
 
-      // ========================================================
-      // ADD TO ARC-MAP
-      // ========================================================
+    /* ========================================================
+     * 10
+     * WMS LOAD FAILURE
+     * ========================================================
+     */
 
-      console.log(
-        "[arc-wms-layer] BEFORE arcMap.addLayer()"
-      );
+    it(
+      "should handle WMSLayer load failure",
+      async () => {
 
+        /*
+         * Override only the next WMSLayer.
+         */
+        WMSLayerMock
+          .mockImplementationOnce(
+            (
+              options: {
+                url?: string;
+                title?: string;
+                visible?: boolean;
+              }
+            ) => {
 
-      await ancestorMap.addLayer(
-        wmsLayer,
-        this
-      );
-
-
-      console.log(
-        "[arc-wms-layer] AFTER arcMap.addLayer()"
-      );
-
-      console.log(
-        "[arc-wms-layer] WMS LAYER SUCCESSFULLY ADDED"
-      );
-
-      console.log(
-        "[arc-wms-layer] layer id:",
-        wmsLayer.id
-      );
-
-      console.log(
-        "[arc-wms-layer] layer title:",
-        wmsLayer.title
-      );
-
-      console.log(
-        "[arc-wms-layer] layer visible:",
-        wmsLayer.visible
-      );
-
-      console.log(
-        "[arc-wms-layer] -----------------------------------"
-      );
+              const layer =
+                createMockWmsLayer(
+                  options
+                );
 
 
-    } catch (error) {
+              const loadError =
+                new Error(
+                  "GetCapabilities failed"
+                );
 
-      /*
-       * Don't report an old build as the current failure.
-       */
-      if (
-        sequence === this.updateSequence
-      ) {
 
-        console.error(
+              layer.load =
+                jest.fn()
+                  .mockImplementation(
+                    async () => {
+
+                      layer.loadStatus =
+                        "failed";
+
+                      layer.loadError =
+                        loadError;
+
+                      throw loadError;
+                    }
+                  );
+
+
+              createdLayers.push(
+                layer
+              );
+
+
+              return layer;
+            }
+          );
+
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          url:
+            "https://example.com/broken-wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        expect(
+          layer.load
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        /*
+         * Failed WMS should not be added.
+         */
+        expect(
+          arcMap.addLayer
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          layer.destroy
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalledWith(
           "[arc-wms-layer] WMS BUILD FAILED"
         );
-
-        console.error(
-          "[arc-wms-layer] URL:",
-          parsedService.url
-        );
-
-        console.error(
-          "[arc-wms-layer] loadStatus:",
-          wmsLayer.loadStatus
-        );
-
-        console.error(
-          "[arc-wms-layer] loadError:",
-          wmsLayer.loadError
-        );
-
-        console.error(
-          "[arc-wms-layer] ERROR:",
-          error
-        );
       }
-
-
-      await this.disposeLayer(
-        wmsLayer
-      );
-    }
-  }
-
-
-  // ============================================================
-  // REMOVE CURRENT LAYER
-  // ============================================================
-
-  private async removeLayer():
-    Promise<void> {
-
-    const layer =
-      this.wmsLayer;
-
-
-    if (!layer) {
-
-      console.log(
-        "[arc-wms-layer] removeLayer - no existing WMS layer"
-      );
-
-      return;
-    }
-
-
-    /*
-     * Clear reference first.
-     *
-     * This prevents another asynchronous lifecycle call
-     * from trying to remove the same layer twice.
-     */
-    this.wmsLayer =
-      undefined;
-
-
-    console.log(
-      "[arc-wms-layer] removing WMS layer:",
-      layer.id
     );
 
 
-    const ancestorMap =
-      this.ancestorMap;
+    /* ========================================================
+     * 11
+     * LEGEND URL
+     * ========================================================
+     */
+
+    it(
+      "should apply legendUrl to selected WMS sublayer",
+      async () => {
+
+        const {
+          element
+        } =
+          mountComponent();
 
 
-    if (
-      ancestorMap &&
-      typeof ancestorMap.removeLayer ===
-        "function"
-    ) {
+        element.legendUrl =
+          "https://example.com/legend.png";
 
-      try {
 
-        console.log(
-          "[arc-wms-layer] BEFORE arcMap.removeLayer()"
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
         );
 
 
-        await ancestorMap.removeLayer(
-          layer
-        );
+        const layer =
+          createdLayers[0];
 
 
-        console.log(
-          "[arc-wms-layer] AFTER arcMap.removeLayer()"
-        );
+        const roads =
+          layer.allSublayers[0];
 
-      } catch (error) {
 
-        console.warn(
-          "[arc-wms-layer] Error removing WMS layer " +
-          "from <arc-map>:",
-          error
+        expect(
+          roads.legendUrl
+        ).toBe(
+          "https://example.com/legend.png"
         );
       }
-    }
+    );
 
 
-    try {
-
-      layer.destroy();
-
-      console.log(
-        "[arc-wms-layer] WMSLayer destroyed"
-      );
-
-    } catch (error) {
-
-      console.warn(
-        "[arc-wms-layer] Error destroying WMSLayer:",
-        error
-      );
-    }
-  }
-
-
-  // ============================================================
-  // DISPOSE SPECIFIC LAYER
-  // ============================================================
-
-  private async disposeLayer(
-    layer: WMSLayer
-  ): Promise<void> {
-
-    /*
-     * Remove only if this is still the component's
-     * active layer reference.
+    /* ========================================================
+     * 12
+     * NAME UPDATE
+     * ========================================================
      */
-    if (
-      this.wmsLayer === layer
-    ) {
 
-      this.wmsLayer =
-        undefined;
-    }
+    it(
+      "should update WMSLayer title when name changes",
+      async () => {
 
-
-    const ancestorMap =
-      this.ancestorMap;
+        const {
+          element
+        } =
+          mountComponent();
 
 
-    if (
-      ancestorMap &&
-      typeof ancestorMap.removeLayer ===
-        "function"
-    ) {
+        element.name =
+          "Original Name";
 
-      try {
 
-        await ancestorMap.removeLayer(
-          layer
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
         );
 
-      } catch {
+
+        const layer =
+          createdLayers[0];
+
+
+        expect(
+          layer.title
+        ).toBe(
+          "Original Name"
+        );
+
 
         /*
-         * Layer may never have been added.
-         * This is expected when load() fails.
+         * Change only the Lit name property.
+         * This should NOT recreate WMSLayer.
          */
+        element.name =
+          "Updated Name";
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          layer.title
+        ).toBe(
+          "Updated Name"
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).toHaveBeenCalledTimes(
+          1
+        );
       }
-    }
+    );
 
 
-    try {
+    /* ========================================================
+     * 13
+     * SERVICE CHANGE
+     * ========================================================
+     */
 
-      layer.destroy();
+    it(
+      "should remove old WMSLayer and create a new layer when service changes",
+      async () => {
 
-    } catch {
-
-      // Layer may already be destroyed.
-    }
-  }
-
-
-  // ============================================================
-  // LEGEND
-  // ============================================================
-
-  private applyLegendUrl(
-    layer: WMSLayer
-  ): void {
-
-    if (!this.legendUrl) {
-      return;
-    }
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
 
 
-    console.log(
-      "[arc-wms-layer] applying legendUrl:",
-      this.legendUrl
+        /*
+         * First WMS service.
+         */
+        element.service = {
+          url:
+            "https://example.com/wms-1",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const firstLayer =
+          createdLayers[0];
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          firstLayer,
+          element
+        );
+
+
+        /*
+         * Change WMS service.
+         */
+        element.service = {
+          url:
+            "https://example.com/wms-2",
+
+          layerNames: [
+            "cities"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          createdLayers
+        ).toHaveLength(
+          2
+        );
+
+
+        const secondLayer =
+          createdLayers[1];
+
+
+        /*
+         * Old layer removed.
+         */
+        expect(
+          arcMap.removeLayer
+        ).toHaveBeenCalledWith(
+          firstLayer
+        );
+
+
+        expect(
+          firstLayer.destroy
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        /*
+         * New layer uses new URL.
+         */
+        expect(
+          secondLayer.url
+        ).toBe(
+          "https://example.com/wms-2"
+        );
+
+
+        /*
+         * New layer added.
+         */
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          secondLayer,
+          element
+        );
+
+
+        expect(
+          secondLayer.sublayers
+        ).toEqual(
+          [
+            secondLayer.allSublayers[1]
+          ]
+        );
+      }
     );
 
 
-    layer.allSublayers.forEach(
-      sublayer => {
+    /* ========================================================
+     * 14
+     * DISCONNECTED CALLBACK
+     * ========================================================
+     */
 
-        sublayer.legendUrl =
-          this.legendUrl;
+    it(
+      "should remove and destroy WMSLayer when component is disconnected",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          url:
+            "https://example.com/wms",
+
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        /*
+         * Verify layer initially added.
+         */
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          element
+        );
+
+
+        /*
+         * Trigger disconnectedCallback().
+         */
+        arcMap.removeChild(
+          element
+        );
+
+
+        await flushAsync();
+
+
+        expect(
+          arcMap.removeLayer
+        ).toHaveBeenCalledWith(
+          layer
+        );
+
+
+        expect(
+          layer.destroy
+        ).toHaveBeenCalledTimes(
+          1
+        );
       }
     );
-  }
 
 
-  // ============================================================
-  // SERVICE PARSING
-  // ============================================================
+    /* ========================================================
+     * 15
+     * GET LAYER
+     * ========================================================
+     */
 
-  private static parseAndValidateWebServiceProperty(
-    service:
-      DynamicWebMappingService | string
-  ): DynamicWebMappingService | null {
+    it(
+      "should return underlying ArcGIS WMSLayer from getLayer",
+      async () => {
 
-    let parsedService:
-      DynamicWebMappingService;
-
-
-    // ----------------------------------------------------------
-    // HTML attribute / JSON string
-    // ----------------------------------------------------------
-
-    if (
-      typeof service === "string"
-    ) {
-
-      const serviceString =
-        service.trim();
+        const {
+          element
+        } =
+          mountComponent();
 
 
-      if (!serviceString) {
+        element.service = {
+          url:
+            "https://example.com/wms",
 
-        console.error(
-          "[arc-wms-layer] service string is empty"
+          layerNames: [
+            "roads"
+          ]
+        } as any;
+
+
+        await waitForComponent(
+          element
         );
 
-        return null;
-      }
 
-
-      try {
-
-        parsedService =
-          JSON.parse(
-            serviceString
-          ) as DynamicWebMappingService;
-
-      } catch (error) {
-
-        console.error(
-          "[arc-wms-layer] Could not parse service JSON:",
-          serviceString,
-          error
+        expect(
+          element.getLayer()
+        ).toBe(
+          createdLayers[0]
         );
-
-        return null;
       }
-
-    } else {
-
-      // --------------------------------------------------------
-      // JavaScript / Angular object
-      // --------------------------------------------------------
-
-      parsedService =
-        service;
-    }
-
-
-    // ----------------------------------------------------------
-    // URL validation
-    // ----------------------------------------------------------
-
-    if (
-      !parsedService ||
-      typeof parsedService.url !==
-        "string" ||
-      parsedService.url.trim().length ===
-        0
-    ) {
-
-      console.error(
-        "[arc-wms-layer] A valid WMS url is required."
-      );
-
-      return null;
-    }
-
-
-    console.log(
-      "[arc-wms-layer] validated URL:",
-      parsedService.url
-    );
-
-    console.log(
-      "[arc-wms-layer] validated layerNames:",
-      parsedService.layerNames
     );
 
 
-    return parsedService;
-  }
+    /* ========================================================
+     * 16
+     * GET LAYER ID
+     * ========================================================
+     */
+
+    it(
+      "should return WMS layer id from getLayerId",
+      async () => {
+
+        const {
+          element
+        } =
+          mountComponent();
 
 
-  // ============================================================
-  // NORMALIZE LAYER NAMES
-  // ============================================================
+        element.service = {
+          url:
+            "https://example.com/wms",
 
-  private normalizeLayerNames(
-    layerNames: unknown
-  ): string[] {
-
-    if (!layerNames) {
-      return [];
-    }
+          layerNames: [
+            "roads"
+          ]
+        } as any;
 
 
-    // ----------------------------------------------------------
-    // Array
-    // ----------------------------------------------------------
-
-    if (
-      Array.isArray(layerNames)
-    ) {
-
-      return layerNames
-        .map(
-          value =>
-            String(value).trim()
-        )
-        .filter(
-          value =>
-            value.length > 0
+        await waitForComponent(
+          element
         );
-    }
 
 
-    // ----------------------------------------------------------
-    // Comma separated string
-    // ----------------------------------------------------------
+        const layerId =
+          await element.getLayerId();
 
-    if (
-      typeof layerNames === "string"
-    ) {
 
-      return layerNames
-        .split(",")
-        .map(
-          value =>
-            value.trim()
-        )
-        .filter(
-          value =>
-            value.length > 0
+        expect(
+          layerId
+        ).toBe(
+          "mock-wms-1"
         );
-    }
+      }
+    );
 
 
-    // ----------------------------------------------------------
-    // Single numeric/string-compatible value
-    // ----------------------------------------------------------
+    /* ========================================================
+     * 17
+     * NO LAYER NAME
+     * ========================================================
+     */
 
-    return [
-      String(layerNames).trim()
-    ].filter(Boolean);
+    it(
+      "should add WMSLayer when layerNames is not provided",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        element.service = {
+          url:
+            "https://example.com/wms"
+        } as any;
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        const layer =
+          createdLayers[0];
+
+
+        expect(
+          layer.load
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        /*
+         * Since no specific layerNames were supplied,
+         * findSublayerByName should not be needed.
+         */
+        expect(
+          layer.findSublayerByName
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap.addLayer
+        ).toHaveBeenCalledWith(
+          layer,
+          element
+        );
+      }
+    );
+
+
+    /* ========================================================
+     * 18
+     * EMPTY SERVICE
+     * ========================================================
+     */
+
+    it(
+      "should do nothing when service is undefined",
+      async () => {
+
+        const {
+          arcMap,
+          element
+        } =
+          mountComponent();
+
+
+        await waitForComponent(
+          element
+        );
+
+
+        expect(
+          WMSLayerMock
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          arcMap.addLayer
+        ).not.toHaveBeenCalled();
+      }
+    );
+
   }
-}
-
-
-declare global {
-
-  interface HTMLElementTagNameMap {
-
-    "arc-wms-layer":
-      ArcWmsLayer;
-  }
-}
+);
