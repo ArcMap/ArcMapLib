@@ -1,15 +1,33 @@
+private async constructLayerAndAddToMap(
+  parsedService: DynamicWebMappingService,
+  version: number
+): Promise<void> {
 
-    id="testWms"
-    name="Sample World Cities">
-  </-layer>
+  console.log("1. constructLayerAndAddToMap ENTERED");
+  console.log("2. URL =", parsedService.url);
+  console.log("3. layerNames =", parsedService.layerNames);
 
-<script type="module">
-  const wmsElement =
-    document.querySelector("#testWms");
+  const wmsLayer = new WMSLayer({
+    url: parsedService.url,
+    title: this.name || undefined
+  });
 
-  wmsElement.service = {
-    url:
-      "https://SampleWorldCities/MapServer/WMSServer",
-    layerNames: ["1"]
-  };
-</script>
+  console.log("4. WMSLayer CREATED", wmsLayer);
+  console.log("5. WMSLayer URL =", wmsLayer.url);
+  console.log("6. BEFORE wmsLayer.load()");
+
+  try {
+    await wmsLayer.load();
+
+    console.log("7. AFTER wmsLayer.load()");
+    console.log("8. loadStatus =", wmsLayer.loadStatus);
+    console.log(
+      "9. sublayers =",
+      wmsLayer.allSublayers?.toArray?.() ?? wmsLayer.allSublayers
+    );
+
+  } catch (error) {
+    console.error("WMS LOAD FAILED:", error);
+    throw error;
+  }
+}
