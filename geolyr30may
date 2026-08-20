@@ -1,14 +1,15 @@
-try {
-  if (this.ancestorMap) {
-    await this.ancestorMap.removeLayer(wmsLayer);
-  } else if (this.view?.map) {
-    this.view.map.remove(wmsLayer);
-  }
-} catch (removeError) {
-  console.warn(
-    "[arc-wms-layer] Failed to remove WMS layer:",
-    removeError
-  );
-}
 
-wmsLayer.destroy();
+    id="testWms"
+    name="Sample World Cities">
+  </-layer>
+
+<script type="module">
+  const wmsElement =
+    document.querySelector("#testWms");
+
+  wmsElement.service = {
+    url:
+      "https://SampleWorldCities/MapServer/WMSServer",
+    layerNames: ["1"]
+  };
+</script>
