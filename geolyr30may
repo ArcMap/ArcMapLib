@@ -1,33 +1,1262 @@
-private async constructLayerAndAddToMap(
-  parsedService: DynamicWebMappingService,
-  version: number
-): Promise<void> {
+import {
+  LitElement,
+  nothing,
+  PropertyValues
+} from "lit";
 
-  console.log("1. constructLayerAndAddToMap ENTERED");
-  console.log("2. URL =", parsedService.url);
-  console.log("3. layerNames =", parsedService.layerNames);
+import {
+  customElement,
+  property
+} from "lit/decorators.js";
 
-  const wmsLayer = new WMSLayer({
-    url: parsedService.url,
-    title: this.name || undefined
-  });
+import WMSLayer from "@arcgis/core/layers/WMSLayer.js";
+import type WMSSublayer from "@arcgis/core/layers/support/WMSSublayer.js";
 
-  console.log("4. WMSLayer CREATED", wmsLayer);
-  console.log("5. WMSLayer URL =", wmsLayer.url);
-  console.log("6. BEFORE wmsLayer.load()");
+import type {
+  DynamicWebMappingService
+} from "../../external-api";
 
-  try {
-    await wmsLayer.load();
 
-    console.log("7. AFTER wmsLayer.load()");
-    console.log("8. loadStatus =", wmsLayer.loadStatus);
+/**
+ * Minimum contract required from our <arc-map>.
+ *
+ * We intentionally do NOT get MapView directly here.
+ * arc-map remains responsible for adding/removing layers
+ * and maintaining layer order.
+ */
+type ArcMapElement = HTMLElement & {
+
+  addLayer: (
+    layer: WMSLayer,
+    element?: HTMLElement
+  ) => void | Promise<void>;
+
+  removeLayer: (
+    layer: WMSLayer
+  ) => void | Promise<void>;
+};
+
+
+/**
+ * <arc-wms-layer>
+ *
+ * Must be placed under <arc-map>.
+ *
+ * Example:
+ *
+ * <arc-map>
+ *   <arc-wms-layer
+ *     name="My WMS"
+ *     service='{
+ *       "url":"https://server/wms",
+ *       "layerNames":["my_layer"]
+ *     }'>
+ *   </arc-wms-layer>
+ * </arc-map>
+ */
+@customElement("arc-wms-layer")
+export class ArcWmsLayer extends LitElement {
+
+  /**
+   * Parent <arc-map>.
+   */
+  private ancestorMap?: ArcMapElement;
+
+  /**
+   * Actual ArcGIS WMSLayer.
+   */
+  private wmsLayer?: WMSLayer;
+
+  /**
+   * Prevent an older async update from completing
+   * after a newer service update has already started.
+   */
+  private updateSequence = 0;
+
+
+  // ============================================================
+  // PROPERTIES
+  // ============================================================
+
+  /**
+   * Kept for compatibility with old up-wms-layer API.
+   *
+   * ArcGIS 5.x does not expose the old SVG DOM node,
+   * therefore layerClass cannot be applied to the WMS
+   * rendered image the same way as the old implementation.
+   */
+  @property({
+    type: String,
+    attribute: "layer-class",
+    reflect: true
+  })
+  layerClass = "";
+
+
+  /**
+   * Optional custom WMS legend URL.
+   */
+  @property({
+    type: String,
+    attribute: "legend-url",
+    reflect: true
+  })
+  legendUrl = "";
+
+
+  /**
+   * Display name used by LayerList / Legend.
+   */
+  @property({
+    type: String,
+    reflect: true
+  })
+  name = "";
+
+
+  /**
+   * WMS service configuration.
+   *
+   * IMPORTANT:
+   *
+   * We intentionally allow this as an HTML attribute.
+   *
+   * Therefore BOTH of these work:
+   *
+   * JavaScript:
+   *
+   * element.service = {
+   *   url: "...",
+   *   layerNames: ["layer1"]
+   * };
+   *
+   * HTML:
+   *
+   * service='{"url":"...","layerNames":["layer1"]}'
+   */
+  @property({
+    attribute: "service"
+  })
+  service?: DynamicWebMappingService | string;
+
+
+  // ============================================================
+  // LIT LIFECYCLE
+  // ============================================================
+
+  connectedCallback(): void {
+
+    super.connectedCallback();
+
     console.log(
-      "9. sublayers =",
-      wmsLayer.allSublayers?.toArray?.() ?? wmsLayer.allSublayers
+      "[arc-wms-layer] connectedCallback"
     );
 
-  } catch (error) {
-    console.error("WMS LOAD FAILED:", error);
-    throw error;
+    /*
+     * On FIRST connection, updated() will handle service.
+     *
+     * On reconnection, Lit may not consider service changed,
+     * so rebuild the layer if necessary.
+     */
+    if (
+      this.hasUpdated &&
+      this.service &&
+      !this.wmsLayer
+    ) {
+
+      console.log(
+        "[arc-wms-layer] reconnect detected - rebuilding layer"
+      );
+
+      void this.updateLayer();
+    }
+  }
+
+
+  disconnectedCallback(): void {
+
+    console.log(
+      "[arc-wms-layer] disconnectedCallback"
+    );
+
+    /*
+     * Invalidate any currently running async build.
+     */
+    ++this.updateSequence;
+
+    void this.removeLayer();
+
+    this.ancestorMap = undefined;
+
+    super.disconnectedCallback();
+  }
+
+
+  protected updated(
+    changedProperties: PropertyValues<this>
+  ): void {
+
+    console.log(
+      "[arc-wms-layer] updated()",
+      Array.from(changedProperties.keys())
+    );
+
+
+    // ----------------------------------------------------------
+    // SERVICE
+    // ----------------------------------------------------------
+
+    if (changedProperties.has("service")) {
+
+      console.log(
+        "[arc-wms-layer] SERVICE CHANGED:",
+        this.service
+      );
+
+      void this.updateLayer();
+
+      return;
+    }
+
+
+    // ----------------------------------------------------------
+    // NAME
+    // ----------------------------------------------------------
+
+    if (
+      changedProperties.has("name") &&
+      this.wmsLayer
+    ) {
+
+      console.log(
+        "[arc-wms-layer] updating title:",
+        this.name
+      );
+
+      this.wmsLayer.title =
+        this.name || null;
+    }
+
+
+    // ----------------------------------------------------------
+    // LEGEND URL
+    // ----------------------------------------------------------
+
+    if (
+      changedProperties.has("legendUrl") &&
+      this.wmsLayer
+    ) {
+
+      this.applyLegendUrl(
+        this.wmsLayer
+      );
+    }
+
+
+    // ----------------------------------------------------------
+    // OLD layerClass API
+    // ----------------------------------------------------------
+
+    if (
+      changedProperties.has("layerClass") &&
+      this.layerClass
+    ) {
+
+      console.warn(
+        "[arc-wms-layer] layerClass is retained for API " +
+        "compatibility, but ArcGIS 5.x WMSLayer does not " +
+        "expose the old SVG DOM node."
+      );
+    }
+  }
+
+
+  protected render() {
+
+    /*
+     * arc-wms-layer is a configuration component.
+     * It does not render its own visible DOM.
+     */
+    return nothing;
+  }
+
+
+  // ============================================================
+  // PUBLIC API
+  // ============================================================
+
+  /**
+   * Used by arc-map for layer ordering if required.
+   */
+  public async getLayerId():
+    Promise<string | undefined> {
+
+    return this.wmsLayer?.id;
+  }
+
+
+  /**
+   * Optional direct access to the ArcGIS layer.
+   */
+  public getLayer():
+    WMSLayer | undefined {
+
+    return this.wmsLayer;
+  }
+
+
+  // ============================================================
+  // MAIN UPDATE FLOW
+  // ============================================================
+
+  private async updateLayer():
+    Promise<void> {
+
+    const sequence =
+      ++this.updateSequence;
+
+
+    console.log(
+      "[arc-wms-layer] ==================================="
+    );
+
+    console.log(
+      "[arc-wms-layer] 1 - updateLayer ENTER"
+    );
+
+    console.log(
+      "[arc-wms-layer] sequence:",
+      sequence
+    );
+
+
+    // ----------------------------------------------------------
+    // Remove previous layer
+    // ----------------------------------------------------------
+
+    await this.removeLayer();
+
+
+    /*
+     * Another update may have started while we were
+     * removing the previous layer.
+     */
+    if (
+      sequence !== this.updateSequence ||
+      !this.isConnected
+    ) {
+
+      console.log(
+        "[arc-wms-layer] STOP - stale update after remove"
+      );
+
+      return;
+    }
+
+
+    // ----------------------------------------------------------
+    // Validate service
+    // ----------------------------------------------------------
+
+    if (!this.service) {
+
+      console.log(
+        "[arc-wms-layer] STOP - service is empty"
+      );
+
+      return;
+    }
+
+
+    console.log(
+      "[arc-wms-layer] 2 - parsing service:",
+      this.service
+    );
+
+
+    const parsedService =
+      ArcWmsLayer.parseAndValidateWebServiceProperty(
+        this.service
+      );
+
+
+    console.log(
+      "[arc-wms-layer] 3 - parsedService:",
+      parsedService
+    );
+
+
+    if (!parsedService) {
+
+      console.error(
+        "[arc-wms-layer] STOP - service is invalid"
+      );
+
+      return;
+    }
+
+
+    // ----------------------------------------------------------
+    // Find arc-map
+    // ----------------------------------------------------------
+
+    console.log(
+      "[arc-wms-layer] looking for ancestor <arc-map>"
+    );
+
+
+    const ancestorMap =
+      this.closest(
+        "arc-map"
+      ) as ArcMapElement | null;
+
+
+    console.log(
+      "[arc-wms-layer] 4 - ancestor <arc-map>:",
+      ancestorMap
+    );
+
+
+    if (!ancestorMap) {
+
+      console.error(
+        "[arc-wms-layer] STOP - <arc-wms-layer> " +
+        "must be a descendant of <arc-map>."
+      );
+
+      return;
+    }
+
+
+    /*
+     * Runtime check in addition to TypeScript contract.
+     */
+    if (
+      typeof ancestorMap.addLayer !== "function"
+    ) {
+
+      console.error(
+        "[arc-wms-layer] STOP - ancestor <arc-map> " +
+        "does not provide addLayer()."
+      );
+
+      return;
+    }
+
+
+    this.ancestorMap =
+      ancestorMap;
+
+
+    console.log(
+      "[arc-wms-layer] 5 - calling constructLayerAndAddToMap()"
+    );
+
+
+    // ----------------------------------------------------------
+    // Construct WMS
+    // ----------------------------------------------------------
+
+    await this.constructLayerAndAddToMap(
+      parsedService,
+      sequence
+    );
+
+
+    console.log(
+      "[arc-wms-layer] 6 - updateLayer FINISHED"
+    );
+
+    console.log(
+      "[arc-wms-layer] ==================================="
+    );
+  }
+
+
+  // ============================================================
+  // CONSTRUCT WMS LAYER
+  // ============================================================
+
+  private async constructLayerAndAddToMap(
+    parsedService: DynamicWebMappingService,
+    sequence: number
+  ): Promise<void> {
+
+    console.log(
+      "[arc-wms-layer] -----------------------------------"
+    );
+
+    console.log(
+      "[arc-wms-layer] CONSTRUCT ENTERED"
+    );
+
+    console.log(
+      "[arc-wms-layer] URL:",
+      parsedService.url
+    );
+
+    console.log(
+      "[arc-wms-layer] requested layerNames:",
+      parsedService.layerNames
+    );
+
+
+    // ----------------------------------------------------------
+    // Create WMSLayer
+    // ----------------------------------------------------------
+
+    const wmsLayer =
+      new WMSLayer({
+
+        url:
+          parsedService.url,
+
+        title:
+          this.name || undefined,
+
+        visible:
+          true
+      });
+
+
+    /*
+     * Store immediately so that disconnectedCallback()
+     * can clean it up while load() is still running.
+     */
+    this.wmsLayer =
+      wmsLayer;
+
+
+    console.log(
+      "[arc-wms-layer] WMSLayer CREATED:",
+      wmsLayer
+    );
+
+    console.log(
+      "[arc-wms-layer] WMSLayer URL:",
+      wmsLayer.url
+    );
+
+    console.log(
+      "[arc-wms-layer] BEFORE wmsLayer.load()"
+    );
+
+
+    try {
+
+      // ========================================================
+      // THIS SHOULD TRIGGER GetCapabilities
+      // ========================================================
+
+      await wmsLayer.load();
+
+
+      console.log(
+        "[arc-wms-layer] AFTER wmsLayer.load()"
+      );
+
+      console.log(
+        "[arc-wms-layer] loadStatus:",
+        wmsLayer.loadStatus
+      );
+
+      console.log(
+        "[arc-wms-layer] loaded:",
+        wmsLayer.loaded
+      );
+
+
+      /*
+       * If you reach BEFORE load() but not AFTER load(),
+       * immediately check Network for GetCapabilities.
+       */
+
+
+      // --------------------------------------------------------
+      // Check stale async operation
+      // --------------------------------------------------------
+
+      if (
+        sequence !== this.updateSequence ||
+        !this.isConnected
+      ) {
+
+        console.log(
+          "[arc-wms-layer] build became stale after load()"
+        );
+
+        await this.disposeLayer(
+          wmsLayer
+        );
+
+        return;
+      }
+
+
+      // --------------------------------------------------------
+      // Print every available WMS sublayer
+      // --------------------------------------------------------
+
+      const availableSublayers =
+        wmsLayer.allSublayers.map(
+          sublayer => ({
+
+            id:
+              sublayer.id,
+
+            name:
+              sublayer.name,
+
+            title:
+              sublayer.title
+          })
+        );
+
+
+      console.log(
+        "[arc-wms-layer] AVAILABLE WMS SUBLAYERS:",
+        availableSublayers
+      );
+
+
+      // --------------------------------------------------------
+      // Requested layer names
+      // --------------------------------------------------------
+
+      const layerNames =
+        this.normalizeLayerNames(
+          parsedService.layerNames
+        );
+
+
+      console.log(
+        "[arc-wms-layer] normalized requested layerNames:",
+        layerNames
+      );
+
+
+      // --------------------------------------------------------
+      // Select sublayers
+      // --------------------------------------------------------
+
+      if (layerNames.length > 0) {
+
+        const selectedSublayers:
+          WMSSublayer[] = [];
+
+
+        for (
+          const requestedName of layerNames
+        ) {
+
+          console.log(
+            "[arc-wms-layer] searching WMS sublayer:",
+            requestedName
+          );
+
+
+          /*
+           * First search by actual WMS Name.
+           */
+          let sublayer =
+            wmsLayer.findSublayerByName(
+              requestedName
+            );
+
+
+          /*
+           * Helpful fallback:
+           *
+           * Some old configurations use a numeric ID
+           * in layerNames rather than the WMS Name.
+           */
+          if (
+            !sublayer &&
+            /^\d+$/.test(requestedName)
+          ) {
+
+            const numericId =
+              Number(requestedName);
+
+
+            console.log(
+              "[arc-wms-layer] name not found; " +
+              "trying sublayer id:",
+              numericId
+            );
+
+
+            sublayer =
+              wmsLayer.findSublayerById(
+                numericId
+              );
+          }
+
+
+          if (sublayer) {
+
+            console.log(
+              "[arc-wms-layer] SUBLAYER FOUND:",
+              {
+                id: sublayer.id,
+                name: sublayer.name,
+                title: sublayer.title
+              }
+            );
+
+
+            if (this.legendUrl) {
+
+              sublayer.legendUrl =
+                this.legendUrl;
+            }
+
+
+            selectedSublayers.push(
+              sublayer
+            );
+
+          } else {
+
+            console.error(
+              `[arc-wms-layer] Requested WMS layer ` +
+              `"${requestedName}" was NOT found.`
+            );
+          }
+        }
+
+
+        // ------------------------------------------------------
+        // Nothing matched
+        // ------------------------------------------------------
+
+        if (
+          selectedSublayers.length === 0
+        ) {
+
+          console.error(
+            "[arc-wms-layer] STOP - none of the requested " +
+            "layerNames matched the WMS GetCapabilities response."
+          );
+
+
+          console.error(
+            "[arc-wms-layer] Compare requested names with:",
+            availableSublayers
+          );
+
+
+          await this.disposeLayer(
+            wmsLayer
+          );
+
+          return;
+        }
+
+
+        // ------------------------------------------------------
+        // Set only requested sublayers
+        // ------------------------------------------------------
+
+        console.log(
+          "[arc-wms-layer] setting selected sublayers:",
+          selectedSublayers.map(
+            layer => ({
+              id: layer.id,
+              name: layer.name,
+              title: layer.title
+            })
+          )
+        );
+
+
+        /*
+         * ArcGIS supports setting the service-created
+         * WMSSublayers after load().
+         */
+        wmsLayer.sublayers =
+          selectedSublayers;
+      }
+
+
+      // --------------------------------------------------------
+      // Legend URL when all layers are being used
+      // --------------------------------------------------------
+
+      if (
+        layerNames.length === 0 &&
+        this.legendUrl
+      ) {
+
+        this.applyLegendUrl(
+          wmsLayer
+        );
+      }
+
+
+      // --------------------------------------------------------
+      // Get ancestor map into local variable.
+      //
+      // This avoids:
+      // "Object is possibly undefined"
+      // --------------------------------------------------------
+
+      const ancestorMap =
+        this.ancestorMap;
+
+
+      if (!ancestorMap) {
+
+        throw new Error(
+          "Ancestor <arc-map> disappeared before layer was added."
+        );
+      }
+
+
+      if (
+        typeof ancestorMap.addLayer !==
+        "function"
+      ) {
+
+        throw new Error(
+          "<arc-map> does not contain addLayer()."
+        );
+      }
+
+
+      // ========================================================
+      // ADD TO ARC-MAP
+      // ========================================================
+
+      console.log(
+        "[arc-wms-layer] BEFORE arcMap.addLayer()"
+      );
+
+
+      await ancestorMap.addLayer(
+        wmsLayer,
+        this
+      );
+
+
+      console.log(
+        "[arc-wms-layer] AFTER arcMap.addLayer()"
+      );
+
+      console.log(
+        "[arc-wms-layer] WMS LAYER SUCCESSFULLY ADDED"
+      );
+
+      console.log(
+        "[arc-wms-layer] layer id:",
+        wmsLayer.id
+      );
+
+      console.log(
+        "[arc-wms-layer] layer title:",
+        wmsLayer.title
+      );
+
+      console.log(
+        "[arc-wms-layer] layer visible:",
+        wmsLayer.visible
+      );
+
+      console.log(
+        "[arc-wms-layer] -----------------------------------"
+      );
+
+
+    } catch (error) {
+
+      /*
+       * Don't report an old build as the current failure.
+       */
+      if (
+        sequence === this.updateSequence
+      ) {
+
+        console.error(
+          "[arc-wms-layer] WMS BUILD FAILED"
+        );
+
+        console.error(
+          "[arc-wms-layer] URL:",
+          parsedService.url
+        );
+
+        console.error(
+          "[arc-wms-layer] loadStatus:",
+          wmsLayer.loadStatus
+        );
+
+        console.error(
+          "[arc-wms-layer] loadError:",
+          wmsLayer.loadError
+        );
+
+        console.error(
+          "[arc-wms-layer] ERROR:",
+          error
+        );
+      }
+
+
+      await this.disposeLayer(
+        wmsLayer
+      );
+    }
+  }
+
+
+  // ============================================================
+  // REMOVE CURRENT LAYER
+  // ============================================================
+
+  private async removeLayer():
+    Promise<void> {
+
+    const layer =
+      this.wmsLayer;
+
+
+    if (!layer) {
+
+      console.log(
+        "[arc-wms-layer] removeLayer - no existing WMS layer"
+      );
+
+      return;
+    }
+
+
+    /*
+     * Clear reference first.
+     *
+     * This prevents another asynchronous lifecycle call
+     * from trying to remove the same layer twice.
+     */
+    this.wmsLayer =
+      undefined;
+
+
+    console.log(
+      "[arc-wms-layer] removing WMS layer:",
+      layer.id
+    );
+
+
+    const ancestorMap =
+      this.ancestorMap;
+
+
+    if (
+      ancestorMap &&
+      typeof ancestorMap.removeLayer ===
+        "function"
+    ) {
+
+      try {
+
+        console.log(
+          "[arc-wms-layer] BEFORE arcMap.removeLayer()"
+        );
+
+
+        await ancestorMap.removeLayer(
+          layer
+        );
+
+
+        console.log(
+          "[arc-wms-layer] AFTER arcMap.removeLayer()"
+        );
+
+      } catch (error) {
+
+        console.warn(
+          "[arc-wms-layer] Error removing WMS layer " +
+          "from <arc-map>:",
+          error
+        );
+      }
+    }
+
+
+    try {
+
+      layer.destroy();
+
+      console.log(
+        "[arc-wms-layer] WMSLayer destroyed"
+      );
+
+    } catch (error) {
+
+      console.warn(
+        "[arc-wms-layer] Error destroying WMSLayer:",
+        error
+      );
+    }
+  }
+
+
+  // ============================================================
+  // DISPOSE SPECIFIC LAYER
+  // ============================================================
+
+  private async disposeLayer(
+    layer: WMSLayer
+  ): Promise<void> {
+
+    /*
+     * Remove only if this is still the component's
+     * active layer reference.
+     */
+    if (
+      this.wmsLayer === layer
+    ) {
+
+      this.wmsLayer =
+        undefined;
+    }
+
+
+    const ancestorMap =
+      this.ancestorMap;
+
+
+    if (
+      ancestorMap &&
+      typeof ancestorMap.removeLayer ===
+        "function"
+    ) {
+
+      try {
+
+        await ancestorMap.removeLayer(
+          layer
+        );
+
+      } catch {
+
+        /*
+         * Layer may never have been added.
+         * This is expected when load() fails.
+         */
+      }
+    }
+
+
+    try {
+
+      layer.destroy();
+
+    } catch {
+
+      // Layer may already be destroyed.
+    }
+  }
+
+
+  // ============================================================
+  // LEGEND
+  // ============================================================
+
+  private applyLegendUrl(
+    layer: WMSLayer
+  ): void {
+
+    if (!this.legendUrl) {
+      return;
+    }
+
+
+    console.log(
+      "[arc-wms-layer] applying legendUrl:",
+      this.legendUrl
+    );
+
+
+    layer.allSublayers.forEach(
+      sublayer => {
+
+        sublayer.legendUrl =
+          this.legendUrl;
+      }
+    );
+  }
+
+
+  // ============================================================
+  // SERVICE PARSING
+  // ============================================================
+
+  private static parseAndValidateWebServiceProperty(
+    service:
+      DynamicWebMappingService | string
+  ): DynamicWebMappingService | null {
+
+    let parsedService:
+      DynamicWebMappingService;
+
+
+    // ----------------------------------------------------------
+    // HTML attribute / JSON string
+    // ----------------------------------------------------------
+
+    if (
+      typeof service === "string"
+    ) {
+
+      const serviceString =
+        service.trim();
+
+
+      if (!serviceString) {
+
+        console.error(
+          "[arc-wms-layer] service string is empty"
+        );
+
+        return null;
+      }
+
+
+      try {
+
+        parsedService =
+          JSON.parse(
+            serviceString
+          ) as DynamicWebMappingService;
+
+      } catch (error) {
+
+        console.error(
+          "[arc-wms-layer] Could not parse service JSON:",
+          serviceString,
+          error
+        );
+
+        return null;
+      }
+
+    } else {
+
+      // --------------------------------------------------------
+      // JavaScript / Angular object
+      // --------------------------------------------------------
+
+      parsedService =
+        service;
+    }
+
+
+    // ----------------------------------------------------------
+    // URL validation
+    // ----------------------------------------------------------
+
+    if (
+      !parsedService ||
+      typeof parsedService.url !==
+        "string" ||
+      parsedService.url.trim().length ===
+        0
+    ) {
+
+      console.error(
+        "[arc-wms-layer] A valid WMS url is required."
+      );
+
+      return null;
+    }
+
+
+    console.log(
+      "[arc-wms-layer] validated URL:",
+      parsedService.url
+    );
+
+    console.log(
+      "[arc-wms-layer] validated layerNames:",
+      parsedService.layerNames
+    );
+
+
+    return parsedService;
+  }
+
+
+  // ============================================================
+  // NORMALIZE LAYER NAMES
+  // ============================================================
+
+  private normalizeLayerNames(
+    layerNames: unknown
+  ): string[] {
+
+    if (!layerNames) {
+      return [];
+    }
+
+
+    // ----------------------------------------------------------
+    // Array
+    // ----------------------------------------------------------
+
+    if (
+      Array.isArray(layerNames)
+    ) {
+
+      return layerNames
+        .map(
+          value =>
+            String(value).trim()
+        )
+        .filter(
+          value =>
+            value.length > 0
+        );
+    }
+
+
+    // ----------------------------------------------------------
+    // Comma separated string
+    // ----------------------------------------------------------
+
+    if (
+      typeof layerNames === "string"
+    ) {
+
+      return layerNames
+        .split(",")
+        .map(
+          value =>
+            value.trim()
+        )
+        .filter(
+          value =>
+            value.length > 0
+        );
+    }
+
+
+    // ----------------------------------------------------------
+    // Single numeric/string-compatible value
+    // ----------------------------------------------------------
+
+    return [
+      String(layerNames).trim()
+    ].filter(Boolean);
+  }
+}
+
+
+declare global {
+
+  interface HTMLElementTagNameMap {
+
+    "arc-wms-layer":
+      ArcWmsLayer;
   }
 }
