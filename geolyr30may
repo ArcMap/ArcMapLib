@@ -1,60 +1,62 @@
-constructor() {
-  effect((onCleanup) => {
-    const enabled = this.enabled();
-    const paused = this.isPaused();
+private static counter = 0;
 
-    console.log('[DO EFFECT]', {
-      enabled,
-      paused
+private readonly instanceId =
+  ++Do.counter;
+
+effect((onCleanup) => {
+  const enabled = this.enabled();
+  const paused = this.isPaused();
+
+  console.log(
+    `[DO INSTANCE ${this.instanceId}] EFFECT`,
+    { enabled, paused }
+  );
+
+  if (!enabled || paused) {
+    console.log(
+      `[D INSTANCE ${this.instanceId}] NO TIMER`
+    );
+    return;
+  }
+
+  const subscription =
+    interval(ANIMATION_INTERVAL_MS).subscribe(() => {
+
+      console.log(
+        `[DO INSTANCE ${this.instanceId}] DOFRAME`,
+        this.currentFrameIndex(),
+        'paused =',
+        this.isPaused()
+      );
+
+      if (this.isPaused() || !this.enabled()) {
+        return;
+      }
+
+      // existing frame code...
     });
 
-    if (!enabled || paused) {
-      console.log('[DO NO TIMER]');
-      return;
-    }
+  onCleanup(() => {
+    console.log(
+      `[DO INSTANCE ${this.instanceId}] CLEANUP`
+    );
 
-    console.log('[DO TIMER START]');
-
-    const subscription = interval(ANIMATION_INTERVAL_MS)
-      .subscribe(() => {
-
-        // Defensive check
-        if (this.isPaused() || !this.enabled()) {
-          console.log('[DO TICK BLOCKED]', {
-            paused: this.isPaused(),
-            enabled: this.enabled()
-          });
-          return;
-        }
-
-        const next =
-          (this.currentFrameIndex() + 1) %
-          FRAME_DELTAS_MINUTES.length;
-
-        this.currentFrameIndex.set(next);
-
-        if (next === 0) {
-          this.nowMs.set(Date.now());
-        }
-
-        console.log(
-          '[DOFRAME]',
-          next,
-          DOFRAME_LAYER_NAMES[next],
-          'paused',
-          this.isPaused()
-        );
-
-        this.frameChange.emit(
-          DOFRAME_LAYER_NAMES[next]
-        );
-      });
-
-    // CRITICAL:
-    // Runs when paused/enabled changes AND when component is destroyed.
-    onCleanup(() => {
-      console.log('[DO TIMER CLEANUP]');
-      subscription.unsubscribe();
-    });
+    subscription.unsubscribe();
   });
+});
+
+
+togglePlayPause(): void {
+  const nowPaused = !this.isPaused();
+
+  console.log(
+    `[DO INSTANCE ${this.instanceId}] CLICK`,
+    {
+      before: this.isPaused(),
+      after: nowPaused
+    }
+  );
+
+  this.isPaused.set(nowPaused);
+  this.pauseChange.emit(nowPaused);
 }
