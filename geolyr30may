@@ -1,73 +1,60 @@
-togglePlayPause(): void {
-  const wasPaused = this.isPaused();
-  const nowPaused = !wasPaused;
+constructor() {
+  effect((onCleanup) => {
+    const enabled = this.enabled();
+    const paused = this.isPaused();
 
-  console.log(
-    '[DCLICK]',
-    'before =', wasPaused,
-    'after =', nowPaused
-  );
-
-  this.isPaused.set(nowPaused);
-
-  if (nowPaused) {
-    // Stop immediately.
-    this.animationSub?.unsubscribe();
-    this.animationSub = undefined;
-
-    console.log('[DO PAUSED - TIMER REMOVED]');
-  } else {
-    console.log('[D PLAY REQUESTED]');
-  }
-
-  this.pauseChange.emit(nowPaused)
-
-
-
-
-private updateAnimation(active: boolean): void {
-  console.log(
-    '[D updateAnimation]',
-    'active =', active,
-    'paused =', this.isPaused()
-  );
-
-  this.animationSub?.unsubscribe();
-  this.animationSub = undefined;
-
-  if (!active || this.isPaused()) {
-    console.log('[DO TIMER NOT STARTED]');
-    return;
-  }
-
-  this.animationSub =
-    interval(ANIMATION_INTERVAL_MS).subscribe(() => {
-
-      if (this.isPaused()) {
-        console.log('[DO TICK BLOCKED - PAUSED]');
-        return;
-      }
-
-      const next =
-        (this.currentFrameIndex() + 1) %
-        FRAME_DELTAS_MINUTES.length;
-
-      this.currentFrameIndex.set(next);
-
-      if (next === 0) {
-        this.nowMs.set(Date.now());
-      }
-
-      console.log(
-        '[DO FRAME]',
-        next,
-        DO_FRAME_LAYER_NAMES[next],
-        'paused',
-        this.isPaused()
-      );
-
-      this.frameChange.emit(
-        DO_FRAME_LAYER_NAMES[next]
-      );
+    console.log('[DO EFFECT]', {
+      enabled,
+      paused
     });
+
+    if (!enabled || paused) {
+      console.log('[DO NO TIMER]');
+      return;
+    }
+
+    console.log('[DO TIMER START]');
+
+    const subscription = interval(ANIMATION_INTERVAL_MS)
+      .subscribe(() => {
+
+        // Defensive check
+        if (this.isPaused() || !this.enabled()) {
+          console.log('[DO TICK BLOCKED]', {
+            paused: this.isPaused(),
+            enabled: this.enabled()
+          });
+          return;
+        }
+
+        const next =
+          (this.currentFrameIndex() + 1) %
+          FRAME_DELTAS_MINUTES.length;
+
+        this.currentFrameIndex.set(next);
+
+        if (next === 0) {
+          this.nowMs.set(Date.now());
+        }
+
+        console.log(
+          '[DOFRAME]',
+          next,
+          DOFRAME_LAYER_NAMES[next],
+          'paused',
+          this.isPaused()
+        );
+
+        this.frameChange.emit(
+          DOFRAME_LAYER_NAMES[next]
+        );
+      });
+
+    // CRITICAL:
+    // Runs when paused/enabled changes AND when component is destroyed.
+    onCleanup(() => {
+      console.log('[DO TIMER CLEANUP]');
+      subscription.unsubscribe();
+    });
+  });
 }
