@@ -38,17 +38,7 @@ const TEST_FRAME_DELTAS_MINUTES = [
 const TEST_ANIMATION_INTERVAL_MS = 2000;
 
 const TEST_FRAME_LAYER_NAMES = [
-  'test-n0r-m50m',
-  'test-n0r-m45m',
-  'test-n0r-m40m',
-  'test-n0r-m35m',
-  'test-n0r-m30m',
-  'test-n0r-m25m',
-  'test-n0r-m20m',
-  'test-n0r-m15m',
-  'test-n0r-m10m',
-  'test-n0r-m05m',
-  'test-n0r',
+  ,
 ] as const;
 
 export interface TestLegendItem {
