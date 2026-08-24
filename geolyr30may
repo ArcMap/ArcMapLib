@@ -1,62 +1,401 @@
-private static counter = 0;
+import {
+  ChangeDetectionStrategy,
+  Component,
+  CUSTOM_ELEMENTS_SCHEMA,
+  computed,
+  effect,
+  input,
+  OnDestroy,
+  output,
+  signal,
+} from '@angular/core';
 
-private readonly instanceId =
-  ++Do.counter;
+import { interval, Subscription } from 'rxjs';
 
-effect((onCleanup) => {
-  const enabled = this.enabled();
-  const paused = this.isPaused();
+// Keep your actual project import for UpElement
 
-  console.log(
-    `[DO INSTANCE ${this.instanceId}] EFFECT`,
-    { enabled, paused }
+
+// Keep your existing filter type imports
+import {
+  WeatherEventFilter,
+  WeatherFilterToggleEvent,
+} from '../../models/weather-event.model';
+
+const TEST_FRAME_DELTAS_MINUTES = [
+  50,
+  45,
+  40,
+  35,
+  30,
+  25,
+  20,
+  15,
+  10,
+  5,
+  0,
+] as const;
+
+const TEST_ANIMATION_INTERVAL_MS = 2000;
+
+const TEST_FRAME_LAYER_NAMES = [
+  'test-n0r-m50m',
+  'test-n0r-m45m',
+  'test-n0r-m40m',
+  'test-n0r-m35m',
+  'test-n0r-m30m',
+  'test-n0r-m25m',
+  'test-n0r-m20m',
+  'test-n0r-m15m',
+  'test-n0r-m10m',
+  'test-n0r-m05m',
+  'test-n0r',
+] as const;
+
+export interface TestLegendItem {
+  dbz: string;
+  rainRate: string;
+  color: string;
+}
+
+export const TEST_LEGEND: TestLegendItem[] = [
+  { dbz: '65', rainRate: '16+', color: '#cc00cc' },
+  { dbz: '60', rainRate: '8.00', color: '#cc3333' },
+  { dbz: '55', rainRate: '4.00', color: '#cc5500' },
+  { dbz: '52', rainRate: '2.50', color: '#ff7700' },
+  { dbz: '47', rainRate: '1.25', color: '#cc9900' },
+  { dbz: '41', rainRate: '0.50', color: '#ffff00' },
+  { dbz: '36', rainRate: '0.25', color: '#cccc00' },
+  { dbz: '30', rainRate: '0.10', color: '#99cc00' },
+  { dbz: '20', rainRate: 'Trace', color: '#66cc66' },
+  { dbz: '10', rainRate: 'Light', color: '#3399ff' },
+  { dbz: '<10', rainRate: 'Mist', color: '#99ddff' },
+];
+
+@Component({
+  selector: 'app-test-event',
+  templateUrl: './test-event.component.html',
+  styleUrls: ['./test-event.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  imports: [],
+})
+export class TestEventComponent implements OnDestroy {
+  // ------------------------------------------------------
+  // Inputs
+  // ------------------------------------------------------
+
+  readonly enabled = input.required<boolean>();
+
+  readonly filters =
+    input<WeatherEventFilter[]>([]);
+
+  /**
+   * IMPORTANT:
+   * Pause state comes from WeatherFacade.
+   *
+   * Do NOT create:
+   *
+   * readonly isPaused = signal(false);
+   *
+   * inside this component.
+   */
+  readonly paused = input(false);
+
+  // ------------------------------------------------------
+  // Outputs
+  // ------------------------------------------------------
+
+  readonly displayToggle = output<boolean>();
+
+  readonly opacityChange = output<number>();
+
+  readonly frameChange = output<string>();
+
+  readonly pauseChange = output<boolean>();
+
+  readonly filterToggle =
+    output<WeatherFilterToggleEvent>();
+
+  // ------------------------------------------------------
+  // Local UI state
+  // ------------------------------------------------------
+
+  readonly opacity = signal(100);
+
+  readonly currentFrameIndex =
+    signal(TEST_FRAME_DELTAS_MINUTES.length - 1);
+
+  private readonly nowMs =
+    signal(Date.now());
+
+  private animationSub?: Subscription;
+
+  // ------------------------------------------------------
+  // Computed
+  // ------------------------------------------------------
+
+  readonly timeLapseStart = computed(() =>
+    new Date(
+      this.nowMs() -
+        TEST_FRAME_DELTAS_MINUTES[0] * 60_000
+    )
   );
 
-  if (!enabled || paused) {
-    console.log(
-      `[D INSTANCE ${this.instanceId}] NO TIMER`
+  readonly timeLapseEnd = computed(
+    () => new Date(this.nowMs())
+  );
+
+  readonly currentTime = computed(() => {
+    const delta =
+      TEST_FRAME_DELTAS_MINUTES[
+        this.currentFrameIndex()
+      ];
+
+    return new Date(
+      this.nowMs() - delta * 60_000
     );
-    return;
-  }
+  });
 
-  const subscription =
-    interval(ANIMATION_INTERVAL_MS).subscribe(() => {
+  readonly progressPct = computed(() =>
+    (
+      this.currentFrameIndex() /
+      (TEST_FRAME_DELTAS_MINUTES.length - 1)
+    ) * 100
+  );
 
-      console.log(
-        `[DO INSTANCE ${this.instanceId}] DOFRAME`,
-        this.currentFrameIndex(),
-        'paused =',
-        this.isPaused()
+  // ------------------------------------------------------
+  // Static values
+  // ------------------------------------------------------
+
+  readonly legendItems = TEST_LEGEND;
+
+  readonly frameMax =
+    TEST_FRAME_DELTAS_MINUTES.length - 1;
+
+  readonly frameTooltipFormatter =
+    (value: number): string => {
+      const index = Math.min(
+        Math.max(Math.round(value), 0),
+        this.frameMax
       );
 
-      if (this.isPaused() || !this.enabled()) {
-        return;
-      }
+      const delta =
+        TEST_FRAME_DELTAS_MINUTES[index] ?? 0;
 
-      // existing frame code...
+      const date = new Date(
+        Date.now() - delta * 60_000
+      );
+
+      return date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    };
+
+  constructor() {
+    /**
+     * This effect watches:
+     *
+     * enabled
+     * paused
+     *
+     * PLAY:
+     * enabled=true, paused=false
+     * => updateAnimation(true)
+     *
+     * PAUSE:
+     * enabled=true, paused=true
+     * => updateAnimation(false)
+     */
+    effect(() => {
+      const active =
+        this.enabled() &&
+        !this.paused();
+
+      console.log(
+        '[TEST ANIMATION STATE]',
+        {
+          enabled: this.enabled(),
+          paused: this.paused(),
+          active,
+        }
+      );
+
+      this.updateAnimation(active);
     });
+  }
 
-  onCleanup(() => {
+  // ------------------------------------------------------
+  // Animation
+  // ------------------------------------------------------
+
+  private updateAnimation(
+    active: boolean
+  ): void {
+    /**
+     * Always remove any existing timer first.
+     *
+     * This is important because the effect can rerun
+     * whenever enabled/paused changes.
+     */
+    this.animationSub?.unsubscribe();
+    this.animationSub = undefined;
+
+    if (!active) {
+      console.log(
+        '[TEST TIMER STOPPED]'
+      );
+
+      return;
+    }
+
     console.log(
-      `[DO INSTANCE ${this.instanceId}] CLEANUP`
+      '[TEST TIMER STARTED]'
     );
 
-    subscription.unsubscribe();
-  });
-});
+    this.animationSub =
+      interval(TEST_ANIMATION_INTERVAL_MS)
+        .subscribe(() => {
+          /**
+           * Extra guard in case a signal changes
+           * between timer ticks.
+           */
+          if (
+            this.paused() ||
+            !this.enabled()
+          ) {
+            return;
+          }
 
+          const next =
+            (
+              this.currentFrameIndex() + 1
+            ) %
+            TEST_FRAME_DELTAS_MINUTES.length;
 
-togglePlayPause(): void {
-  const nowPaused = !this.isPaused();
+          this.currentFrameIndex.set(next);
 
-  console.log(
-    `[DO INSTANCE ${this.instanceId}] CLICK`,
-    {
-      before: this.isPaused(),
-      after: nowPaused
+          if (next === 0) {
+            this.nowMs.set(Date.now());
+          }
+
+          const layerName =
+            TEST_FRAME_LAYER_NAMES[next];
+
+          console.log(
+            '[TEST FRAME]',
+            next,
+            layerName,
+            'paused:',
+            this.paused()
+          );
+
+          /**
+           * THIS is what eventually causes
+           * the WMS service to change/call endpoint.
+           */
+          this.frameChange.emit(
+            layerName
+          );
+        });
+  }
+
+  // ------------------------------------------------------
+  // Event handlers
+  // ------------------------------------------------------
+
+  onDisplayToggle(
+    event: Event
+  ): void {
+    const checked =
+      (
+        event.target as HTMLInputElement
+      ).checked;
+
+    this.displayToggle.emit(
+      checked
+    );
+  }
+
+  onOpacityChange(
+    event: Event
+  ): void {
+    const value = Number(
+      (
+        event.target as HTMLInputElement
+      ).value
+    );
+
+    this.opacity.set(value);
+
+    this.opacityChange.emit(
+      value / 100
+    );
+  }
+
+  togglePlayPause(): void {
+    /**
+     * Do NOT change a local pause signal here.
+     *
+     * Parent → WeatherFacade owns pause.
+     */
+    const newPausedState =
+      !this.paused();
+
+    console.log(
+      '[TEST PLAY/PAUSE CLICK]',
+      {
+        before: this.paused(),
+        after: newPausedState,
+      }
+    );
+
+    this.pauseChange.emit(
+      newPausedState
+    );
+  }
+
+  /**
+   * Selecting a frame:
+   *
+   * 1. Select requested frame
+   * 2. Display selected frame
+   * 3. Pause animation
+   */
+  onFrameScrub(
+    event: Event
+  ): void {
+    const index = Number(
+      (
+        event.target as HTMLInputElement
+      ).value
+    );
+
+    const safeIndex = Math.min(
+      Math.max(
+        Math.round(index),
+        0
+      ),
+      this.frameMax
+    );
+
+    this.currentFrameIndex.set(
+      safeIndex
+    );
+
+    this.frameChange.emit(
+      TEST_FRAME_LAYER_NAMES[
+        safeIndex
+      ]
+    );
+
+    if (!this.paused()) {
+      this.pauseChange.emit(true);
     }
-  );
+  }
 
-  this.isPaused.set(nowPaused);
-  this.pauseChange.emit(nowPaused);
+  ngOnDestroy(): void {
+    this.animationSub?.unsubscribe();
+    this.animationSub = undefined;
+  }
 }
