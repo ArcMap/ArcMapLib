@@ -7,7 +7,6 @@
 
 .legend-title {
   margin: 0;
-  padding: 0.75rem 0.875rem;
   font-size: var(--uu-font-size-body-sm, 0.875rem);
   font-weight: 600;
   color: var(--uu-color-on-surface, inherit);
@@ -18,77 +17,103 @@
   border-collapse: collapse;
   table-layout: fixed;
   font-size: var(--uu-font-size-body-sm, 0.875rem);
-}
 
-/* Header row like UX */
-.legend-table thead {
-  background: var(
-    --uu-color-surface-container,
-    rgba(0, 0, 0, 0.025)
-  );
+  border: 1px solid
+    var(--uu-color-outline-variant, #ccc);
 }
 
 .legend-th {
-  height: 3rem;
-  padding: 0 0.5rem;
+  height: 2.75rem;
+  padding: 0.25rem 0.5rem;
   text-align: left;
   vertical-align: middle;
   font-weight: 600;
-  color: var(--uu-color-on-surface, inherit);
-  border: 0;
-}
 
-/*
- * First column contains:
- * [color square] [dBZ number]
- *
- * Push the dBZ heading so it lines up
- * with 65, 60, 55... rather than the square.
- */
-.legend-th:first-child {
-  width: 34%;
-  padding-left: 4rem;
+  color: var(
+    --uu-color-on-surface-variant,
+    #444
+  );
+
+  border-right: 1px solid
+    var(--uu-color-outline-variant, #ddd);
+
+  border-bottom: 1px solid
+    var(--uu-color-outline-variant, #ddd);
 }
 
 .legend-th:last-child {
-  width: 66%;
+  border-right: 0;
 }
 
-/* UX has comfortable vertical spacing */
+/* Color column */
+.legend-th--color {
+  width: 3.5rem;
+}
+
+/* dBZ column */
+.legend-th--dbz {
+  width: 4.5rem;
+}
+
+/* Rainrate takes remaining space */
+.legend-th--rainrate {
+  width: auto;
+}
+
 .legend-row {
-  height: 2.9rem;
+  height: 2.75rem;
 
   &:hover {
-    background: transparent;
+    background-color: var(
+      --uu-color-surface-container,
+      rgba(0, 0, 0, 0.04)
+    );
   }
 }
 
 .legend-cell {
   padding: 0.25rem 0.5rem;
   vertical-align: middle;
-  color: var(--uu-color-on-surface, inherit);
-  border: 0;
   white-space: nowrap;
+
+  color: var(
+    --uu-color-on-surface,
+    inherit
+  );
+
+  /* Vertical divider between columns */
+  border-right: 1px solid
+    var(--uu-color-outline-variant, #ddd);
+
+  /* No horizontal border between rows */
+  border-bottom: 0;
 }
 
-/* Square + dBZ number */
+.legend-cell:last-child {
+  border-right: 0;
+}
+
+.legend-cell--color {
+  text-align: center;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
 .legend-cell--dbz {
-  padding-left: 1rem;
-  white-space: nowrap;
+  text-align: left;
 }
 
-/* Larger blocks like legacy/UX */
+.legend-cell--rainrate {
+  text-align: left;
+}
+
 .legend-swatch {
   display: inline-block;
-  width: 1.75rem;
-  height: 1.75rem;
-  margin-right: 1.25rem;
+  width: 1.5rem;
+  height: 1.5rem;
   vertical-align: middle;
   border-radius: 0;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
 
-/* Keep dBZ number vertically centered with square */
-.legend-cell--dbz {
-  line-height: 1.75rem;
+  border: 1px solid
+    rgba(0, 0, 0, 0.1);
 }
