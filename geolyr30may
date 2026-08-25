@@ -1,391 +1,94 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  CUSTOM_ELEMENTS_SCHEMA,
-  computed,
-  effect,
-  input,
-  OnDestroy,
-  output,
-  signal,
-} from '@angular/core';
-
-import { interval, Subscription } from 'rxjs';
-
-// Keep your actual project import for UpElement
-
-
-// Keep your existing filter type imports
-import {
-  WeatherEventFilter,
-  WeatherFilterToggleEvent,
-} from '../../models/weather-event.model';
-
-const TEST_FRAME_DELTAS_MINUTES = [
-  50,
-  45,
-  40,
-  35,
-  30,
-  25,
-  20,
-  15,
-  10,
-  5,
-  0,
-] as const;
-
-const TEST_ANIMATION_INTERVAL_MS = 2000;
-
-const TEST_FRAME_LAYER_NAMES = [
-  ,
-] as const;
-
-export interface TestLegendItem {
-  dbz: string;
-  rainRate: string;
-  color: string;
+.legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
 }
 
-export const TEST_LEGEND: TestLegendItem[] = [
-  { dbz: '65', rainRate: '16+', color: '#cc00cc' },
-  { dbz: '60', rainRate: '8.00', color: '#cc3333' },
-  { dbz: '55', rainRate: '4.00', color: '#cc5500' },
-  { dbz: '52', rainRate: '2.50', color: '#ff7700' },
-  { dbz: '47', rainRate: '1.25', color: '#cc9900' },
-  { dbz: '41', rainRate: '0.50', color: '#ffff00' },
-  { dbz: '36', rainRate: '0.25', color: '#cccc00' },
-  { dbz: '30', rainRate: '0.10', color: '#99cc00' },
-  { dbz: '20', rainRate: 'Trace', color: '#66cc66' },
-  { dbz: '10', rainRate: 'Light', color: '#3399ff' },
-  { dbz: '<10', rainRate: 'Mist', color: '#99ddff' },
-];
+.legend-title {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  font-size: var(--uu-font-size-body-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--uu-color-on-surface, inherit);
+}
 
-@Component({
-  selector: 'app-test-event',
-  templateUrl: './test-event.component.html',
-  styleUrls: ['./test-event.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  imports: [],
-})
-export class TestEventComponent implements OnDestroy {
-  // ------------------------------------------------------
-  // Inputs
-  // ------------------------------------------------------
+.legend-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--uu-font-size-body-sm, 0.875rem);
+}
 
-  readonly enabled = input.required<boolean>();
-
-  readonly filters =
-    input<WeatherEventFilter[]>([]);
-
-  /**
-   * IMPORTANT:
-   * Pause state comes from WeatherFacade.
-   *
-   * Do NOT create:
-   *
-   * readonly isPaused = signal(false);
-   *
-   * inside this component.
-   */
-  readonly paused = input(false);
-
-  // ------------------------------------------------------
-  // Outputs
-  // ------------------------------------------------------
-
-  readonly displayToggle = output<boolean>();
-
-  readonly opacityChange = output<number>();
-
-  readonly frameChange = output<string>();
-
-  readonly pauseChange = output<boolean>();
-
-  readonly filterToggle =
-    output<WeatherFilterToggleEvent>();
-
-  // ------------------------------------------------------
-  // Local UI state
-  // ------------------------------------------------------
-
-  readonly opacity = signal(100);
-
-  readonly currentFrameIndex =
-    signal(TEST_FRAME_DELTAS_MINUTES.length - 1);
-
-  private readonly nowMs =
-    signal(Date.now());
-
-  private animationSub?: Subscription;
-
-  // ------------------------------------------------------
-  // Computed
-  // ------------------------------------------------------
-
-  readonly timeLapseStart = computed(() =>
-    new Date(
-      this.nowMs() -
-        TEST_FRAME_DELTAS_MINUTES[0] * 60_000
-    )
+/* Header row like UX */
+.legend-table thead {
+  background: var(
+    --uu-color-surface-container,
+    rgba(0, 0, 0, 0.025)
   );
+}
 
-  readonly timeLapseEnd = computed(
-    () => new Date(this.nowMs())
-  );
+.legend-th {
+  height: 3rem;
+  padding: 0 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 600;
+  color: var(--uu-color-on-surface, inherit);
+  border: 0;
+}
 
-  readonly currentTime = computed(() => {
-    const delta =
-      TEST_FRAME_DELTAS_MINUTES[
-        this.currentFrameIndex()
-      ];
+/*
+ * First column contains:
+ * [color square] [dBZ number]
+ *
+ * Push the dBZ heading so it lines up
+ * with 65, 60, 55... rather than the square.
+ */
+.legend-th:first-child {
+  width: 34%;
+  padding-left: 4rem;
+}
 
-    return new Date(
-      this.nowMs() - delta * 60_000
-    );
-  });
+.legend-th:last-child {
+  width: 66%;
+}
 
-  readonly progressPct = computed(() =>
-    (
-      this.currentFrameIndex() /
-      (TEST_FRAME_DELTAS_MINUTES.length - 1)
-    ) * 100
-  );
+/* UX has comfortable vertical spacing */
+.legend-row {
+  height: 2.9rem;
 
-  // ------------------------------------------------------
-  // Static values
-  // ------------------------------------------------------
-
-  readonly legendItems = TEST_LEGEND;
-
-  readonly frameMax =
-    TEST_FRAME_DELTAS_MINUTES.length - 1;
-
-  readonly frameTooltipFormatter =
-    (value: number): string => {
-      const index = Math.min(
-        Math.max(Math.round(value), 0),
-        this.frameMax
-      );
-
-      const delta =
-        TEST_FRAME_DELTAS_MINUTES[index] ?? 0;
-
-      const date = new Date(
-        Date.now() - delta * 60_000
-      );
-
-      return date.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    };
-
-  constructor() {
-    /**
-     * This effect watches:
-     *
-     * enabled
-     * paused
-     *
-     * PLAY:
-     * enabled=true, paused=false
-     * => updateAnimation(true)
-     *
-     * PAUSE:
-     * enabled=true, paused=true
-     * => updateAnimation(false)
-     */
-    effect(() => {
-      const active =
-        this.enabled() &&
-        !this.paused();
-
-      console.log(
-        '[TEST ANIMATION STATE]',
-        {
-          enabled: this.enabled(),
-          paused: this.paused(),
-          active,
-        }
-      );
-
-      this.updateAnimation(active);
-    });
+  &:hover {
+    background: transparent;
   }
+}
 
-  // ------------------------------------------------------
-  // Animation
-  // ------------------------------------------------------
+.legend-cell {
+  padding: 0.25rem 0.5rem;
+  vertical-align: middle;
+  color: var(--uu-color-on-surface, inherit);
+  border: 0;
+  white-space: nowrap;
+}
 
-  private updateAnimation(
-    active: boolean
-  ): void {
-    /**
-     * Always remove any existing timer first.
-     *
-     * This is important because the effect can rerun
-     * whenever enabled/paused changes.
-     */
-    this.animationSub?.unsubscribe();
-    this.animationSub = undefined;
+/* Square + dBZ number */
+.legend-cell--dbz {
+  padding-left: 1rem;
+  white-space: nowrap;
+}
 
-    if (!active) {
-      console.log(
-        '[TEST TIMER STOPPED]'
-      );
+/* Larger blocks like legacy/UX */
+.legend-swatch {
+  display: inline-block;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-right: 1.25rem;
+  vertical-align: middle;
+  border-radius: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
 
-      return;
-    }
-
-    console.log(
-      '[TEST TIMER STARTED]'
-    );
-
-    this.animationSub =
-      interval(TEST_ANIMATION_INTERVAL_MS)
-        .subscribe(() => {
-          /**
-           * Extra guard in case a signal changes
-           * between timer ticks.
-           */
-          if (
-            this.paused() ||
-            !this.enabled()
-          ) {
-            return;
-          }
-
-          const next =
-            (
-              this.currentFrameIndex() + 1
-            ) %
-            TEST_FRAME_DELTAS_MINUTES.length;
-
-          this.currentFrameIndex.set(next);
-
-          if (next === 0) {
-            this.nowMs.set(Date.now());
-          }
-
-          const layerName =
-            TEST_FRAME_LAYER_NAMES[next];
-
-          console.log(
-            '[TEST FRAME]',
-            next,
-            layerName,
-            'paused:',
-            this.paused()
-          );
-
-          /**
-           * THIS is what eventually causes
-           * the WMS service to change/call endpoint.
-           */
-          this.frameChange.emit(
-            layerName
-          );
-        });
-  }
-
-  // ------------------------------------------------------
-  // Event handlers
-  // ------------------------------------------------------
-
-  onDisplayToggle(
-    event: Event
-  ): void {
-    const checked =
-      (
-        event.target as HTMLInputElement
-      ).checked;
-
-    this.displayToggle.emit(
-      checked
-    );
-  }
-
-  onOpacityChange(
-    event: Event
-  ): void {
-    const value = Number(
-      (
-        event.target as HTMLInputElement
-      ).value
-    );
-
-    this.opacity.set(value);
-
-    this.opacityChange.emit(
-      value / 100
-    );
-  }
-
-  togglePlayPause(): void {
-    /**
-     * Do NOT change a local pause signal here.
-     *
-     * Parent → WeatherFacade owns pause.
-     */
-    const newPausedState =
-      !this.paused();
-
-    console.log(
-      '[TEST PLAY/PAUSE CLICK]',
-      {
-        before: this.paused(),
-        after: newPausedState,
-      }
-    );
-
-    this.pauseChange.emit(
-      newPausedState
-    );
-  }
-
-  /**
-   * Selecting a frame:
-   *
-   * 1. Select requested frame
-   * 2. Display selected frame
-   * 3. Pause animation
-   */
-  onFrameScrub(
-    event: Event
-  ): void {
-    const index = Number(
-      (
-        event.target as HTMLInputElement
-      ).value
-    );
-
-    const safeIndex = Math.min(
-      Math.max(
-        Math.round(index),
-        0
-      ),
-      this.frameMax
-    );
-
-    this.currentFrameIndex.set(
-      safeIndex
-    );
-
-    this.frameChange.emit(
-      TEST_FRAME_LAYER_NAMES[
-        safeIndex
-      ]
-    );
-
-    if (!this.paused()) {
-      this.pauseChange.emit(true);
-    }
-  }
-
-  ngOnDestroy(): void {
-    this.animationSub?.unsubscribe();
-    this.animationSub = undefined;
-  }
+/* Keep dBZ number vertically centered with square */
+.legend-cell--dbz {
+  line-height: 1.75rem;
 }
