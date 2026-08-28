@@ -1,38 +1,15 @@
-private triggerMapRefresh(): void {
-  const view = this.ma.mapView();
-
-  if (!view || !Number.isFinite(view.zoom)) {
+private clearRoutePlannerGraphics(mapView: any): void {
+  if (!mapView?.graphics) {
     return;
   }
 
-  const originalZoom = view.zoom;
+  const graphicsToRemove = mapView.graphics
+    .toArray()
+    .filter((graphic: any) =>
+      graphic.attributes?.source === 'route-planner'
+    );
 
-  requestAnimationFrame(() => {
-    view
-      .goTo(
-        {
-          center: view.center,
-          zoom: originalZoom + 0.01
-        },
-        {
-          animate: true,
-          duration: 100
-        }
-      )
-      .then(() =>
-        view.goTo(
-          {
-            center: view.center,
-            zoom: originalZoom
-          },
-          {
-            animate: true,
-            duration: 100
-          }
-        )
-      )
-      .catch(() => {
-        // Ignore interrupted navigation
-      });
-  });
+  if (graphicsToRemove.length > 0) {
+    mapView.graphics.removeMany(graphicsToRemove);
+  }
 }
