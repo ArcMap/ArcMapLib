@@ -1,30 +1,38 @@
+private triggerMapRefresh(): void {
+  const view = this.ma.mapView();
 
-  const view = this.mapView();
-
-  if (!view) {
+  if (!view || !Number.isFinite(view.zoom)) {
     return;
   }
 
-  const currentZoom = view.zoom;
+  const originalZoom = view.zoom;
 
-  // Force ArcGIS to refresh the view
-  view.goTo(
-    {
-      center: view.center,
-      zoom: currentZoom + 0.001
-    },
-    {
-      animate: false
-    }
-  ).then(() => {
-    return view.goTo(
-      {
-        center: view.center,
-        zoom: currentZoom
-      },
-      {
-        animate: false
-      }
-    );
-  }).catch(() => {});
+  requestAnimationFrame(() => {
+    view
+      .goTo(
+        {
+          center: view.center,
+          zoom: originalZoom + 0.01
+        },
+        {
+          animate: true,
+          duration: 100
+        }
+      )
+      .then(() =>
+        view.goTo(
+          {
+            center: view.center,
+            zoom: originalZoom
+          },
+          {
+            animate: true,
+            duration: 100
+          }
+        )
+      )
+      .catch(() => {
+        // Ignore interrupted navigation
+      });
+  });
 }
