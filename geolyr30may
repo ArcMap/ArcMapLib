@@ -1,176 +1,30 @@
-.legend-section {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
 
-.legend-title {
-  margin: 0;
-  font-size: var(--uu-font-size-body-sm, 0.875rem);
-  font-weight: 600;
-  color: var(--uu-color-on-surface, inherit);
-}
+  const view = this.mapView();
 
-.legend-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: var(--uu-font-size-body-sm, 0.875rem);
-
-  border: 1px solid
-    var(--uu-color-outline-variant, #d7d7d7);
-}
-
-/* ---------- HEADER ---------- */
-
-.legend-table thead {
-  background-color: var(
-    --uu-color-surface-container,
-    #f3f3f3
-  );
-}
-
-.legend-th {
-  height: 3rem;
-  padding: 0 0.5rem;
-
-  text-align: left;
-  vertical-align: middle;
-  font-weight: 600;
-
-  color: var(
-    --uu-color-on-surface-variant,
-    #444
-  );
-
-  border-right: 1px solid
-    var(--uu-color-outline-variant, #dddddd);
-
-  border-bottom: 1px solid
-    var(--uu-color-outline-variant, #dddddd);
-}
-
-.legend-th:last-child {
-  border-right: 0;
-}
-
-/* Color square column */
-.legend-th--color {
-  width: 3.5rem;
-  padding: 0;
-}
-
-/* dBZ column */
-.legend-th--dbz {
-  width: 4.5rem;
-}
-
-/* Rainrate column */
-.legend-th--rainrate {
-  width: auto;
-}
-
-/* ---------- BODY ---------- */
-
-.legend-row {
-  height: 2.75rem;
-
-  &:hover {
-    background-color: transparent;
+  if (!view) {
+    return;
   }
-}
 
-.legend-cell {
-  padding: 0.25rem 0.5rem;
-  vertical-align: middle;
-  white-space: nowrap;
+  const currentZoom = view.zoom;
 
-  color: var(
-    --uu-color-on-surface,
-    inherit
-  );
-
-  /* vertical column line */
-  border-right: 1px solid
-    var(--uu-color-outline-variant, #e0e0e0);
-
-  /* screenshot does not show row-by-row horizontal lines */
-  border-bottom: 0;
-}
-
-.legend-cell:last-child {
-  border-right: 0;
-}
-
-/* ---------- COLOR COLUMN ---------- */
-
-.legend-cell--color {
-  width: 3.5rem;
-  padding: 0;
-  text-align: center;
-}
-
-.legend-swatch {
-  display: inline-block;
-
-  width: 1.5rem;
-  height: 1.5rem;
-
-  vertical-align: middle;
-
-  border-radius: 0;
-
-  border: 1px solid
-    rgba(0, 0, 0, 0.08);
-}
-
-/* ---------- DBZ COLUMN ---------- */
-
-.legend-cell--dbz {
-  width: 4.5rem;
-  text-align: left;
-}
-
-/* ---------- RAIN RATE COLUMN ---------- */
-
-.legend-cell--rainrate {
-  text-align: left;
-}
-
-
-
-<table class="legend-table">
-  <thead>
-    <tr>
-      <th class="legend-th legend-th--color"></th>
-      <th class="legend-th legend-th--dbz">dBZ</th>
-      <th class="legend-th legend-th--rainrate">
-        Rainrate (in/hr)
-      </th>
-    </tr>
-  </thead>
-
-  <tbody>
-    @for (item of legendItems; track item.dbz) {
-      <tr class="legend-row">
-
-        <td class="legend-cell legend-cell--color">
-          <span
-            class="legend-swatch"
-            [style.background-color]="item.color"
-          ></span>
-        </td>
-
-        <td class="legend-cell legend-cell--dbz">
-          {{ item.dbz }}
-        </td>
-
-        <td class="legend-cell legend-cell--rainrate">
-          {{ item.rainRate }}
-        </td>
-
-      </tr>
+  // Force ArcGIS to refresh the view
+  view.goTo(
+    {
+      center: view.center,
+      zoom: currentZoom + 0.001
+    },
+    {
+      animate: false
     }
-  </tbody>
-</table>
+  ).then(() => {
+    return view.goTo(
+      {
+        center: view.center,
+        zoom: currentZoom
+      },
+      {
+        animate: false
+      }
+    );
+  }).catch(() => {});
+}
