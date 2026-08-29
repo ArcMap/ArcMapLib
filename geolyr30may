@@ -1,15 +1,37 @@
-private clearRoutePlannerGraphics(mapView: any): void {
-  if (!mapView?.graphics) {
-    return;
-  }
+const highlightRouteElement = mapElement?.querySelector(
+  'up-route#routePlannerHighlightRoute'
+);
 
-  const graphicsToRemove = mapView.graphics
-    .toArray()
-    .filter((graphic: any) =>
-      graphic.attributes?.source === 'route-planner'
-    );
+if (
+  highlightRouteElement &&
+  (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
+) {
+  highlightRouteElement.dispatchEvent(
+    new CustomEvent('const highlightRouteElement = mapElement?.querySelector(
+  'u#routePlannerHighlightRoute'
+);
 
-  if (graphicsToRemove.length > 0) {
-    mapView.graphics.removeMany(graphicsToRemove);
-  }
+if (
+  highlightRouteElement &&
+  (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
+) {
+  highlightRouteElement.dispatchEvent(
+    new CustomEvent('', {
+      detail: {
+        map: mapView.map,
+        mapView
+      },
+      bubbles: false,
+      composed: true
+    })
+  );
+}', {
+      detail: {
+        map: mapView.map,
+        mapView
+      },
+      bubbles: false,
+      composed: true
+    })
+  );
 }
