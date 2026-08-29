@@ -1,37 +1,68 @@
-const highlightRouteElement = mapElement?.querySelector(
-  'up-route#routePlannerHighlightRoute'
-);
+effect(() => {
+  const mapView = this.mapFacade.mapView();
+  const routeRenderState = this.mapFacade.routePlannerRenderState();
 
-if (
-  highlightRouteElement &&
-  (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
-) {
-  highlightRouteElement.dispatchEvent(
-    new CustomEvent('const highlightRouteElement = mapElement?.querySelector(
-  'u#routePlannerHighlightRoute'
-);
+  if (!mapView || !this.u) {
+    return;
+  }
 
-if (
-  highlightRouteElement &&
-  (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
-) {
-  highlightRouteElement.dispatchEvent(
-    new CustomEvent('', {
-      detail: {
-        map: mapView.map,
-        mapView
-      },
-      bubbles: false,
-      composed: true
-    })
-  );
-}', {
-      detail: {
-        map: mapView.map,
-        mapView
-      },
-      bubbles: false,
-      composed: true
-    })
-  );
-}
+  this.applyRoutePlannerRenderState(mapView, routeRenderState);
+
+  if ((routeRenderState?.routeLocations?.length ?? 0) <= 1) {
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    const mapElement =
+      this.u()?.nativeElement as HTMLElement | undefined;
+
+    const routeElement = mapElement?.querySelector(
+      'u#routePlannerMainRoute'
+    );
+
+    if (!routeElement) {
+      console.warn('Route element not found in DOM');
+      return;
+    }
+
+    // Existing fix
+    if (
+      this.previousRouteElement &&
+      this.previousRouteElement !== routeElement
+    ) {
+      routeElement.dispatchEvent(
+        new CustomEvent('u', {
+          detail: {
+            map: mapView.map,
+            mapView
+          },
+          bubbles: false,
+          composed: true
+        })
+      );
+    }
+
+    this.previousRouteElement = routeElement;
+
+    // ADD THIS FOR SHOW ROUTE / WORK RANGE
+    const highlightRouteElement = mapElement?.querySelector(
+      'route#routePlannerHighlightRoute'
+    );
+
+    if (
+      highlightRouteElement &&
+      (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
+    ) {
+      highlightRouteElement.dispatchEvent(
+        new CustomEvent('u', {
+          detail: {
+            map: mapView.map,
+            mapView
+          },
+          bubbles: false,
+          composed: true
+        })
+      );
+    }
+  });
+});
