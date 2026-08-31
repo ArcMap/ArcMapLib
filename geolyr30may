@@ -1,68 +1,99 @@
 effect(() => {
   const mapView = this.mapFacade.mapView();
-  const routeRenderState = this.mapFacade.routePlannerRenderState();
+  const routeRenderState =
+    this.mapFacade.routePlannerRenderState();
 
-  if (!mapView || !this.u) {
+  if (!mapView || !this.appMapInstance) {
     return;
   }
 
-  this.applyRoutePlannerRenderState(mapView, routeRenderState);
+  this.applyRoutePlannerRenderState(
+    mapView,
+    routeRenderState
+  );
 
-  if ((routeRenderState?.routeLocations?.length ?? 0) <= 1) {
-    return;
+  // -----------------------------
+  // Main route
+  // -----------------------------
+  if ((routeRenderState?.routeLocations?.length ?? 0) > 1) {
+    requestAnimationFrame(() => {
+      const mapElement =
+        this.appMapElement()?.nativeElement as HTMLElement | undefined;
+
+      const routeElement = mapElement?.querySelector(
+        'app-route#routePlannerRoute'
+      );
+
+      if (!routeElement) {
+        return;
+      }
+
+      if (
+        this.previousRouteElement &&
+        this.previousRouteElement !== routeElement
+      ) {
+        routeElement.dispatchEvent(
+          new CustomEvent('appMapDeferredReady', {
+            detail: {
+              map: mapView.map,
+              view: mapView,
+            },
+            bubbles: false,
+            composed: true,
+          })
+        );
+      }
+
+      this.previousRouteElement = routeElement;
+    });
+  } else {
+    this.previousRouteElement = null;
   }
 
-  requestAnimationFrame(() => {
-    const mapElement =
-      this.u()?.nativeElement as HTMLElement | undefined;
+  // -----------------------------
+  // Work-range highlighted route
+  // -----------------------------
+  if (
+    (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
+  ) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const mapElement =
+          this.appMapElement()?.nativeElement as HTMLElement | undefined;
 
-    const routeElement = mapElement?.querySelector(
-      'u#routePlannerMainRoute'
-    );
+        const highlightedRouteElement =
+          mapElement?.querySelector(
+            'app-route#routePlannerHighlightedRoute'
+          );
 
-    if (!routeElement) {
-      console.warn('Route element not found in DOM');
-      return;
-    }
+        if (!highlightedRouteElement) {
+          return;
+        }
 
-    // Existing fix
-    if (
-      this.previousRouteElement &&
-      this.previousRouteElement !== routeElement
-    ) {
-      routeElement.dispatchEvent(
-        new CustomEvent('u', {
-          detail: {
-            map: mapView.map,
-            mapView
-          },
-          bubbles: false,
-          composed: true
-        })
-      );
-    }
+        // IMPORTANT:
+        // Dispatch even when previousHighlightedRouteElement is null.
+        // This element is dynamically created after map initialization.
+        if (
+          this.previousHighlightedRouteElement !==
+          highlightedRouteElement
+        ) {
+          highlightedRouteElement.dispatchEvent(
+            new CustomEvent('appMapDeferredReady', {
+              detail: {
+                map: mapView.map,
+                view: mapView,
+              },
+              bubbles: false,
+              composed: true,
+            })
+          );
+        }
 
-    this.previousRouteElement = routeElement;
-
-    // ADD THIS FOR SHOW ROUTE / WORK RANGE
-    const highlightRouteElement = mapElement?.querySelector(
-      'route#routePlannerHighlightRoute'
-    );
-
-    if (
-      highlightRouteElement &&
-      (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
-    ) {
-      highlightRouteElement.dispatchEvent(
-        new CustomEvent('u', {
-          detail: {
-            map: mapView.map,
-            mapView
-          },
-          bubbles: false,
-          composed: true
-        })
-      );
-    }
-  });
+        this.previousHighlightedRouteElement =
+          highlightedRouteElement;
+      });
+    });
+  } else {
+    this.previousHighlightedRouteElement = null;
+  }
 });
