@@ -3,97 +3,48 @@ effect(() => {
   const routeRenderState =
     this.mapFacade.routePlannerRenderState();
 
-  if (!mapView || !this.appMapInstance) {
+  const highlightedRouteLocations =
+    routeRenderState?.highlightedRouteLocations ?? [];
+
+  // Hide Route / Clear
+  if (highlightedRouteLocations.length <= 1) {
+    this.lastHighlightedRouteKey = '';
     return;
   }
 
-  this.applyRoutePlannerRenderState(
-    mapView,
-    routeRenderState
-  );
+  const routeKey = JSON.stringify(highlightedRouteLocations);
 
-  // -----------------------------
-  // Main route
-  // -----------------------------
-  if ((routeRenderState?.routeLocations?.length ?? 0) > 1) {
-    requestAnimationFrame(() => {
-      const mapElement =
-        this.appMapElement()?.nativeElement as HTMLElement | undefined;
+  // Already initialized for this highlighted route
+  if (routeKey === this.lastHighlightedRouteKey) {
+    return;
+  }
 
-      const routeElement = mapElement?.querySelector(
-        'app-route#routePlannerRoute'
+  // Wait until Angular's @if has actually created the <appp-route>
+  setTimeout(() => {
+    const mapElement =
+      this.apppMapElement()?.nativeElement as HTMLElement | undefined;
+
+    const highlightedRouteElement =
+      mapElement?.querySelector(
+        'appp-route#routePlannerHighlightedRoute'
       );
 
-      if (!routeElement) {
-        return;
-      }
+    if (!highlightedRouteElement) {
+      return;
+    }
 
-      if (
-        this.previousRouteElement &&
-        this.previousRouteElement !== routeElement
-      ) {
-        routeElement.dispatchEvent(
-          new CustomEvent('appMapDeferredReady', {
-            detail: {
-              map: mapView.map,
-              view: mapView,
-            },
-            bubbles: false,
-            composed: true,
-          })
-        );
-      }
+    highlightedRouteElement.dispatchEvent(
+      new CustomEvent('apppMapDeferredReady', {
+        detail: {
+          map: mapView?.map,
+          view: mapView,
+        },
+        bubbles: false,
+        composed: true,
+      })
+    );
 
-      this.previousRouteElement = routeElement;
-    });
-  } else {
-    this.previousRouteElement = null;
-  }
-
-  // -----------------------------
-  // Work-range highlighted route
-  // -----------------------------
-  if (
-    (routeRenderState?.highlightedRouteLocations?.length ?? 0) > 1
-  ) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const mapElement =
-          this.appMapElement()?.nativeElement as HTMLElement | undefined;
-
-        const highlightedRouteElement =
-          mapElement?.querySelector(
-            'app-route#routePlannerHighlightedRoute'
-          );
-
-        if (!highlightedRouteElement) {
-          return;
-        }
-
-        // IMPORTANT:
-        // Dispatch even when previousHighlightedRouteElement is null.
-        // This element is dynamically created after map initialization.
-        if (
-          this.previousHighlightedRouteElement !==
-          highlightedRouteElement
-        ) {
-          highlightedRouteElement.dispatchEvent(
-            new CustomEvent('appMapDeferredReady', {
-              detail: {
-                map: mapView.map,
-                view: mapView,
-              },
-              bubbles: false,
-              composed: true,
-            })
-          );
-        }
-
-        this.previousHighlightedRouteElement =
-          highlightedRouteElement;
-      });
-    });
-  } else {
-    this.previousHighlightedRouteElement = null;
-  }
+    // Set only AFTER the element was found and initialized
+    this.lastHighlightedRouteKey = routeKey;
+  }, 0);
 });
