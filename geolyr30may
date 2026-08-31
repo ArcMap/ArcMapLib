@@ -1,50 +1,33 @@
-effect(() => {
-  const mapView = this.mapFacade.mapView();
-  const routeRenderState =
-    this.mapFacade.routePlannerRenderState();
 
-  const highlightedRouteLocations =
-    routeRenderState?.highlightedRouteLocations ?? [];
 
-  // Hide Route / Clear
-  if (highlightedRouteLocations.length <= 1) {
-    this.lastHighlightedRouteKey = '';
-    return;
-  }
-
-  const routeKey = JSON.stringify(highlightedRouteLocations);
-
-  // Already initialized for this highlighted route
-  if (routeKey === this.lastHighlightedRouteKey) {
-    return;
-  }
-
-  // Wait until Angular's @if has actually created the <appp-route>
-  setTimeout(() => {
-    const mapElement =
-      this.apppMapElement()?.nativeElement as HTMLElement | undefined;
-
-    const highlightedRouteElement =
-      mapElement?.querySelector(
-        'appp-route#routePlannerHighlightedRoute'
-      );
-
-    if (!highlightedRouteElement) {
-      return;
-    }
-
-    highlightedRouteElement.dispatchEvent(
-      new CustomEvent('apppMapDeferredReady', {
-        detail: {
-          map: mapView?.map,
-          view: mapView,
+  if (marker.type === 'work-range-point') {
+    return {
+      geometry: {
+        type: 'point',
+        latitude: marker.latitude,
+        longitude: marker.longitude,
+      },
+      symbol: {
+        type: 'simple-marker',
+        style: 'circle',
+        size: 10,
+        color: [255, 0, 0, 255],
+        outline: {
+          color: [255, 0, 0, 255],
+          width: 0,
         },
-        bubbles: false,
-        composed: true,
-      })
-    );
+      },
+    };
+  }
 
-    // Set only AFTER the element was found and initialized
-    this.lastHighlightedRouteKey = routeKey;
-  }, 0);
-});
+  // KEEP YOUR EXISTING PIN-MARKER CODE BELOW
+  return {
+    geometry: {
+      type: 'point',
+      latitude: marker.latitude,
+      longitude: marker.longitude,
+    },
+    symbol: this.getRouteMarkerSymbol(),
+    // your existing popupTemplate etc...
+  };
+}
