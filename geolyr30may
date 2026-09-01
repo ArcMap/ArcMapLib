@@ -1,33 +1,22 @@
+Task: Migrate GraphQL to REST with minimal code changes.
 
-
-  if (marker.type === 'work-range-point') {
-    return {
-      geometry: {
-        type: 'point',
-        latitude: marker.latitude,
-        longitude: marker.longitude,
-      },
-      symbol: {
-        type: 'simple-marker',
-        style: 'circle',
-        size: 10,
-        color: [255, 0, 0, 255],
-        outline: {
-          color: [255, 0, 0, 255],
-          width: 0,
-        },
-      },
-    };
-  }
-
-  // KEEP YOUR EXISTING PIN-MARKER CODE BELOW
-  return {
-    geometry: {
-      type: 'point',
-      latitude: marker.latitude,
-      longitude: marker.longitude,
-    },
-    symbol: this.getRouteMarkerSymbol(),
-    // your existing popupTemplate etc...
-  };
-}
+1. Find all GraphQL queries, mutations, subscriptions, Apollo usage, generated GraphQL types, and GraphQL-specific services.
+2. For each GraphQL operation, identify the equivalent REST endpoint I provide.
+3. Replace GraphQL calls with the existing Angular REST/HttpClient pattern already used in this project.
+4. Reuse a shared REST service where multiple components/states call the same backend area. Do not duplicate endpoint construction or HTTP logic.
+5. Preserve existing public method names, NGXS actions, state structure, component behavior, loading behavior, and error handling unless a change is required.
+6. Remove GraphQL response wrappers such as response.data.xxx. Map the REST response directly to the existing application model.
+7. Do not use any. Reuse existing interfaces/models when possible; create a new REST response interface only when necessary.
+8. Do not refactor unrelated code.
+9. After all GraphQL calls are migrated, remove unused GraphQL code:
+    * Apollo services/imports
+    * GraphQL queries/mutations
+    * generated GraphQL files/types that are no longer referenced
+    * GraphQL configuration/providers
+    * GraphQL environment/config values
+    * GraphQL npm dependencies
+10. Before deleting a dependency/file, search the entire project and confirm it has no remaining references.
+11. Update affected unit tests to mock REST/HttpClient instead of Apollo/GraphQL.
+12. Keep changes small and production-safe.
+13. Do not create documentation unless requested.
+14. Do not explain unchanged code.
