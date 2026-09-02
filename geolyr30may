@@ -1,27 +1,119 @@
-<arc-map id="arcMap">
+const arcMap = document.querySelector("#arcMap");
 
-  <div id="pointContainer">
+if (showPoints) {
 
-    <arc-point id="point1"></arc-point>
+  for (const data of pointData) {
 
-    <arc-point id="point2"></arc-point>
+    if (!data.active) {
+      continue;
+    }
 
-  </div>
+    const point = document.createElement("arc-point");
 
-</arc-map>
+    point.latitude = data.latitude;
+    point.longitude = data.longitude;
 
-const container = document.createElement("div");
+    point.symbol = {
+      type: "simple-marker",
+      style: "circle",
+      color: "white",
+      size: 6,
+      outline: {
+        type: "simple-line",
+        color: "red",
+        width: 2
+      }
+    };
 
-for (const data of pointData) {
-
-  const point = document.createElement("arc-point");
-
-  point.latitude = data.latitude;
-  point.longitude = data.longitude;
-
-  // BAD if connectedCallback executes here
-  document.body.appendChild(point);
+    // ✅ Point becomes connected directly under arc-map
+    arcMap.appendChild(point);
+  }
 }
 
-// Moving it later doesn't prevent the earlier error
-arcMap.appendChild(container);
+
+<arc-map
+  id="arcMap"
+  center="-108.82,43.04"
+  zoom="8"
+  style="display:block; width:100%; height:700px;"
+>
+</arc-map>
+
+<script type="module">
+
+  const showPoints = true;
+
+  // Define the data first
+  const pointData = [
+    {
+      id: "point1",
+      latitude: 43.04254246258416,
+      longitude: -108.82080678124471,
+      active: true
+    },
+    {
+      id: "point2",
+      latitude: 43.05254246258416,
+      longitude: -108.83080678124471,
+      active: true
+    },
+    {
+      id: "point3",
+      latitude: 43.06254246258416,
+      longitude: -108.84080678124471,
+      active: false
+    }
+  ];
+
+  window.addEventListener("DOMContentLoaded", async () => {
+
+    await customElements.whenDefined("arc-map");
+    await customElements.whenDefined("arc-point");
+
+    const arcMap = document.getElementById("arcMap");
+
+    if (showPoints) {
+
+      for (const data of pointData) {
+
+        // data is defined only inside this loop
+        console.log("Current point data:", data);
+
+        if (!data.active) {
+          continue;
+        }
+
+        const arcPoint = document.createElement("arc-point");
+
+        arcPoint.id = data.id;
+        arcPoint.latitude = data.latitude;
+        arcPoint.longitude = data.longitude;
+
+        arcPoint.type = "simple";
+
+        arcPoint.symbol = {
+          type: "simple-marker",
+          style: "circle",
+          color: "white",
+          size: 6,
+          outline: {
+            type: "simple-line",
+            color: "red",
+            width: 2
+          }
+        };
+
+        // arc-point becomes a descendant of arc-map
+        arcMap.appendChild(arcPoint);
+
+        console.log(
+          "Point added:",
+          data.id,
+          "ancestor map:",
+          arcPoint.closest("arc-map")
+        );
+      }
+    }
+  });
+
+</script>
