@@ -1,19 +1,101 @@
--search';
+@Action(SearchedAssetDataAction.FetchObservationsInDateRange)
+fetchObservationsInDateRange(
+  { getState, setState }: StateContext<SearchedAssetDataStateModel>,
+  dt: SearchedAssetDataAction.FetchObservationsInDateRange
+) {
+  const assetId = dt.payload.assetId;
+  const initialCursor = getState().pageInfo.cursor;
 
-  constructor(
-    private readonly http: HttpClient
-  ) {}
+  return this.trac
+    .getObservatio(assetId, initialCursor)
+    .pipe(
+      takeUntil(this.tracds.cancelOngoingRequest$),
 
-  getSmartSearchedData(
-    searchedData: string
-  ): Observable<SmartSearch> {
+      /*
+       * Keep requesting the next page until
+       * the REST service says there are no more pages.
+       */
+      expand((response: ObservationHires) => {
+        const pageInfo = response.observationHis?.pageInfo;
 
-    const params = new HttpParams()
-      .set('searchedData', searchedData);
+        if (!pageInfo?.hasNextPage || !pageInfo.cursor) {
+          return EMPTY;
+        }
 
-    return this.http.get<SmartSearch>(
-      this.smartSearchUrl,
-      { params }
+        return this.traceRestService
+          .getObservatih(
+            assetId,
+            pageInfo.cursor
+          )
+          .pipe(
+            takeUntil(
+              this.tr.cancelOngoingRequest$
+            )
+          );
+      }),
+
+      /*
+       * Take observations from every REST response.
+       */
+      map((response: ObservationHire) => {
+        return response.observationHi?.observations ?? [];
+      }),
+
+      /*
+       * Combine observations from all pages.
+       */
+      reduce(
+        (
+          allObservations: Observation[],
+          observations: Observation[]
+        ) => [
+          ...allObservations,
+          ...observations
+        ],
+        []
+      ),
+
+      /*
+       * Filter observations based on the requested
+       * start/end date and update NGXS state.
+       */
+      tap((observations: Observation[]) => {
+        const observationsInDateRange =
+          observations.filter(observation => {
+            const dateTimeInSeconds =
+              new Date(
+                observation.observationDateTime
+              ).getTime() / 1000;
+
+            return (
+              dateTimeInSeconds >= dt.payload.startDate &&
+              dateTimeInSeconds <= dt.payload.endDate
+            );
+          });
+
+        setState(
+          produce(getState(), draft => {
+            draft.observations.push(
+              ...observationsInDateRange
+            );
+
+            draft.observations = [
+              ...new Set(draft.observations)
+            ];
+          })
+        );
+      }),
+
+      catchError(err => {
+        if (err instanceof HttpErrorResponse) {
+          this.store.dispatch(
+            new ShowErrorBanner(
+              'Failed to load observations. Please try again.'
+            )
+          );
+        }
+
+        return throwError(() => err);
+      })
     );
-  }
 }
