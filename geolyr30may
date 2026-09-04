@@ -1,155 +1,126 @@
-  const assetId = dt.payload.assetId;
 
+
+  const assetId = dt.payload.assetId;
   const initialCursor = getState().pageInfo.cursor;
 
-  return defer(() =>
+  /*
+   * Prevent the same cursor from being requested
+   * more than once during this action execution.
+   */
+  const requestedCursors = new Set<string>();
 
-    this.TRS.GOH(assetId, initialCursor)
+  const getPage = (cursor?: string) => {
+    const cursorKey = cursor ?? 'INITIAL';
 
-  ).pipe(
-
-    // Keep fetching next pages
-
-    expand((response: ObservationHistoryResponse) => {
-
-      const OH = response.observationHistory;
-
-      const pageInfo = OH?.pageInfo;
-
-      if (!pageInfo?.hasNextPage || !pageInfo.cursor) {
-
-        return EMPTY;
-
-      }
-
-      return this.TRS.GOH(
-
-        assetId,
-
-        pageInfo.cursor
-
+    if (requestedCursors.has(cursorKey)) {
+      console.warn(
+        'Skipping duplicate observation request:',
+        ast,
+        cursor
       );
 
+      return EMPTY;
+    }
+
+    requestedCursors.add(cursorKey);
+
+    console.log(
+      'Calling GOH:',
+      assetId,
+      cursor
+    );
+
+    return this.TRS
+      .GOH(assetId, cursor)
+      .pipe(
+        takeUntil(
+          this.tra.cancelOngoingRequest$
+        )
+      );
+  };
+
+  return getPage(initialCursor).pipe(
+
+    expand((response: obhr) => {
+      const OH = response.observat;
+      const pageInfo = OH?.pageInfo;
+
+      if (
+        !pageInfo?.hasNextPage ||
+        !pageInfo.cursor
+      ) {
+        return EMPTY;
+      }
+
+      return getPage(pageInfo.cursor);
     }),
-
-    // Get observations from every page
-
-    map((response: ObservationHistoryResponse) => {
-
-      const OH = response.observationHistory;
-
-      return OH?.observations ?? [];
-
-    }),
-
-    // Combine observations from all pages
-
-    reduce(
-
-      (
-
-        allObservations: Observation[],
-
-        currentObservations: Observation[]
-
-      ) => [
-
-        ...allObservations,
-
-        ...currentObservations
-
-      ],
-
-      [] as Observation[]
-
-    ),
 
     /*
-
-     * If the user clicks Cancel:
-
-     * - active HTTP request is unsubscribed
-
-     * - next page will not be requested
-
-     * - tap below will not execute
-
-     * - partial data will not be added to state
-
+     * Cancel the complete pagination chain.
      */
-
     takeUntil(
+      this.tra.cancelOngoingRequest$
+    ),
 
-      this.traceDataService.cancelOngoingRequest$
+    map((response: Observati) => {
+      const OH = response.observath;
 
+      return OH?.observations ?? [];
+    }),
+
+    reduce(
+      (
+        allObservations: Observation[],
+        currentObservations: Observation[]
+      ) => [
+        ...allObservations,
+        ...currentObservations
+      ],
+      [] as Observation[]
     ),
 
     tap((observations: Observation[]) => {
 
       const observationsInDateRange =
-
         observations.filter(observation => {
 
           const dateTimeInSeconds =
-
             new Date(
-
               observation.observationDateTime
-
             ).getTime() / 1000;
 
           return (
-
-            dateTimeInSeconds >= dt.payload.startDate &&
-
-            dateTimeInSeconds <= dt.payload.endDate
-
+            dateTimeInSeconds >=
+              dt.payload.startDate &&
+            dateTimeInSeconds <=
+              dt.payload.endDate
           );
-
         });
 
       setState(
-
         produce(getState(), draft => {
 
           draft.observations.push(
-
             ...observationsInDateRange
-
           );
 
           draft.observations = [
-
             ...new Set(draft.observations)
-
           ];
-
         })
-
       );
-
     }),
 
     catchError(err => {
-
       if (err instanceof HttpErrorResponse) {
-
         this.store.dispatch(
-
           new ShowErrorBanner(
-
             'Failed to load observations. Please try again.'
-
           )
-
         );
-
       }
 
       return throwError(() => err);
-
     })
-
   );
-
 }
