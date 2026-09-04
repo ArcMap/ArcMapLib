@@ -1,101 +1,155 @@
-@Action(SearchedAssetDataAction.FetchObservationsInDateRange)
-fetchObservationsInDateRange(
-  { getState, setState }: StateContext<SearchedAssetDataStateModel>,
-  dt: SearchedAssetDataAction.FetchObservationsInDateRange
-) {
   const assetId = dt.payload.assetId;
+
   const initialCursor = getState().pageInfo.cursor;
 
-  return this.trac
-    .getObservatio(assetId, initialCursor)
-    .pipe(
-      takeUntil(this.tracds.cancelOngoingRequest$),
+  return defer(() =>
 
-      /*
-       * Keep requesting the next page until
-       * the REST service says there are no more pages.
-       */
-      expand((response: ObservationHires) => {
-        const pageInfo = response.observationHis?.pageInfo;
+    this.TRS.GOH(assetId, initialCursor)
 
-        if (!pageInfo?.hasNextPage || !pageInfo.cursor) {
-          return EMPTY;
-        }
+  ).pipe(
 
-        return this.traceRestService
-          .getObservatih(
-            assetId,
-            pageInfo.cursor
+    // Keep fetching next pages
+
+    expand((response: ObservationHistoryResponse) => {
+
+      const OH = response.observationHistory;
+
+      const pageInfo = OH?.pageInfo;
+
+      if (!pageInfo?.hasNextPage || !pageInfo.cursor) {
+
+        return EMPTY;
+
+      }
+
+      return this.TRS.GOH(
+
+        assetId,
+
+        pageInfo.cursor
+
+      );
+
+    }),
+
+    // Get observations from every page
+
+    map((response: ObservationHistoryResponse) => {
+
+      const OH = response.observationHistory;
+
+      return OH?.observations ?? [];
+
+    }),
+
+    // Combine observations from all pages
+
+    reduce(
+
+      (
+
+        allObservations: Observation[],
+
+        currentObservations: Observation[]
+
+      ) => [
+
+        ...allObservations,
+
+        ...currentObservations
+
+      ],
+
+      [] as Observation[]
+
+    ),
+
+    /*
+
+     * If the user clicks Cancel:
+
+     * - active HTTP request is unsubscribed
+
+     * - next page will not be requested
+
+     * - tap below will not execute
+
+     * - partial data will not be added to state
+
+     */
+
+    takeUntil(
+
+      this.traceDataService.cancelOngoingRequest$
+
+    ),
+
+    tap((observations: Observation[]) => {
+
+      const observationsInDateRange =
+
+        observations.filter(observation => {
+
+          const dateTimeInSeconds =
+
+            new Date(
+
+              observation.observationDateTime
+
+            ).getTime() / 1000;
+
+          return (
+
+            dateTimeInSeconds >= dt.payload.startDate &&
+
+            dateTimeInSeconds <= dt.payload.endDate
+
+          );
+
+        });
+
+      setState(
+
+        produce(getState(), draft => {
+
+          draft.observations.push(
+
+            ...observationsInDateRange
+
+          );
+
+          draft.observations = [
+
+            ...new Set(draft.observations)
+
+          ];
+
+        })
+
+      );
+
+    }),
+
+    catchError(err => {
+
+      if (err instanceof HttpErrorResponse) {
+
+        this.store.dispatch(
+
+          new ShowErrorBanner(
+
+            'Failed to load observations. Please try again.'
+
           )
-          .pipe(
-            takeUntil(
-              this.tr.cancelOngoingRequest$
-            )
-          );
-      }),
 
-      /*
-       * Take observations from every REST response.
-       */
-      map((response: ObservationHire) => {
-        return response.observationHi?.observations ?? [];
-      }),
-
-      /*
-       * Combine observations from all pages.
-       */
-      reduce(
-        (
-          allObservations: Observation[],
-          observations: Observation[]
-        ) => [
-          ...allObservations,
-          ...observations
-        ],
-        []
-      ),
-
-      /*
-       * Filter observations based on the requested
-       * start/end date and update NGXS state.
-       */
-      tap((observations: Observation[]) => {
-        const observationsInDateRange =
-          observations.filter(observation => {
-            const dateTimeInSeconds =
-              new Date(
-                observation.observationDateTime
-              ).getTime() / 1000;
-
-            return (
-              dateTimeInSeconds >= dt.payload.startDate &&
-              dateTimeInSeconds <= dt.payload.endDate
-            );
-          });
-
-        setState(
-          produce(getState(), draft => {
-            draft.observations.push(
-              ...observationsInDateRange
-            );
-
-            draft.observations = [
-              ...new Set(draft.observations)
-            ];
-          })
         );
-      }),
 
-      catchError(err => {
-        if (err instanceof HttpErrorResponse) {
-          this.store.dispatch(
-            new ShowErrorBanner(
-              'Failed to load observations. Please try again.'
-            )
-          );
-        }
+      }
 
-        return throwError(() => err);
-      })
-    );
+      return throwError(() => err);
+
+    })
+
+  );
+
 }
